@@ -1,10 +1,29 @@
+import os
+import re
 import select
-from typing import Mapping, Any
+from pathlib import Path
+from typing import Mapping, Any, List
 
 import dbus
 from systemd import journal
 
 import configparser
+
+DEFAULT_CONFIG = '''
+[options]
+burst_seconds = 2
+burst_truncate_messages = 3
+debug = yes
+
+[ignore] 
+kwin_bad_damage = XCB error: 152 (BadDamage)
+kwin_bad_window = kwin_core: XCB error: 3 (BadWindow)
+self_caused = NotificationPopup.
+qt_kde_binding_loop = Binding loop detected for property
+
+[match]
+
+'''
 
 
 # Press Alt+Shift+X to execute it or replace it with your code.
@@ -30,53 +49,124 @@ class NotifyFreeDesktop:
 
 class JournalWatcher:
 
-    def __init__(self, config: configparser.ConfigParser):
-        self.config = config
+    def __init__(self):
+        config_dir_path = Path.home().joinpath('.config').joinpath('jwatch')
+        if not config_dir_path.parent.is_dir():
+            os.makedirs(config_dir_path)
+        self.config_path = config_dir_path.joinpath('jwatch.conf')
+        self.config = None
+        self.config_mtime = 0.0
+        self.burst_truncate = 3
+        self.polling_millis = 2000
+        self.debug_enabled = True
+        self.ignore_regexp: Mapping[str, re] = {}
+        self.match_regexp: Mapping[str, re] = {}
+        self.update_config()
 
-    def determine_app_name(self, journal_entry: Mapping[str, Any]):
+    def update_config(self):
+        if self.config_path.is_file():
+            mtime = self.config_path.lstat().st_mtime
+            if self.config is not None and self.config_mtime == mtime:
+                return
+            self.config_mtime = mtime
+            self.info(f"Reading {self.config_path}")
+            config_text = Path(self.config_path).read_text()
+        elif self.config is None:
+            self.info(f"No {self.config_path}")
+            config_text = DEFAULT_CONFIG
+        else:
+            return
+        config = configparser.ConfigParser()
+        config.read_string(config_text)
+        for section in ['options', 'match', 'ignore']:
+            if section not in config:
+                config[section] = {}
+        self.config = config
+        if 'burst_truncate_messages' in self.config['options']:
+            self.burst_truncate = self.config.getint('options', 'burst_truncate_messages')
+        if 'burst_seconds' in self.config['options']:
+            self.polling_millis = 1000 * self.config.getint('options', 'burst_seconds')
+        if 'debug' in self.config['options']:
+            self.debug_enabled = self.config.getboolean('options', 'debug')
+        for rule_id, rule_text in self.config['ignore'].items():
+            if rule_text.startswith('regexp '):
+                self.ignore_regexp[rule_id] = re.compile(rule_text[len('regexp '):])
+            else:
+                self.ignore_regexp[rule_id] = re.compile(re.escape(rule_text))
+        for rule_id, rule_text in self.config['match'].items():
+            if rule_text.startswith('regexp '):
+                self.match_regexp[rule_id] = re.compile(rule_text[len('regexp '):])
+            else:
+                self.match_regexp[rule_id] = re.compile(re.escape(rule_text))
+
+    def determine_app_name(self, journal_entries: List[Mapping[str, Any]]):
         app_name_info = ''
         sep = ''
-        for key, prefix in {'SYSLOG_IDENTIFIER': '', '_PID': 'PID ', '_CMDLINE': '', '_EXE': '', '_COMM': '',
-                            '_KERNEL_SUBSYSTEM': 'kernel ',
-                            }.items():
-            print(key, journal_entry[key] if key in journal_entry else False)
-            if key in journal_entry:
-                value = str(journal_entry[key])
-                if app_name_info.find(value) < 0:
-                    app_name_info += sep + prefix + value
-                    sep = '; '
+        for journal_entry in journal_entries:
+            for key, prefix in {'SYSLOG_IDENTIFIER': '', '_PID': 'PID ', '_CMDLINE': '', '_EXE': '', '_COMM': '',
+                                '_KERNEL_SUBSYSTEM': 'kernel ',
+                                }.items():
+                print(key, journal_entry[key] if key in journal_entry else False)
+                if key in journal_entry:
+                    value = str(journal_entry[key])
+                    if app_name_info.find(value) < 0:
+                        app_name_info += sep + prefix + value
+                        sep = '; '
         if app_name_info == '':
             app_name_info = 'unknown'
         return app_name_info
 
-    def determine_summary(self, journal_entry: Mapping[str, Any], burst_count: int = 0):
+    def determine_summary(self, journal_entries: List[Mapping[str, Any]]):
+        journal_entry = journal_entries[0]
         realtime = journal_entry['__REALTIME_TIMESTAMP']
         transport = f" {journal_entry['_TRANSPORT']}:" if '_TRANSPORT' in journal_entry else ''
-        print(realtime)
-        if burst_count > 1:
-            summary = f"{realtime:%H:%M:%S}:{transport} Burst of {burst_count} messages, first was..."
+        number_of_entries = len(journal_entries)
+        if number_of_entries > 1:
+            summary = f"{realtime:%H:%M:%S}:{transport} Burst of {number_of_entries} messages"
         else:
-            if 'SYSLOG_IDENTIFIER' not in journal_entry:
+            if 'SYSLOG_IDENTIFIER' in journal_entry:
                 text = journal_entry['SYSLOG_IDENTIFIER']
             else:
                 text = journal_entry['MESSAGE']
-            summary = f"{realtime:%H:%M:%S}: {transport} {text} "
-        print("summary=", summary)
+            summary = f"{realtime:%H:%M:%S}: {transport} {text}"
+        self.debug(f"realtime='{realtime}' summary='{summary}'")
         return summary
 
-    def determine_message(self, journal_entry: Mapping[str, Any]) -> str:
-        message = journal_entry['MESSAGE']
-        print(message)
-        return f"{message}"
+    def determine_message(self, journal_entries: List[Mapping[str, Any]]) -> str:
+        message = ''
+        sep = ''
+        previous_message = ''
+        duplicates = 0
+        reported = 0
+        for journal_entry in journal_entries:
+            new_message = journal_entry['MESSAGE']
+            if new_message == previous_message:
+                duplicates += 1
+            else:
+                message += f"{sep}{new_message}"
+                previous_message = new_message
+                reported += 1
+                if reported == self.burst_truncate and reported < len(journal_entries):
+                    message += f"\n[Only showing first {self.burst_truncate} messages]"
+                    break
+            sep = '\n'
+        if duplicates > 0:
+            message += f'\n[{duplicates + 1} duplicate messages]'
+        self.debug(f'message={message}')
+        return message
 
     def is_notable(self, journal_entry: Mapping[str, Any]):
         message = journal_entry['MESSAGE']
         if message != "":
-            for ignore_key, ignore_spec in self.config['IGNORE'].items():
-                if ignore_spec in message:
-                    print(f"Ignore option {ignore_key} ignoring: {message}")
+            for rule_id, match_re in self.match_regexp.items():
+                if match_re.search(message) is not None:
+                    self.debug(f"rule=match.{rule_id}: {message}")
+                    return True
+            for rule_id, ignore_re in self.ignore_regexp.items():
+                if ignore_re.search(message) is not None:
+                    self.debug(f"rule=ignore.{rule_id}: {message}")
                     return False
-        return True
+        return len(self.match_regexp) == 0
 
     def watch_journal(self):
         notify = NotifyFreeDesktop()
@@ -93,31 +183,31 @@ class JournalWatcher:
         journal_reader_poll.register(journal_reader, journal_reader.get_events())
         journal_reader.add_match()
         while True:
+            self.update_config()
             burst_count = 0
-            first_notable = None
-            while journal_reader_poll.poll(2000):
+            notable = []
+            while journal_reader_poll.poll(self.polling_millis):
                 if journal_reader.process() == journal.APPEND:
                     for journal_entry in journal_reader:
                         burst_count += 1
                         if self.is_notable(journal_entry):
-                            if first_notable is None:
-                                first_notable = journal_entry
-                        if first_notable:
-                            print(f"count={burst_count} {journal_entry['MESSAGE']}")
-            if first_notable is not None:
-                notify.notify_desktop(app_name=self.determine_app_name(first_notable),
-                                      summary=self.determine_summary(first_notable, burst_count=burst_count),
-                                      message=self.determine_message(first_notable))
+                            self.debug(f"Notable: burst_count={len(notable)}: {journal_entry['MESSAGE']}")
+                            notable.append(journal_entry)
+            if len(notable):
+                notify.notify_desktop(app_name=self.determine_app_name(notable),
+                                      summary=self.determine_summary(notable),
+                                      message=self.determine_message(notable))
+
+    def debug(self, *arg):
+        if self.debug_enabled:
+            print('DEBUG:', *arg)
+
+    def info(self, *arg):
+        print('INFO:', *arg)
 
 
 def main():
-    config = configparser.ConfigParser()
-    config['IGNORE'] = {'kwin_bad_damage': 'XCB error: 152 (BadDamage)',
-                        'kwin_bad_window': 'kwin_core: XCB error: 3 (BadWindow)',
-                        'xyzzy': 'xyzzy',
-                        'self_caused': 'NotificationPopup.',
-                        'qt_kde_binding_loop': 'Binding loop detected for property'}
-    journal_watcher = JournalWatcher(config)
+    journal_watcher = JournalWatcher()
     journal_watcher.watch_journal()
 
 
