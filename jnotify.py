@@ -13,6 +13,7 @@ DEFAULT_CONFIG = '''
 [options]
 burst_seconds = 2
 burst_truncate_messages = 3
+notification_seconds = 60
 debug = yes
 
 [ignore] 
@@ -36,12 +37,11 @@ class NotifyFreeDesktop:
             object=dbus.SessionBus().get_object("org.freedesktop.Notifications", "/org/freedesktop/Notifications"),
             dbus_interface="org.freedesktop.Notifications")
 
-    def notify_desktop(self, app_name: str, summary: str, message: str):
+    def notify_desktop(self, app_name: str, summary: str, message: str, timeout: int):
         replace_id = 0
         notification_icon = ''
         action_requests = []
         extra_hints = {"urgency": 1}
-        timeout = 60000
         self.notify_interface.Notify(app_name, replace_id, notification_icon, summary, message, action_requests,
                                      extra_hints,
                                      timeout)
@@ -50,15 +50,16 @@ class NotifyFreeDesktop:
 class JournalWatcher:
 
     def __init__(self):
-        config_dir_path = Path.home().joinpath('.config').joinpath('jwatch')
+        config_dir_path = Path.home().joinpath('.config').joinpath('jnotify')
         if not config_dir_path.parent.is_dir():
             os.makedirs(config_dir_path)
-        self.config_path = config_dir_path.joinpath('jwatch.conf')
-        self.config = None
-        self.config_mtime = 0.0
-        self.burst_truncate = 3
-        self.polling_millis = 2000
-        self.debug_enabled = True
+        self.config_path: Path = config_dir_path.joinpath('jnotify.conf')
+        self.config: configparser.ConfigParser = None
+        self.config_mtime: float = 0.0
+        self.burst_truncate: int = 3
+        self.polling_millis: int = 2000
+        self.notification_timeout: int = 60000
+        self.debug_enabled: bool = True
         self.ignore_regexp: Mapping[str, re] = {}
         self.match_regexp: Mapping[str, re] = {}
         self.update_config()
@@ -86,6 +87,8 @@ class JournalWatcher:
             self.burst_truncate = self.config.getint('options', 'burst_truncate_messages')
         if 'burst_seconds' in self.config['options']:
             self.polling_millis = 1000 * self.config.getint('options', 'burst_seconds')
+        if 'notification_seconds' in self.config['options']:
+            self.notification_timeout = 1000 * self.config.getint('options', 'notification_seconds')
         if 'debug' in self.config['options']:
             self.debug_enabled = self.config.getboolean('options', 'debug')
         for rule_id, rule_text in self.config['ignore'].items():
@@ -196,7 +199,8 @@ class JournalWatcher:
             if len(notable):
                 notify.notify_desktop(app_name=self.determine_app_name(notable),
                                       summary=self.determine_summary(notable),
-                                      message=self.determine_message(notable))
+                                      message=self.determine_message(notable),
+                                      timeout=self.notification_timeout)
 
     def debug(self, *arg):
         if self.debug_enabled:
@@ -211,28 +215,6 @@ def main():
     journal_watcher.watch_journal()
 
 
-# Press the green button in the gutter to run the script.
 if __name__ == '__main__':
     main()
 
-    # j = journal.Reader()
-    # #j.log_level(journal.LOG_INFO)
-    #
-    # # j.add_match(_SYSTEMD_UNIT="systemd-udevd.service")
-    # j.seek_tail()
-    # j.get_previous()
-    # # j.get_next() # it seems this is not necessary.
-    #
-    # p = select.poll()
-    # p.register(j, j.get_events())
-    #
-    # while p.poll():
-    #     if j.process() != journal.APPEND:
-    #         continue
-    #     for entry in j:
-    #         if entry['MESSAGE'] != "":
-    #             print(str(entry['__REALTIME_TIMESTAMP'] )+ ' ' + entry['MESSAGE'])
-    #             print(entry)
-    #             notify_interface.Notify("x", 0, "x", 'summary', entry['MESSAGE'], [], {"urgency": 1}, 10000)
-
-# See PyCharm help at https://www.jetbrains.com/help/pycharm/
