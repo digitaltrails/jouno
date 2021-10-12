@@ -1,11 +1,144 @@
+#!/usr/bin/python3
+"""
+joun: Journal to desktop-notification filter
+============================================
+
+A desktop utility for filtering and forwarding systemd journal entries to desktop-notifications.
+
+Usage:
+======
+
+        joun [-h]
+                     [--about] [--detailed-help]
+                     [--create-config-files]
+                     [--install] [--uninstall]
+
+Optional arguments:
+-------------------
+
+      -h, --help            show this help message and exit
+      --detailed-help       full help in markdown format
+      --about               about joun
+      --debug               enable debug output to stdout
+      --create-config-files  if they do not exist, create template config INI files in $HOME/.config/joun/
+      --install             installs the joun in the current user's path and desktop application menu.
+      --uninstall           uninstalls the joun application menu file and script for the current user.
+
+Description
+===========
+
+``joun`` is new new new.
+
+Configuration
+=============
+
+Configuration is supplied via command line parameters and config-files.  The command line provides an immediate way
+to temporarily alter the behaviour of the application. The config files provide a more comprehensive and permanent
+solution for altering the application's configuration.
+
+Settings Menu and Config files
+------------------------------
+
+The right-mouse context-menu ``Settings`` item can be used to customise the application by writing to a set of config
+files.  The ``Settings`` item will feature a tab for editing each config file.
+
+The config files are in INI-format divided into a number of sections as outlined below:
+
+        # The vdu-controls-globals section is only required in $HOME/.config/vdu_controls/vdu_controls.conf
+        [options]
+        burst_seconds = 2
+        burst_truncate_messages = 3
+        debug = yes
+
+        [match]
+        my_rule_name = forward journal entry if this string matches
+        my_other_rule_name = regexp forward journal entry if this [Rr]egexp matches
+
+        [ignore]
+        my_ignore_rule_name = ignore journal entry if this string matches
+        my_ignore_other_rule_name = regexp ignore journal entry if this [Rr]egexp matches
+
+As well as using the ``Settings``, config files may also be created by the command line option
+
+        joun --create-config-files
+
+which will create initial templates based on the currently connected VDU's.
+
+The config files are completely optional, but some filtering of the journal is likely to be necessary.
+For example, some KDE desktop-notification processing can cause KDE errors which will be logged to
+the journal.  It may be that desktops other than KDE may log fewer or no errors during notification
+processing.  ``joun`` copes with cascades and won't cause infinite cascades, but filtering is
+necessary to shut them up the initial bursts.
+
+
+Responsiveness
+--------------
+
+Filter more...
+
+Examples
+========
+
+    joun
+        All default controls.
+
+
+
+Prerequisites
+=============
+
+Described for OpenSUSE, similar for other distros:
+
+Software::
+
+        zypper install python38-QtPy python38-systemd
+
+Kernel Modules::
+
+        lsmod | grep i2c_dev
+
+Read ddcutil readme concerning config of i2c_dev with nvidia GPU's. Detailed ddcutil info at https://www.ddcutil.com/
+
+
+joun Copyright (C) 2021 Michael Hamilton
+===========================================
+
+This program is free software: you can redistribute it and/or modify it
+under the terms of the GNU General Public License as published by the
+Free Software Foundation, version 3.
+
+This program is distributed in the hope that it will be useful, but
+WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
+or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
+more details.
+
+You should have received a copy of the GNU General Public License along
+with this program. If not, see <https://www.gnu.org/licenses/>.
+
+**Contact:**  m i c h a e l   @   a c t r i x   .   g e n   .   n z
+
+----------
+
+"""
+
 import configparser
 import os
 import re
 import select
+import traceback
 from enum import Enum
 from pathlib import Path
-from typing import Mapping, Any, List
+from typing import Mapping, Any, List, Type
+import signal
+import sys
+import multiprocessing as mp
 
+from PyQt5.QtCore import QCoreApplication, QProcess, Qt
+from PyQt5.QtGui import QPixmap, QIcon, QImage, QPainter, QCursor
+from PyQt5.QtSvg import QSvgWidget, QSvgRenderer
+from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QHBoxLayout, QSlider, QMessageBox, QLineEdit, QLabel, \
+    QSplashScreen, QPushButton, QProgressBar, QComboBox, QSystemTrayIcon, QMenu, QStyle, QTextEdit, QDialog, QTabWidget, \
+    QCheckBox, QPlainTextEdit, QGridLayout, QSizePolicy, QAction
 import dbus
 from systemd import journal
 
@@ -74,10 +207,10 @@ class NotifyFreeDesktop:
 class JournalWatcher:
 
     def __init__(self):
-        config_dir_path = Path.home().joinpath('.config').joinpath('jnotify')
+        config_dir_path = Path.home().joinpath('.config').joinpath('joun')
         if not config_dir_path.parent.is_dir():
             os.makedirs(config_dir_path)
-        self.config_path: Path = config_dir_path.joinpath('jnotify.conf')
+        self.config_path: Path = config_dir_path.joinpath('joun.conf')
         self.config: configparser.ConfigParser = None
         self.config_mtime: float = 0.0
         self.burst_truncate: int = 3
@@ -128,9 +261,9 @@ class JournalWatcher:
 
     def determine_app_name(self, journal_entries: List[Mapping[str, Any]]):
         app_name_info = ''
-        sep = ''
+        sep = '\u25b3'
         for journal_entry in journal_entries:
-            for key, prefix in {'SYSLOG_IDENTIFIER': '', '_PID': 'PID ', '_CMDLINE': '', '_EXE': '', '_COMM': '',
+            for key, prefix in {'_CMDLINE': '', '_EXE': '', '_COMM': '', 'SYSLOG_IDENTIFIER': '',
                                 '_KERNEL_SUBSYSTEM': 'kernel ',
                                 }.items():
                 print(key, journal_entry[key] if key in journal_entry else False)
@@ -140,22 +273,26 @@ class JournalWatcher:
                         app_name_info += sep + prefix + value
                         sep = '; '
         if app_name_info == '':
-            app_name_info = 'unknown'
+            app_name_info = sep + 'unknown'
         return app_name_info
 
     def determine_summary(self, journal_entries: List[Mapping[str, Any]]):
         journal_entry = journal_entries[0]
         realtime = journal_entry['__REALTIME_TIMESTAMP']
-        transport = f" {journal_entry['_TRANSPORT']}:" if '_TRANSPORT' in journal_entry else ''
+        transport = f" {journal_entry['_TRANSPORT']}" if '_TRANSPORT' in journal_entry else ''
         number_of_entries = len(journal_entries)
         if number_of_entries > 1:
-            summary = f"{realtime:%H:%M:%S}:{transport} Burst of {number_of_entries} messages"
+            summary = f"\u25F4{realtime:%H:%M:%S}:{transport} Burst of {number_of_entries} messages"
         else:
-            if 'SYSLOG_IDENTIFIER' in journal_entry:
-                text = journal_entry['SYSLOG_IDENTIFIER']
-            else:
-                text = journal_entry['MESSAGE']
-            summary = f"{realtime:%H:%M:%S}: {transport} {text}"
+            text = ''
+            sep = ''
+            for key, prefix in {'SYSLOG_IDENTIFIER': '', '_PID': 'PID ', '_KERNEL_SUBSYSTEM': 'kernel ', }.items():
+                if key in journal_entry:
+                    value = str(journal_entry[key])
+                    if text.find(value) < 0:
+                        text += sep + prefix + value
+                        sep = ' '
+            summary = f"\u25F4{realtime:%H:%M:%S}: {text} (\u21e8{transport})"
         self.debug(f"realtime='{realtime}' summary='{summary}'")
         return summary
 
@@ -170,7 +307,7 @@ class JournalWatcher:
             if new_message == previous_message:
                 duplicates += 1
             else:
-                message += f"{sep}{new_message}"
+                message += f"{sep}\u25B7{new_message}"
                 previous_message = new_message
                 reported += 1
                 if reported == self.burst_truncate and reported < len(journal_entries):
@@ -245,9 +382,313 @@ class JournalWatcher:
         print('INFO:', *arg)
 
 
-def main():
+def translate(source_text: str):
+    """For future internationalization - recommended way to do this at this time."""
+    return QCoreApplication.translate('vdu_controls', source_text)
+
+
+joun_VERSION = '0.9.0'
+
+ABOUT_TEXT = f"""
+
+<b>joun version {joun_VERSION}</b>
+<p>
+A journal to desktop-notification filter. 
+<p>
+Run joun --help in a console for help.
+<p>
+Visit <a href="https://github.com/digitaltrails/joun">https://github.com/digitaltrails/joun</a> for 
+more details.
+<p><p>
+
+<b>joun Copyright (C) 2021 Michael Hamilton</b>
+<p>
+This program is free software: you can redistribute it and/or modify it
+under the terms of the GNU General Public License as published by the
+Free Software Foundation, version 3.
+<p>
+This program is distributed in the hope that it will be useful, but
+WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
+or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
+more details.
+<p>
+You should have received a copy of the GNU General Public License along
+with this program. If not, see <a href="https://www.gnu.org/licenses/">https://www.gnu.org/licenses/</a>.
+
+"""
+
+CONTRAST_SVG = b"""
+<svg xmlns="http://www.w3.org/2000/svg" version="1.1" viewBox="0 0 24 24" width="24" height="24">
+  <defs>
+    <style type="text/css" id="current-color-scheme">
+      .ColorScheme-Text { color:#232629; }
+    </style>
+  </defs>
+  <g transform="translate(1,1)">
+    <path style="fill:currentColor;fill-opacity:1;stroke:none" transform="translate(-1,-1)" d="m 12,7 c -2.761424,0 -5,2.2386 -5,5 0,2.7614 2.238576,5 5,5 2.761424,0 5,-2.2386 5,-5 0,-2.7614 -2.238576,-5 -5,-5 z m 0,1 v 8 C 9.790861,16 8,14.2091 8,12 8,9.7909 9.790861,8 12,8" class="ColorScheme-Text" id="path79" />
+  </g>
+</svg>
+"""
+
+# https://www.svgrepo.com/svg/335387/filter
+FILTER_SVG = b"""
+<svg width="24px" height="24px" viewBox="0 -1 18 19" xmlns="http://www.w3.org/2000/svg">
+  <path fill="#494c4e" d="M14.35 4.855L10 9.21v2.8c0 1.31-2 2.45-2 1.89V9.2L3.65 4.856a.476.476 0 0 1-.11-.54A.5.5 0 0 1 4 4h10a.5.5 0 0 1 .46.31.476.476 0 0 1-.11.545z"/>
+  <circle fill="#494c4e" cx="9" cy="17" r="1"/>
+  <circle fill="#494c4e" cx="5" cy="1" r="1"/>
+  <circle fill="#494c4e" cx="13" cy="1" r="1"/>
+  <circle fill="#494c4e" cx="9" cy="1" r="1"/>
+</svg>
+"""
+
+FILTER_OFF_SVG = b"""
+<svg width="24px" height="24px" viewBox="0 -1 18 19" xmlns="http://www.w3.org/2000/svg">
+  <path fill="#494c4e" d="M14.35 4.855L10 9.21v2.8c0 1.31-2 2.45-2 1.89V9.2L3.65 4.856a.476.476 0 0 1-.11-.54A.5.5 0 0 1 4 4h10a.5.5 0 0 1 .46.31.476.476 0 0 1-.11.545z"/>
+  <circle fill="#ff5500" cx="9" cy="17" r="1"/>
+  <circle fill="#ff5500" cx="5" cy="1" r="1"/>
+  <circle fill="#ff5500" cx="13" cy="1" r="1"/>
+  <circle fill="#ff5500" cx="9" cy="1" r="1"/>
+</svg>
+"""
+
+
+class DialogSingletonMixin:
+    """
+    A mixin that can augment a QDialog or QMessageBox with code to enforce a singleton UI.
+    For example, it is used so that only ones settings editor can be active at a time.
+    """
+    _dialogs_map = {}
+    debug = False
+
+    def __init__(self) -> None:
+        """Registers the concrete class as a singleton so it can be reused later."""
+        super().__init__()
+        class_name = self.__class__.__name__
+        if class_name in DialogSingletonMixin._dialogs_map:
+            raise TypeError(f"ERROR: More than one instance of {class_name} cannot exist.")
+        if DialogSingletonMixin.debug:
+            print(f'DEBUG: SingletonDialog created for {class_name}')
+        DialogSingletonMixin._dialogs_map[class_name] = self
+
+    def closeEvent(self, event) -> None:
+        """Subclasses that implement their own closeEvent must call this closeEvent to deregister the singleton"""
+        class_name = self.__class__.__name__
+        if DialogSingletonMixin.debug:
+            print(f'DEBUG: SingletonDialog remove {class_name}')
+        del DialogSingletonMixin._dialogs_map[class_name]
+        event.accept()
+
+    def make_visible(self):
+        """
+        If the dialog exists(), call this to make it visible by raising it.
+        Internal, used by the class method show_existing_dialog()
+        """
+        self.show()
+        self.raise_()
+        self.activateWindow()
+
+    @classmethod
+    def show_existing_dialog(cls: Type):
+        """If the dialog exists(), call this to make it visible by raising it."""
+        class_name = cls.__name__
+        if DialogSingletonMixin.debug:
+            print(f'DEBUG: SingletonDialog show existing {class_name}')
+        instance = DialogSingletonMixin._dialogs_map[class_name]
+        instance.make_visible()
+
+    @classmethod
+    def exists(cls: Type) -> bool:
+        """Returns true if the dialog has already been created."""
+        class_name = cls.__name__
+        if DialogSingletonMixin.debug:
+            print(f'DEBUG: SingletonDialog exists {class_name} {class_name in DialogSingletonMixin._dialogs_map}')
+        return class_name in DialogSingletonMixin._dialogs_map
+
+
+class AboutDialog(QMessageBox, DialogSingletonMixin):
+
+    @staticmethod
+    def invoke():
+        if AboutDialog.exists():
+            AboutDialog.show_existing_dialog()
+        else:
+            AboutDialog()
+
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle(translate('About'))
+        self.setTextFormat(Qt.AutoText)
+        self.setText(translate('About joun'))
+        self.setInformativeText(translate(ABOUT_TEXT))
+        self.setIcon(QMessageBox.Information)
+        self.exec()
+
+
+class HelpDialog(QDialog, DialogSingletonMixin):
+
+    @staticmethod
+    def invoke():
+        if HelpDialog.exists():
+            HelpDialog.show_existing_dialog()
+        else:
+            HelpDialog()
+
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle(translate('Help'))
+        layout = QVBoxLayout()
+        markdown_view = QTextEdit()
+        markdown_view.setReadOnly(True)
+        markdown_view.setMarkdown(__doc__)
+        layout.addWidget(markdown_view)
+        self.setLayout(layout)
+        # TODO maybe compute a minimum from the actual screen size
+        self.setMinimumWidth(1600)
+        self.setMinimumHeight(1024)
+        # .show() is non-modal, .exec() is modal
+        self.make_visible()
+
+
+class ContextMenu(QMenu):
+
+    def __init__(self,
+                 about_action=None, help_action=None, enable_action=None,
+                 quit_action=None) -> None:
+        super().__init__()
+        self.main_window = None
+
+        toggle_action = self.addAction(
+            self.style().standardIcon(QStyle.SP_ComputerIcon),
+            translate('Pause'),
+            enable_action)
+        self.addAction(self.style().standardIcon(QStyle.SP_MessageBoxInformation),
+                       translate('About'),
+                       about_action)
+        self.addAction(self.style().standardIcon(QStyle.SP_TitleBarContextHelpButton),
+                       translate('Help'),
+                       help_action)
+        self.addSeparator()
+        self.addAction(self.style().standardIcon(QStyle.SP_DialogCloseButton),
+                       translate('Quit'),
+                       quit_action)
+        def triggered(action: QAction):
+            print('triggered', action.text(), toggle_action.text())
+            if action == toggle_action:
+                action.setText(translate('Continue') if action.text() == translate("Pause") else translate("Pause"))
+        self.triggered.connect(triggered)
+
+    def set_vdu_controls_main_window(self, main_window) -> None:
+        self.main_window = main_window
+
+
+def exception_handler(e_type, e_value, e_traceback):
+    """Overarching error handler in case something unexpected happens."""
+    print("ERROR:\n", ''.join(traceback.format_exception(e_type, e_value, e_traceback)))
+    alert = QMessageBox()
+    alert.setText(translate('Error: {}').format(''.join(traceback.format_exception_only(e_type, e_value))))
+    alert.setInformativeText(translate('Unexpected error'))
+    alert.setDetailedText(
+        translate('Details: {}').format(''.join(traceback.format_exception(e_type, e_value, e_traceback))))
+    alert.setIcon(QMessageBox.Critical)
+    alert.exec()
+    QApplication.quit()
+
+
+def create_icon_from_svg_string(svg_str: bytes) -> QIcon:
+    """There is no QIcon option for loading SVG from a string, only from a SVG file, so roll our own."""
+    renderer = QSvgRenderer(svg_str)
+    image = QImage(64, 64, QImage.Format_ARGB32)
+    image.fill(0x0)
+    painter = QPainter(image)
+    renderer.render(painter)
+    painter.end()
+    return QIcon(QPixmap.fromImage(image))
+
+
+def tray_interface():
+    sys.excepthook = exception_handler
+
+    app = QApplication(sys.argv)
+
+    def toggle_watcher() -> None:
+        global watcher_process
+        if watcher_process.is_alive():
+            stop_watch_journal()
+            tray.setIcon(watch_off_icon)
+        else:
+            start_watch_journal()
+            tray.setIcon(watch_on_icon)
+
+    app_context_menu = ContextMenu(about_action=AboutDialog.invoke,
+                                   help_action=HelpDialog.invoke,
+                                   enable_action=toggle_watcher,
+                                   quit_action=app.quit)
+
+    watch_on_icon = create_icon_from_svg_string(FILTER_SVG)
+    watch_off_icon = create_icon_from_svg_string(FILTER_OFF_SVG)
+
+    tray = QSystemTrayIcon()
+    tray.setIcon(watch_on_icon)
+    tray.setContextMenu(app_context_menu)
+
+    app.setWindowIcon(watch_on_icon)
+    app.setApplicationDisplayName(translate('Journal Notify'))
+
+    main_window = QLabel('HELLPO')
+
+    def show_window():
+        if main_window.isVisible():
+            main_window.hide()
+        else:
+            # Use the mouse pos as a guess to where the system tray is.  The Linux Qt x,y geometry returned by
+            # the tray icon is 0,0, so we can't use that.
+            p = QCursor.pos()
+            wg = main_window.geometry()
+            # Also try to cope with the tray not being at the bottom right of the screen.
+            x = p.x() - wg.width() if p.x() > wg.width() else p.x()
+            y = p.y() - wg.height() if p.y() > wg.height() else p.y()
+            main_window.setGeometry(x, y, wg.width(), wg.height())
+            main_window.show()
+            # Attempt to force it to the top with raise and activate
+            main_window.raise_()
+            main_window.activateWindow()
+
+    tray.activated.connect(show_window)
+    tray.setVisible(True)
+    rc = app.exec_()
+    if rc == 999:  # EXIT_CODE_FOR_RESTART:
+        QProcess.startDetached(app.arguments()[0], app.arguments()[1:])
+
+
+def watch_journal():
     journal_watcher = JournalWatcher()
     journal_watcher.watch_journal()
+
+
+watcher_process: mp.Process = None
+
+
+def start_watch_journal():
+    global watcher_process
+    if watcher_process is not None and watcher_process.is_alive():
+        watcher_process.terminate()
+    watcher_process = mp.Process(target=watch_journal, args=())
+    watcher_process.start()
+    print(f"started watcher PID={watcher_process.pid}")
+
+
+def stop_watch_journal():
+    global watcher_process
+    if watcher_process is not None and watcher_process.is_alive():
+        watcher_process.terminate()
+        watcher_process.join()
+        print(f"terminated watcher PID={watcher_process.pid} exit code={watcher_process.exitcode}")
+
+
+def main():
+    signal.signal(signal.SIGINT, signal.SIG_DFL)
+    start_watch_journal()
+    tray_interface()
 
 
 if __name__ == '__main__':
