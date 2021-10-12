@@ -1,9 +1,9 @@
 #!/usr/bin/python3
 """
-joun: Journal to desktop-notification filter
-============================================
+joun: Journal notifications forwarder
+=====================================
 
-A desktop utility for filtering and forwarding systemd journal entries to desktop-notifications.
+A desktop journal-entry to desktop-notification forwarder.
 
 Usage:
 ======
@@ -27,7 +27,10 @@ Optional arguments:
 Description
 ===========
 
-``joun`` is new new new.
+``joun`` A desktop journal-entry to desktop-notification forwarder with a range of filtering capabilities.
+The systemd-journal is continuously monitored for new entries which are then filtered to select those that
+need to be forwarded to the standard ``freedesktop`` ``dbus`` notifications interface.  Bursts of messages
+are handled by bundling them in to single summarising notification.
 
 Configuration
 =============
@@ -52,11 +55,11 @@ The config files are in INI-format divided into a number of sections as outlined
 
         [match]
         my_rule_name = forward journal entry if this string matches
-        my_other_rule_name = regexp forward journal entry if this [Rr]egexp matches
+        my_other_rule_name = regexp forward journal [Ee]ntry if this python-regexp matches
 
         [ignore]
         my_ignore_rule_name = ignore journal entry if this string matches
-        my_ignore_other_rule_name = regexp ignore journal entry if this [Rr]egexp matches
+        my_ignore_other_rule_name = regexp ignore [Jj]ournal entry if this python-regexp matches
 
 As well as using the ``Settings``, config files may also be created by the command line option
 
@@ -118,6 +121,9 @@ with this program. If not, see <https://www.gnu.org/licenses/>.
 **Contact:**  m i c h a e l   @   a c t r i x   .   g e n   .   n z
 
 ----------
+
+# ######################## MONITOR SUB PROCESS CODE ###############################################################
+
 
 """
 
@@ -386,6 +392,7 @@ def translate(source_text: str):
     """For future internationalization - recommended way to do this at this time."""
     return QCoreApplication.translate('vdu_controls', source_text)
 
+# ######################## USER INTERFACE CODE ######################################################################
 
 joun_VERSION = '0.9.0'
 
@@ -393,7 +400,7 @@ ABOUT_TEXT = f"""
 
 <b>joun version {joun_VERSION}</b>
 <p>
-A journal to desktop-notification filter. 
+A journal-entry to desktop-notification forwarder. 
 <p>
 Run joun --help in a console for help.
 <p>
@@ -450,6 +457,36 @@ FILTER_OFF_SVG = b"""
   <circle fill="#ff5500" cx="9" cy="1" r="1"/>
 </svg>
 """
+
+def create_icon_from_svg_string(svg_str: bytes) -> QIcon:
+    """There is no QIcon option for loading SVG from a string, only from a SVG file, so roll our own."""
+    renderer = QSvgRenderer(svg_str)
+    image = QImage(64, 64, QImage.Format_ARGB32)
+    image.fill(0x0)
+    painter = QPainter(image)
+    renderer.render(painter)
+    painter.end()
+    return QIcon(QPixmap.fromImage(image))
+
+
+class ConfigEditorWidget(QWidget):
+
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle(translate('Control Panel'))
+        self.setMinimumWidth(1024)
+        layout = QVBoxLayout()
+        self.setLayout(layout)
+        self.make_visible()
+
+    def make_visible(self):
+        """
+        If the dialog exists(), call this to make it visible by raising it.
+        Internal, used by the class method show_existing_dialog()
+        """
+        self.show()
+        self.raise_()
+        self.activateWindow()
 
 
 class DialogSingletonMixin:
@@ -571,10 +608,12 @@ class ContextMenu(QMenu):
         self.addAction(self.style().standardIcon(QStyle.SP_DialogCloseButton),
                        translate('Quit'),
                        quit_action)
+
         def triggered(action: QAction):
             print('triggered', action.text(), toggle_action.text())
             if action == toggle_action:
                 action.setText(translate('Continue') if action.text() == translate("Pause") else translate("Pause"))
+
         self.triggered.connect(triggered)
 
     def set_vdu_controls_main_window(self, main_window) -> None:
@@ -594,18 +633,9 @@ def exception_handler(e_type, e_value, e_traceback):
     QApplication.quit()
 
 
-def create_icon_from_svg_string(svg_str: bytes) -> QIcon:
-    """There is no QIcon option for loading SVG from a string, only from a SVG file, so roll our own."""
-    renderer = QSvgRenderer(svg_str)
-    image = QImage(64, 64, QImage.Format_ARGB32)
-    image.fill(0x0)
-    painter = QPainter(image)
-    renderer.render(painter)
-    painter.end()
-    return QIcon(QPixmap.fromImage(image))
 
 
-def tray_interface():
+def user_interface():
     sys.excepthook = exception_handler
 
     app = QApplication(sys.argv)
@@ -632,9 +662,9 @@ def tray_interface():
     tray.setContextMenu(app_context_menu)
 
     app.setWindowIcon(watch_on_icon)
-    app.setApplicationDisplayName(translate('Journal Notify'))
+    app.setApplicationDisplayName(translate('Journal Notification Forwarder'))
 
-    main_window = QLabel('HELLPO')
+    main_window = ConfigEditorWidget()
 
     def show_window():
         if main_window.isVisible():
@@ -688,7 +718,7 @@ def stop_watch_journal():
 def main():
     signal.signal(signal.SIGINT, signal.SIG_DFL)
     start_watch_journal()
-    tray_interface()
+    user_interface()
 
 
 if __name__ == '__main__':
