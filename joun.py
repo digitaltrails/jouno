@@ -450,13 +450,13 @@ FILTER_SVG = b"""
 
 FILTER_OFF_SVG = b"""
 <svg width="24px" height="24px" viewBox="0 -1 18 19" xmlns="http://www.w3.org/2000/svg">
-  <path fill="#494c4e" d="M14.35 4.855L10 9.21v2.8c0 1.31-2 2.45-2 1.89V9.2L3.65 4.856a.476.476 0 0 1-.11-.54A.5.5 0 0 1 4 4h10a.5.5 0 0 1 .46.31.476.476 0 0 1-.11.545z"/>
-  <circle fill="#ff5500" cx="9" cy="17" r="1"/>
-  <circle fill="#ff5500" cx="5" cy="1" r="1"/>
-  <circle fill="#ff5500" cx="13" cy="1" r="1"/>
-  <circle fill="#ff5500" cx="9" cy="1" r="1"/>
+  <path fill="#da4453" d="M14.35 4.855L10 9.21v2.8c0 1.31-2 2.45-2 1.89V9.2L3.65 4.856a.476.476 0 0 1-.11-.54A.5.5 0 0 1 4 4h10a.5.5 0 0 1 .46.31.476.476 0 0 1-.11.545z"/>
+  <circle fill="#494c4e" cx="5" cy="1" r="1"/>
+  <circle fill="#494c4e" cx="13" cy="1" r="1"/>
+  <circle fill="#494c4e" cx="9" cy="1" r="1"/>
 </svg>
 """
+
 
 def create_icon_from_svg_string(svg_str: bytes) -> QIcon:
     """There is no QIcon option for loading SVG from a string, only from a SVG file, so roll our own."""
@@ -477,7 +477,7 @@ class ConfigEditorWidget(QWidget):
         self.setMinimumWidth(1024)
         layout = QVBoxLayout()
         self.setLayout(layout)
-        self.make_visible()
+        #self.make_visible()
 
     def make_visible(self):
         """
