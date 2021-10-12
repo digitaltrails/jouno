@@ -1,13 +1,13 @@
+import configparser
 import os
 import re
 import select
+from enum import Enum
 from pathlib import Path
 from typing import Mapping, Any, List
 
 import dbus
 from systemd import journal
-
-import configparser
 
 DEFAULT_CONFIG = '''
 [options]
@@ -27,6 +27,29 @@ qt_kde_binding_loop = Binding loop detected for property
 '''
 
 
+class Priority(Enum):
+    EMERGENCY = 0
+    ALERT = 1
+    CRITICAL = 2
+    ERR = 3
+    WARNING = 4
+    NOTICE = 5
+    INFO = 6
+    DEBUG = 7
+
+
+NOTIFICATION_ICONS = {
+    Priority.EMERGENCY: 'dialog-error.png',
+    Priority.ALERT: 'dialog-error.png',
+    Priority.CRITICAL: 'dialog-error.png',
+    Priority.ERR: 'dialog-error.png',
+    Priority.WARNING: 'dialog-warning.png',
+    Priority.NOTICE: 'dialog-information.png',
+    Priority.INFO: 'dialog-information.png',
+    Priority.DEBUG: 'dialog-information.png',
+}
+
+
 # Press Alt+Shift+X to execute it or replace it with your code.
 # Press Double Shift to search everywhere for classes, files, tool windows, actions, and settings.
 
@@ -37,11 +60,12 @@ class NotifyFreeDesktop:
             object=dbus.SessionBus().get_object("org.freedesktop.Notifications", "/org/freedesktop/Notifications"),
             dbus_interface="org.freedesktop.Notifications")
 
-    def notify_desktop(self, app_name: str, summary: str, message: str, timeout: int):
+    def notify_desktop(self, app_name: str, summary: str, message: str, priority: Priority, timeout: int):
+        # https://specifications.freedesktop.org/notification-spec/notification-spec-latest.html
         replace_id = 0
-        notification_icon = ''
+        notification_icon = NOTIFICATION_ICONS[priority]
         action_requests = []
-        extra_hints = {"urgency": 1}
+        extra_hints = {"urgency": 1, "sound-name": "dialog-warning", }
         self.notify_interface.Notify(app_name, replace_id, notification_icon, summary, message, action_requests,
                                      extra_hints,
                                      timeout)
@@ -158,6 +182,15 @@ class JournalWatcher:
         self.debug(f'message={message}')
         return message
 
+    def determine_priority(self, journal_entries: List[Mapping[str, Any]]) -> Priority:
+        current_level = Priority.NOTICE
+        for journal_entry in journal_entries:
+            if 'PRIORITY' in journal_entry:
+                priority = journal_entry['PRIORITY']
+                if priority < current_level.value and (Priority.EMERGENCY.value <= priority <= Priority.DEBUG.value):
+                    current_level = Priority(priority)
+        return current_level
+
     def is_notable(self, journal_entry: Mapping[str, Any]):
         message = journal_entry['MESSAGE']
         if message != "":
@@ -194,12 +227,14 @@ class JournalWatcher:
                     for journal_entry in journal_reader:
                         burst_count += 1
                         if self.is_notable(journal_entry):
+                            self.debug(f"Notable: burst_count={len(notable)}: {journal_entry}")
                             self.debug(f"Notable: burst_count={len(notable)}: {journal_entry['MESSAGE']}")
                             notable.append(journal_entry)
             if len(notable):
                 notify.notify_desktop(app_name=self.determine_app_name(notable),
                                       summary=self.determine_summary(notable),
                                       message=self.determine_message(notable),
+                                      priority=self.determine_priority(notable),
                                       timeout=self.notification_timeout)
 
     def debug(self, *arg):
@@ -217,4 +252,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
