@@ -154,7 +154,7 @@ DEFAULT_CONFIG = '''
 burst_seconds = 2
 burst_truncate_messages = 3
 notification_seconds = 60
-debug = yes
+debug_enabled = yes
 
 [ignore] 
 kwin_bad_damage = XCB error: 152 (BadDamage)
@@ -490,6 +490,33 @@ def create_icon_from_svg_string(svg_str: bytes) -> QIcon:
     return QIcon(QPixmap.fromImage(image))
 
 
+class OptionsTab(QWidget):
+
+    def __init__(self, config_section: Mapping[str, str]):
+        super().__init__()
+        default_config = configparser.ConfigParser()
+        default_config.read_string(DEFAULT_CONFIG)
+        layout = QGridLayout(self)
+        row_number = 0
+        for option_id in default_config['options'].keys():
+            label_widget = QLabel(translate(option_id))
+            if option_id.endswith("_enabled"):
+                input_widget = QCheckBox()
+            else:
+                input_widget = QLineEdit()
+                input_widget.setMaximumWidth(100)
+            layout.addWidget(label_widget, row_number, 0)
+            layout.addWidget(input_widget, row_number, 1, 1, 2, alignment=Qt.AlignLeft)
+            row_number += 1
+        self.setLayout(layout)
+
+    def copy_from_config(self, config_section: Mapping[str, str]):
+        self.table_view.copy_from_config(config_section)
+
+    def copy_to_config(self, config_section: Mapping[str, str]):
+        self.table_view.copy_to_config(config_section)
+
+
 class FilterPanel(QWidget):
 
     def __init__(self, config_section: Mapping[str, str]):
@@ -592,8 +619,10 @@ class ConfigEditorWidget(QWidget):
         self.setLayout(layout)
         tabs = QTabWidget()
         layout.addWidget(tabs)
-        tabs.addTab(QLabel("Test"), "Settings")
+
         config = Config()
+        options_panel = OptionsTab(config['options'])
+        tabs.addTab(options_panel, "Options")
         match_panel = FilterPanel(config['match'])
         tabs.addTab(match_panel, "Match Filters")
         ignore_panel = FilterPanel(config['ignore'])
