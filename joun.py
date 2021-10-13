@@ -497,7 +497,7 @@ class ConfigFilterPanel(QWidget):
         print("table", str(config_section.keys()))
         self.config_section = config_section
         self.table_view = FilterTableView(config_section)
-        
+
         def add_action():
             self.table_view.get_model().append_new_config_rule()
 
