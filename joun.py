@@ -139,12 +139,13 @@ import signal
 import sys
 import multiprocessing as mp
 
-from PyQt5.QtCore import QCoreApplication, QProcess, Qt
-from PyQt5.QtGui import QPixmap, QIcon, QImage, QPainter, QCursor
+from PyQt5.QtCore import QCoreApplication, QProcess, Qt, QPoint, QAbstractTableModel, QModelIndex
+from PyQt5.QtGui import QPixmap, QIcon, QImage, QPainter, QCursor, QStandardItemModel, QStandardItem
 from PyQt5.QtSvg import QSvgWidget, QSvgRenderer
 from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QHBoxLayout, QSlider, QMessageBox, QLineEdit, QLabel, \
     QSplashScreen, QPushButton, QProgressBar, QComboBox, QSystemTrayIcon, QMenu, QStyle, QTextEdit, QDialog, QTabWidget, \
-    QCheckBox, QPlainTextEdit, QGridLayout, QSizePolicy, QAction
+    QCheckBox, QPlainTextEdit, QGridLayout, QSizePolicy, QAction, QTableWidget, QTableWidgetItem, QTableView, \
+    QAbstractItemView
 import dbus
 from systemd import journal
 
@@ -188,9 +189,17 @@ NOTIFICATION_ICONS = {
     Priority.DEBUG: 'dialog-information.png',
 }
 
+debug_enabled = True
 
-# Press Alt+Shift+X to execute it or replace it with your code.
-# Press Double Shift to search everywhere for classes, files, tool windows, actions, and settings.
+
+def debug(*arg):
+    if debug_enabled:
+        print('DEBUG:', *arg)
+
+
+def info(*arg):
+    print('INFO:', *arg)
+
 
 class NotifyFreeDesktop:
 
@@ -204,48 +213,65 @@ class NotifyFreeDesktop:
         replace_id = 0
         notification_icon = NOTIFICATION_ICONS[priority]
         action_requests = []
-        extra_hints = {"urgency": 1, "sound-name": "dialog-warning", }
+        # extra_hints = {"urgency": 1, "sound-name": "dialog-warning", }
+        extra_hints = {}
         self.notify_interface.Notify(app_name, replace_id, notification_icon, summary, message, action_requests,
                                      extra_hints,
                                      timeout)
 
 
+def get_config_path() -> Path:
+    config_dir_path = Path.home().joinpath('.config').joinpath('joun')
+    if not config_dir_path.parent.is_dir():
+        os.makedirs(config_dir_path)
+    path = config_dir_path.joinpath('joun.conf')
+    return path
+
+
+class Config(configparser.ConfigParser):
+
+    def __init__(self):
+        super().__init__()
+        self.path = get_config_path()
+        self.modified_time = 0.0
+        if not self.refresh():
+            self.read_string(DEFAULT_CONFIG)
+
+    def refresh(self) -> bool:
+        if self.path.is_file():
+            modified_time = self.path.lstat().st_mtime
+            if self.modified_time == modified_time:
+                return False
+            self.modified_time = modified_time
+            info(f"Reading {self.path}")
+            config_text = self.path.read_text()
+            self.read_string(config_text)
+            for section in ['options', 'match', 'ignore']:
+                if section not in self:
+                    self[section] = {}
+            return True
+        if self.modified_time > 0.0:
+            info(f"Config file has been deleted: {self.path}")
+            self.modified_time = 0.0
+        return False
+
+
 class JournalWatcher:
 
     def __init__(self):
-        config_dir_path = Path.home().joinpath('.config').joinpath('joun')
-        if not config_dir_path.parent.is_dir():
-            os.makedirs(config_dir_path)
-        self.config_path: Path = config_dir_path.joinpath('joun.conf')
-        self.config: configparser.ConfigParser = None
-        self.config_mtime: float = 0.0
+        self.config: Config = None
         self.burst_truncate: int = 3
         self.polling_millis: int = 2000
         self.notification_timeout: int = 60000
-        self.debug_enabled: bool = True
         self.ignore_regexp: Mapping[str, re] = {}
         self.match_regexp: Mapping[str, re] = {}
         self.update_config()
 
     def update_config(self):
-        if self.config_path.is_file():
-            mtime = self.config_path.lstat().st_mtime
-            if self.config is not None and self.config_mtime == mtime:
-                return
-            self.config_mtime = mtime
-            self.info(f"Reading {self.config_path}")
-            config_text = Path(self.config_path).read_text()
-        elif self.config is None:
-            self.info(f"No {self.config_path}")
-            config_text = DEFAULT_CONFIG
+        if self.config is None:
+            self.config = Config()
         else:
-            return
-        config = configparser.ConfigParser()
-        config.read_string(config_text)
-        for section in ['options', 'match', 'ignore']:
-            if section not in config:
-                config[section] = {}
-        self.config = config
+            self.config.refresh()
         if 'burst_truncate_messages' in self.config['options']:
             self.burst_truncate = self.config.getint('options', 'burst_truncate_messages')
         if 'burst_seconds' in self.config['options']:
@@ -253,7 +279,8 @@ class JournalWatcher:
         if 'notification_seconds' in self.config['options']:
             self.notification_timeout = 1000 * self.config.getint('options', 'notification_seconds')
         if 'debug' in self.config['options']:
-            self.debug_enabled = self.config.getboolean('options', 'debug')
+            global debug_enabled
+            debug_enabled = self.config.getboolean('options', 'debug')
         for rule_id, rule_text in self.config['ignore'].items():
             if rule_text.startswith('regexp '):
                 self.ignore_regexp[rule_id] = re.compile(rule_text[len('regexp '):])
@@ -299,7 +326,7 @@ class JournalWatcher:
                         text += sep + prefix + value
                         sep = ' '
             summary = f"\u25F4{realtime:%H:%M:%S}: {text} (\u21e8{transport})"
-        self.debug(f"realtime='{realtime}' summary='{summary}'")
+        debug(f"realtime='{realtime}' summary='{summary}'")
         return summary
 
     def determine_message(self, journal_entries: List[Mapping[str, Any]]) -> str:
@@ -322,7 +349,7 @@ class JournalWatcher:
             sep = '\n'
         if duplicates > 0:
             message += f'\n[{duplicates + 1} duplicate messages]'
-        self.debug(f'message={message}')
+        debug(f'message={message}')
         return message
 
     def determine_priority(self, journal_entries: List[Mapping[str, Any]]) -> Priority:
@@ -339,11 +366,11 @@ class JournalWatcher:
         if message != "":
             for rule_id, match_re in self.match_regexp.items():
                 if match_re.search(message) is not None:
-                    self.debug(f"rule=match.{rule_id}: {message}")
+                    debug(f"rule=match.{rule_id}: {message}")
                     return True
             for rule_id, ignore_re in self.ignore_regexp.items():
                 if ignore_re.search(message) is not None:
-                    self.debug(f"rule=ignore.{rule_id}: {message}")
+                    debug(f"rule=ignore.{rule_id}: {message}")
                     return False
         return len(self.match_regexp) == 0
 
@@ -370,8 +397,8 @@ class JournalWatcher:
                     for journal_entry in journal_reader:
                         burst_count += 1
                         if self.is_notable(journal_entry):
-                            self.debug(f"Notable: burst_count={len(notable)}: {journal_entry}")
-                            self.debug(f"Notable: burst_count={len(notable)}: {journal_entry['MESSAGE']}")
+                            debug(f"Notable: burst_count={len(notable)}: {journal_entry}")
+                            debug(f"Notable: burst_count={len(notable)}: {journal_entry['MESSAGE']}")
                             notable.append(journal_entry)
             if len(notable):
                 notify.notify_desktop(app_name=self.determine_app_name(notable),
@@ -380,17 +407,11 @@ class JournalWatcher:
                                       priority=self.determine_priority(notable),
                                       timeout=self.notification_timeout)
 
-    def debug(self, *arg):
-        if self.debug_enabled:
-            print('DEBUG:', *arg)
-
-    def info(self, *arg):
-        print('INFO:', *arg)
-
 
 def translate(source_text: str):
     """For future internationalization - recommended way to do this at this time."""
     return QCoreApplication.translate('vdu_controls', source_text)
+
 
 # ######################## USER INTERFACE CODE ######################################################################
 
@@ -469,6 +490,79 @@ def create_icon_from_svg_string(svg_str: bytes) -> QIcon:
     return QIcon(QPixmap.fromImage(image))
 
 
+class ConfigFilterTable(QWidget):
+
+    def __init__(self, config_section: Mapping[str, str]):
+        super().__init__()
+        print("table", str(config_section.keys()))
+        self.config_section = config_section
+        table_view = FilterTableView()
+        self.item_model = FilterTableModel(len(self.config_section), 2)
+        row = 0
+        for key, value in self.config_section.items():
+            self.item_model.setItem(row, 0, QStandardItem(key))
+            self.item_model.setItem(row, 1, QStandardItem(value))
+            row += 1
+
+        table_view.setModel(self.item_model)
+        table_view.resizeColumnsToContents()
+
+        button_box = QWidget()
+        button_box_layout = QHBoxLayout()
+        button_box.setLayout(button_box_layout)
+        ok_button = QPushButton(translate("OK"))
+        cancel_button = QPushButton(translate("Cancel"))
+        button_box_layout.addWidget(ok_button)
+        button_box_layout.addWidget(cancel_button)
+
+        def ok_action():
+            debug(f'table order = {table_view.item_view_order()} ')
+
+        ok_button.clicked.connect(ok_action)
+
+        layout = QVBoxLayout(self)
+        layout.addWidget(table_view)
+        layout.addWidget(button_box)
+        self.setLayout(layout)
+
+
+class FilterTableModel(QStandardItemModel):
+
+    def __init__(self, rows, cols):
+        super().__init__(rows, cols)
+
+
+class FilterTableView(QTableView):
+
+    def __init__(self, *args, **kwargs):
+        QTableView.__init__(self, *args, **kwargs)
+        self.setEditTriggers(QAbstractItemView.AllEditTriggers)
+        self.verticalHeader().setSectionsMovable(True)
+        self.verticalHeader().setDragEnabled(True)
+        self.verticalHeader().setDragDropMode(QAbstractItemView.InternalMove)
+        self.setDragDropOverwriteMode(True)
+
+    def item_view_order(self) -> List[int]:
+        """
+        Walk the table model's rows in model-order of 1..n, find the current y-location or each row,
+        sort the y-locations to determine the current view ordering of the model's rows (which may
+        no longer be 1..n due to drag and drop).  Return a list of the current view ordering, for
+        example [4, 0, 1, 2, 3].
+        """
+        row_y_positions = []
+        row_num = 0
+        while True:
+            # Get the view's y-position of the model's row_num
+            y = self.rowViewportPosition(row_num)
+            if y < 0:
+                break
+            row_y_positions.append((y, row_num))
+            row_num += 1
+        # Sort in order of y-position which will order the row_nums by their order in the view.
+        row_y_positions.sort()
+        return [row_num for _, row_num in row_y_positions]
+
+
 class ConfigEditorWidget(QWidget):
 
     def __init__(self):
@@ -477,7 +571,13 @@ class ConfigEditorWidget(QWidget):
         self.setMinimumWidth(1024)
         layout = QVBoxLayout()
         self.setLayout(layout)
-        #self.make_visible()
+        tabs = QTabWidget()
+        layout.addWidget(tabs)
+        tabs.addTab(QLabel("Test"), "Settings")
+        config = Config()
+        tabs.addTab(ConfigFilterTable(config['ignore']), "Filters")
+        self.setContextMenuPolicy(Qt.CustomContextMenu)
+        # self.make_visible()
 
     def make_visible(self):
         """
@@ -630,15 +730,17 @@ def exception_handler(e_type, e_value, e_traceback):
         translate('Details: {}').format(''.join(traceback.format_exception(e_type, e_value, e_traceback))))
     alert.setIcon(QMessageBox.Critical)
     alert.exec()
+    stop_watch_journal()
     QApplication.quit()
-
-
 
 
 def user_interface():
     sys.excepthook = exception_handler
 
     app = QApplication(sys.argv)
+
+    watch_on_icon = create_icon_from_svg_string(FILTER_SVG)
+    watch_off_icon = create_icon_from_svg_string(FILTER_OFF_SVG)
 
     def toggle_watcher() -> None:
         global watcher_process
@@ -649,13 +751,15 @@ def user_interface():
             start_watch_journal()
             tray.setIcon(watch_on_icon)
 
-    app_context_menu = ContextMenu(about_action=AboutDialog.invoke,
-                                   help_action=HelpDialog.invoke,
-                                   enable_action=toggle_watcher,
-                                   quit_action=app.quit)
+    def quit_action():
+        stop_watch_journal()
+        app.quit()
 
-    watch_on_icon = create_icon_from_svg_string(FILTER_SVG)
-    watch_off_icon = create_icon_from_svg_string(FILTER_OFF_SVG)
+    app_context_menu = ContextMenu(
+        about_action=AboutDialog.invoke,
+        help_action=HelpDialog.invoke,
+        enable_action=toggle_watcher,
+        quit_action=quit_action)
 
     tray = QSystemTrayIcon()
     tray.setIcon(watch_on_icon)
@@ -664,7 +768,12 @@ def user_interface():
     app.setWindowIcon(watch_on_icon)
     app.setApplicationDisplayName(translate('Journal Notification Forwarder'))
 
+    def open_context_menu(position: QPoint) -> None:
+        print("context menu")
+        app_context_menu.exec(main_window.mapToGlobal(position))
+
     main_window = ConfigEditorWidget()
+    main_window.customContextMenuRequested.connect(open_context_menu)
 
     def show_window():
         if main_window.isVisible():
