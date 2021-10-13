@@ -490,16 +490,15 @@ def create_icon_from_svg_string(svg_str: bytes) -> QIcon:
     return QIcon(QPixmap.fromImage(image))
 
 
-class ConfigFilterPanel(QWidget):
+class FilterPanel(QWidget):
 
     def __init__(self, config_section: Mapping[str, str]):
         super().__init__()
         print("table", str(config_section.keys()))
-        self.config_section = config_section
         self.table_view = FilterTableView(config_section)
 
         def add_action():
-            self.table_view.get_model().append_new_config_rule()
+            self.table_view.append_new_config_rule()
 
         add_button = QPushButton(translate("New rule"))
         add_button.clicked.connect(add_action)
@@ -509,36 +508,27 @@ class ConfigFilterPanel(QWidget):
         layout.addWidget(add_button)
         self.setLayout(layout)
 
-    def copy_to_config(self):
-        debug(f'table order = {self.table_view.item_view_order()} ')
-        for key in self.config_section.keys():
-            del self.config_section[key]
-        for row_num in self.table_view.item_view_order():
-            key = self.table_view.get_model().item(row_num, 0).text()
-            value = self.table_view.get_model().item(row_num, 1).text()
-            self.config_section[key] = value
+    def copy_from_config(self, config_section: Mapping[str, str]):
+        self.table_view.copy_from_config(config_section)
+
+    def copy_to_config(self, config_section: Mapping[str, str]):
+        self.table_view.copy_to_config(config_section)
 
 
 class FilterTableModel(QStandardItemModel):
 
-    def __init__(self, config_section: Mapping[str, str]):
-        super().__init__(len(config_section), 2)
+    def __init__(self, number_of_rows: int):
+        super().__init__(number_of_rows, 2)
         row = 0
         self.setHorizontalHeaderLabels(["rule-id", "pattern"])
-        for key, value in config_section.items():
-            self.setItem(row, 0, QStandardItem(key))
-            self.setItem(row, 1, QStandardItem(value))
-            row += 1
-
-    def append_new_config_rule(self):
-        self.appendRow([QStandardItem(''), QStandardItem('')])
 
 
 class FilterTableView(QTableView):
 
     def __init__(self, config_section: Mapping[str, str]):
         super().__init__()
-        self.filter_model = FilterTableModel(config_section)
+        self.filter_model = FilterTableModel(len(config_section))
+        self.copy_from_config(config_section)
         self.setModel(self.filter_model)
         self.setEditTriggers(QAbstractItemView.AllEditTriggers)
         self.verticalHeader().setSectionsMovable(True)
@@ -568,6 +558,29 @@ class FilterTableView(QTableView):
         row_y_positions.sort()
         return [row_num for _, row_num in row_y_positions]
 
+    def copy_from_config(self, config_section: Mapping[str, str]):
+        model = self.get_model()
+        if model.rowCount() > 0:
+            model.removeRows(0, model.rowCount())
+        row = 0
+        for key, value in config_section.items():
+            model.setItem(row, 0, QStandardItem(key))
+            model.setItem(row, 1, QStandardItem(value))
+            row += 1
+
+    def copy_to_config(self, config_section: Mapping[str, str]):
+        debug(f'table order = {self.item_view_order()} ')
+        for key in config_section.keys():
+            del config_section[key]
+        model = self.get_model()
+        for row_num in self.item_view_order():
+            key = model.item(row_num, 0).text()
+            value = model.item(row_num, 1).text()
+            config_section[key] = value
+
+    def append_new_config_rule(self):
+        self.get_model().appendRow([QStandardItem(''), QStandardItem('')])
+
 
 class ConfigEditorWidget(QWidget):
 
@@ -581,9 +594,44 @@ class ConfigEditorWidget(QWidget):
         layout.addWidget(tabs)
         tabs.addTab(QLabel("Test"), "Settings")
         config = Config()
-        tabs.addTab(ConfigFilterPanel(config['match']), "Match Filters")
-        tabs.addTab(ConfigFilterPanel(config['ignore']), "Ignore Filters")
+        match_panel = FilterPanel(config['match'])
+        tabs.addTab(match_panel, "Match Filters")
+        ignore_panel = FilterPanel(config['ignore'])
+        tabs.addTab(ignore_panel, "Ignore Filters")
         self.setContextMenuPolicy(Qt.CustomContextMenu)
+
+        button_box = QWidget()
+        button_box_layout = QHBoxLayout()
+        button_box.setLayout(button_box_layout)
+        save_button = QPushButton(translate("Save"))
+        revert_button = QPushButton(translate("Revert"))
+        close_button = QPushButton(translate("Close"))
+        button_box_layout.addWidget(save_button)
+        button_box_layout.addWidget(revert_button)
+        button_box_layout.addWidget(close_button)
+
+        def save_action():
+            debug("save")
+            match_panel.copy_to_config(config['match'])
+            ignore_panel.copy_to_config(config['ignore'])
+            debug(f'ok')
+
+        save_button.clicked.connect(save_action)
+
+        def revert_action():
+            debug("revert")
+            match_panel.copy_from_config(config['match'])
+            ignore_panel.copy_from_config(config['ignore'])
+
+        revert_button.clicked.connect(revert_action)
+
+        def close_action():
+            debug("close")
+            pass
+
+        close_button.clicked.connect(close_action)
+
+        layout.addWidget(button_box)
         # self.make_visible()
 
     def make_visible(self):
