@@ -497,13 +497,7 @@ class ConfigFilterTable(QWidget):
         print("table", str(config_section.keys()))
         self.config_section = config_section
         table_view = FilterTableView()
-        self.item_model = FilterTableModel(len(self.config_section), 2)
-        row = 0
-        for key, value in self.config_section.items():
-            self.item_model.setItem(row, 0, QStandardItem(key))
-            self.item_model.setItem(row, 1, QStandardItem(value))
-            row += 1
-
+        self.item_model = FilterTableModel(self.config_section)
         table_view.setModel(self.item_model)
         table_view.resizeColumnsToContents()
 
@@ -517,6 +511,12 @@ class ConfigFilterTable(QWidget):
 
         def ok_action():
             debug(f'table order = {table_view.item_view_order()} ')
+            for key in self.config_section.keys():
+                del self.config_section[key]
+            for row in table_view.item_view_order():
+                key = self.item_model.item(row,0).text()
+                value = self.item_model.item(row,1).text()
+                self.config_section[key] = value
 
         ok_button.clicked.connect(ok_action)
 
@@ -528,8 +528,18 @@ class ConfigFilterTable(QWidget):
 
 class FilterTableModel(QStandardItemModel):
 
-    def __init__(self, rows, cols):
-        super().__init__(rows, cols)
+    def __init__(self, config_section: Mapping[str,str]):
+        super().__init__(len(config_section), 3)
+        row = 0
+        self.setHorizontalHeaderLabels(["rule-id", "pattern", "regexp"])
+        for key, value in config_section.items():
+            self.setItem(row, 0, QStandardItem(key))
+            self.setItem(row, 1, QStandardItem(value))
+            regex_checkable = QStandardItem('')
+            regex_checkable.setCheckable(True)
+            regex_checkable.setEditable(False)
+            self.setItem(row, 2, regex_checkable)
+            row += 1
 
 
 class FilterTableView(QTableView):
