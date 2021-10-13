@@ -490,50 +490,38 @@ def create_icon_from_svg_string(svg_str: bytes) -> QIcon:
     return QIcon(QPixmap.fromImage(image))
 
 
-class ConfigFilterTable(QWidget):
+class ConfigFilterPanel(QWidget):
 
     def __init__(self, config_section: Mapping[str, str]):
         super().__init__()
         print("table", str(config_section.keys()))
         self.config_section = config_section
-        table_view = FilterTableView(config_section)
-
-
-        button_box = QWidget()
-        button_box_layout = QHBoxLayout()
-        button_box.setLayout(button_box_layout)
-        add_button = QPushButton(translate("New rule"))
-        ok_button = QPushButton(translate("OK"))
-        cancel_button = QPushButton(translate("Cancel"))
-        button_box_layout.addWidget(add_button)
-        button_box_layout.addWidget(ok_button)
-        button_box_layout.addWidget(cancel_button)
-
+        self.table_view = FilterTableView(config_section)
+        
         def add_action():
-            table_view.get_model().append_new_config_rule()
+            self.table_view.get_model().append_new_config_rule()
 
+        add_button = QPushButton(translate("New rule"))
         add_button.clicked.connect(add_action)
 
-        def ok_action():
-            debug(f'table order = {table_view.item_view_order()} ')
-            for key in self.config_section.keys():
-                del self.config_section[key]
-            for row_num in table_view.item_view_order():
-                key = table_view.get_model().item(row_num, 0).text()
-                value = table_view.get_model().item(row_num, 1).text()
-                self.config_section[key] = value
-
-        ok_button.clicked.connect(ok_action)
-
         layout = QVBoxLayout(self)
-        layout.addWidget(table_view)
-        layout.addWidget(button_box)
+        layout.addWidget(self.table_view)
+        layout.addWidget(add_button)
         self.setLayout(layout)
+
+    def copy_to_config(self):
+        debug(f'table order = {self.table_view.item_view_order()} ')
+        for key in self.config_section.keys():
+            del self.config_section[key]
+        for row_num in self.table_view.item_view_order():
+            key = self.table_view.get_model().item(row_num, 0).text()
+            value = self.table_view.get_model().item(row_num, 1).text()
+            self.config_section[key] = value
 
 
 class FilterTableModel(QStandardItemModel):
 
-    def __init__(self, config_section: Mapping[str,str]):
+    def __init__(self, config_section: Mapping[str, str]):
         super().__init__(len(config_section), 2)
         row = 0
         self.setHorizontalHeaderLabels(["rule-id", "pattern"])
@@ -559,7 +547,6 @@ class FilterTableView(QTableView):
         self.setDragDropOverwriteMode(True)
         self.resizeColumnsToContents()
         self.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
-
 
     def get_model(self) -> FilterTableModel:
         return self.filter_model
@@ -594,7 +581,8 @@ class ConfigEditorWidget(QWidget):
         layout.addWidget(tabs)
         tabs.addTab(QLabel("Test"), "Settings")
         config = Config()
-        tabs.addTab(ConfigFilterTable(config['ignore']), "Filters")
+        tabs.addTab(ConfigFilterPanel(config['match']), "Match Filters")
+        tabs.addTab(ConfigFilterPanel(config['ignore']), "Ignore Filters")
         self.setContextMenuPolicy(Qt.CustomContextMenu)
         # self.make_visible()
 
