@@ -145,7 +145,7 @@ from PyQt5.QtSvg import QSvgWidget, QSvgRenderer
 from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QHBoxLayout, QSlider, QMessageBox, QLineEdit, QLabel, \
     QSplashScreen, QPushButton, QProgressBar, QComboBox, QSystemTrayIcon, QMenu, QStyle, QTextEdit, QDialog, QTabWidget, \
     QCheckBox, QPlainTextEdit, QGridLayout, QSizePolicy, QAction, QTableWidget, QTableWidgetItem, QTableView, \
-    QAbstractItemView
+    QAbstractItemView, QHeaderView
 import dbus
 from systemd import journal
 
@@ -497,7 +497,7 @@ class ConfigFilterTable(QWidget):
         print("table", str(config_section.keys()))
         self.config_section = config_section
         table_view = FilterTableView(config_section)
-        table_view.resizeColumnsToContents()
+
 
         button_box = QWidget()
         button_box_layout = QHBoxLayout()
@@ -543,12 +543,12 @@ class FilterTableModel(QStandardItemModel):
             row += 1
 
     def append_new_config_rule(self):
-        self.appendRow([QStandardItem('new_rule_id'), QStandardItem('')])
+        self.appendRow([QStandardItem(''), QStandardItem('')])
 
 
 class FilterTableView(QTableView):
 
-    def __init__(self, config_section: Mapping[str,str]):
+    def __init__(self, config_section: Mapping[str, str]):
         super().__init__()
         self.filter_model = FilterTableModel(config_section)
         self.setModel(self.filter_model)
@@ -557,6 +557,9 @@ class FilterTableView(QTableView):
         self.verticalHeader().setDragEnabled(True)
         self.verticalHeader().setDragDropMode(QAbstractItemView.InternalMove)
         self.setDragDropOverwriteMode(True)
+        self.resizeColumnsToContents()
+        self.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+
 
     def get_model(self) -> FilterTableModel:
         return self.filter_model
