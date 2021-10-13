@@ -55,11 +55,11 @@ The config files are in INI-format divided into a number of sections as outlined
 
         [match]
         my_rule_name = forward journal entry if this string matches
-        my_other_rule_name = regexp forward journal [Ee]ntry if this python-regexp matches
+        my_other_rule_name_regexp = forward journal [Ee]ntry if this python-regexp matches
 
         [ignore]
         my_ignore_rule_name = ignore journal entry if this string matches
-        my_ignore_other_rule_name = regexp ignore [Jj]ournal entry if this python-regexp matches
+        my_ignore_other_rule_name_regexp = ignore [Jj]ournal entry if this python-regexp matches
 
 As well as using the ``Settings``, config files may also be created by the command line option
 
@@ -282,13 +282,13 @@ class JournalWatcher:
             global debug_enabled
             debug_enabled = self.config.getboolean('options', 'debug')
         for rule_id, rule_text in self.config['ignore'].items():
-            if rule_text.startswith('regexp '):
-                self.ignore_regexp[rule_id] = re.compile(rule_text[len('regexp '):])
+            if rule_id.endswith('_regexp'):
+                self.ignore_regexp[rule_id] = re.compile(rule_text)
             else:
                 self.ignore_regexp[rule_id] = re.compile(re.escape(rule_text))
         for rule_id, rule_text in self.config['match'].items():
-            if rule_text.startswith('regexp '):
-                self.match_regexp[rule_id] = re.compile(rule_text[len('regexp '):])
+            if rule_text.endswith('_regexp'):
+                self.match_regexp[rule_id] = re.compile(rule_text)
             else:
                 self.match_regexp[rule_id] = re.compile(re.escape(rule_text))
 
@@ -496,26 +496,31 @@ class ConfigFilterTable(QWidget):
         super().__init__()
         print("table", str(config_section.keys()))
         self.config_section = config_section
-        table_view = FilterTableView()
-        self.item_model = FilterTableModel(self.config_section)
-        table_view.setModel(self.item_model)
+        table_view = FilterTableView(config_section)
         table_view.resizeColumnsToContents()
 
         button_box = QWidget()
         button_box_layout = QHBoxLayout()
         button_box.setLayout(button_box_layout)
+        add_button = QPushButton(translate("New rule"))
         ok_button = QPushButton(translate("OK"))
         cancel_button = QPushButton(translate("Cancel"))
+        button_box_layout.addWidget(add_button)
         button_box_layout.addWidget(ok_button)
         button_box_layout.addWidget(cancel_button)
+
+        def add_action():
+            table_view.get_model().append_new_config_rule()
+
+        add_button.clicked.connect(add_action)
 
         def ok_action():
             debug(f'table order = {table_view.item_view_order()} ')
             for key in self.config_section.keys():
                 del self.config_section[key]
-            for row in table_view.item_view_order():
-                key = self.item_model.item(row,0).text()
-                value = self.item_model.item(row,1).text()
+            for row_num in table_view.item_view_order():
+                key = table_view.get_model().item(row_num, 0).text()
+                value = table_view.get_model().item(row_num, 1).text()
                 self.config_section[key] = value
 
         ok_button.clicked.connect(ok_action)
@@ -529,28 +534,32 @@ class ConfigFilterTable(QWidget):
 class FilterTableModel(QStandardItemModel):
 
     def __init__(self, config_section: Mapping[str,str]):
-        super().__init__(len(config_section), 3)
+        super().__init__(len(config_section), 2)
         row = 0
-        self.setHorizontalHeaderLabels(["rule-id", "pattern", "regexp"])
+        self.setHorizontalHeaderLabels(["rule-id", "pattern"])
         for key, value in config_section.items():
             self.setItem(row, 0, QStandardItem(key))
             self.setItem(row, 1, QStandardItem(value))
-            regex_checkable = QStandardItem('')
-            regex_checkable.setCheckable(True)
-            regex_checkable.setEditable(False)
-            self.setItem(row, 2, regex_checkable)
             row += 1
+
+    def append_new_config_rule(self):
+        self.appendRow([QStandardItem('new_rule_id'), QStandardItem('')])
 
 
 class FilterTableView(QTableView):
 
-    def __init__(self, *args, **kwargs):
-        QTableView.__init__(self, *args, **kwargs)
+    def __init__(self, config_section: Mapping[str,str]):
+        super().__init__()
+        self.filter_model = FilterTableModel(config_section)
+        self.setModel(self.filter_model)
         self.setEditTriggers(QAbstractItemView.AllEditTriggers)
         self.verticalHeader().setSectionsMovable(True)
         self.verticalHeader().setDragEnabled(True)
         self.verticalHeader().setDragDropMode(QAbstractItemView.InternalMove)
         self.setDragDropOverwriteMode(True)
+
+    def get_model(self) -> FilterTableModel:
+        return self.filter_model
 
     def item_view_order(self) -> List[int]:
         """
@@ -559,16 +568,13 @@ class FilterTableView(QTableView):
         no longer be 1..n due to drag and drop).  Return a list of the current view ordering, for
         example [4, 0, 1, 2, 3].
         """
+        # If there is no access to the rowCount, rowViewportPosition() can be called
+        # until it returns -1 (note it can return other valid negative values, so just test
+        # for -1.
         row_y_positions = []
-        row_num = 0
-        while True:
-            # Get the view's y-position of the model's row_num
+        for row_num in range(self.get_model().rowCount()):
             y = self.rowViewportPosition(row_num)
-            if y < 0:
-                break
             row_y_positions.append((y, row_num))
-            row_num += 1
-        # Sort in order of y-position which will order the row_nums by their order in the view.
         row_y_positions.sort()
         return [row_num for _, row_num in row_y_positions]
 
