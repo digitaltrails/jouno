@@ -473,7 +473,7 @@ CONTRAST_SVG = b"""
 """
 
 # https://www.svgrepo.com/svg/335387/filter
-FILTER_SVG = b"""
+FILTER_SVG_OLD = b"""
 <svg width="24px" height="24px" viewBox="0 -1 18 19" xmlns="http://www.w3.org/2000/svg">
   <path fill="#494c4e" d="M14.35 4.855L10 9.21v2.8c0 1.31-2 2.45-2 1.89V9.2L3.65 4.856a.476.476 0 0 1-.11-.54A.5.5 0 0 1 4 4h10a.5.5 0 0 1 .46.31.476.476 0 0 1-.11.545z"/>
   <circle fill="#494c4e" cx="9" cy="17" r="1"/>
@@ -483,12 +483,52 @@ FILTER_SVG = b"""
 </svg>
 """
 
-FILTER_OFF_SVG = b"""
+FILTER_SVG = b"""
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">
+  <defs id="defs3051">
+    <style type="text/css" id="current-color-scheme">
+      .ColorScheme-Text {
+        color:#232629;
+      }
+      </style>
+  </defs>
+ <path style="fill:currentColor;fill-opacity:1;stroke:none" 
+      d="M 4 2 L 4 3 L 13 3 L 13 13 L 4 13 L 4 14 L 13 14 L 14 14 L 14 3 L 14 2 L 7 2 z M 8 6 L 8 8 L 12 8 L 12 7 L 8 7 z M 8 8 L 8 10 L 12 10 L 12 9 L 8 9 z M 8 11 L 8 12 L 12 12 L 12 11 L 10 11 z "
+      class="ColorScheme-Text"
+     />
+</svg>
+"""
+# d="M 4 2 L 4 3 L 13 3 L 13 13 L 4 13 L 4 14 L 13 14 L 14 14 L 14 3 L 14 2 L 7 2 z M 7 6 L 7 8 L 12 8 L 12 7 L 7 7 z M 8 8 L 8 10 L 12 10 L 12 9 L 8 9 z M 9 11 L 9 12 L 12 12 L 12 11 L 10 11 z "
+# d = "M 4 2 L 4 3 L 13 3 L 13 13 L 4 13 L 4 14 L 13 14 L 14 14 L 14 3 L 14 2 L 7 2 z M 7 6 L 7 7 L 12 7 L 12 6 L 7 6 z M 8 8 L 8 9 L 12 9 L 12 8 L 8 8 z M 9 10 L 9 11 L 12 11 L 12 10 L 10 10 z "
+
+WINDOW_ICON_SVG = FILTER_SVG.replace(b'color:#232629;', b'color:#bbbbbb;')
+
+FILTER_OFF_SVG_OLD = b"""
 <svg width="24px" height="24px" viewBox="0 -1 18 19" xmlns="http://www.w3.org/2000/svg">
   <path fill="#da4453" d="M14.35 4.855L10 9.21v2.8c0 1.31-2 2.45-2 1.89V9.2L3.65 4.856a.476.476 0 0 1-.11-.54A.5.5 0 0 1 4 4h10a.5.5 0 0 1 .46.31.476.476 0 0 1-.11.545z"/>
   <circle fill="#494c4e" cx="5" cy="1" r="1"/>
   <circle fill="#494c4e" cx="13" cy="1" r="1"/>
   <circle fill="#494c4e" cx="9" cy="1" r="1"/>
+</svg>
+"""
+
+FILTER_OFF_SVG = b"""
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">
+  <defs id="defs3051">
+    <style type="text/css" id="current-color-scheme">
+      .ColorScheme-Text {
+        color:#232629;
+      }
+      .ColorScheme-NegativeText {
+        color:#da4453;
+      }
+      </style>
+  </defs>
+  <path
+     style="fill:currentColor;fill-opacity:1;stroke:none" 
+     class="ColorScheme-NegativeText"
+    d="M 8 2 A 6 5.9999852 0 0 0 4.5273438 3.1132812 L 5.2460938 3.8320312 A 5 5 0 0 1 8 3 A 5 5 0 0 1 13 8 A 5 5 0 0 1 12.167969 10.753906 L 12.884766 11.470703 A 6 5.9999852 0 0 0 14 8 A 6 5.9999852 0 0 0 8 2 z M 3.1152344 4.5292969 A 6 5.9999852 0 0 0 2 8 A 6 5.9999852 0 0 0 8 14 A 6 5.9999852 0 0 0 11.472656 12.886719 L 10.753906 12.167969 A 5 5 0 0 1 8 13 A 5 5 0 0 1 3 8 A 5 5 0 0 1 3.8320312 5.2460938 L 3.1152344 4.5292969 z M 5 7 L 5 9 L 11 9 L 11 7 L 5 7 z "
+          />
 </svg>
 """
 
@@ -910,6 +950,7 @@ def user_interface():
 
     app = QApplication(sys.argv)
 
+    window_icon = create_icon_from_svg_string(WINDOW_ICON_SVG)
     watch_on_icon = create_icon_from_svg_string(FILTER_SVG)
     watch_off_icon = create_icon_from_svg_string(FILTER_OFF_SVG)
 
@@ -936,7 +977,7 @@ def user_interface():
     tray.setIcon(watch_on_icon)
     tray.setContextMenu(app_context_menu)
 
-    app.setWindowIcon(watch_on_icon)
+    app.setWindowIcon(window_icon)
     app.setApplicationDisplayName(translate('Journal Notification Forwarder'))
 
     def open_context_menu(position: QPoint) -> None:
