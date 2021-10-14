@@ -277,9 +277,8 @@ class JournalWatcher:
     def update_config(self):
         if self.config is None:
             self.config = Config()
-        else:
-            if not self.config.refresh():
-                return
+        if not self.config.refresh():
+            return
         if 'burst_truncate_messages' in self.config['options']:
             self.burst_truncate = self.config.getint('options', 'burst_truncate_messages')
         if 'burst_seconds' in self.config['options']:
@@ -687,6 +686,7 @@ class ConfigEditorWidget(QWidget):
         layout.addWidget(tabs)
 
         config = Config()
+        config.refresh()
         options_panel = OptionsTab(config['options'])
         tabs.addTab(options_panel, "Options")
         match_panel = FilterPanel(config['match'])
