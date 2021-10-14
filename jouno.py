@@ -88,12 +88,11 @@ to eliminate excessive bursts caused by the desktop when it processes the notifi
 by jouno.
 
 
-
 Responsiveness
 --------------
 
-I logged a bug against the KDE plasma desktop. Generating multiple messages with expiry timeouts cause
-plasma-notifications and the kwin-x11 to cosume a large amount of CPU and become jerky when dragging
+I've logged a bug against the KDE plasma notifications. Generating multiple messages with expiry timeouts
+cause plasma-notifications and the kwin-x11 to cosume a large amount of CPU and become jerky when dragging
 windows.  This doesn't seem to happen if notices do not expire (``notification_seconds = 0``).  This
 isn't a bug confined to jouno generated notifications, it can be reproduced by normal shell commands,
 for example:
