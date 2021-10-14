@@ -139,13 +139,14 @@ import signal
 import sys
 import multiprocessing as mp
 
-from PyQt5.QtCore import QCoreApplication, QProcess, Qt, QPoint, QAbstractTableModel, QModelIndex
-from PyQt5.QtGui import QPixmap, QIcon, QImage, QPainter, QCursor, QStandardItemModel, QStandardItem
+from PyQt5.QtCore import QCoreApplication, QProcess, Qt, QPoint, QAbstractTableModel, QModelIndex, QRegExp
+from PyQt5.QtGui import QPixmap, QIcon, QImage, QPainter, QCursor, QStandardItemModel, QStandardItem, QIntValidator, \
+    QRegExpValidator
 from PyQt5.QtSvg import QSvgWidget, QSvgRenderer
 from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QHBoxLayout, QSlider, QMessageBox, QLineEdit, QLabel, \
     QSplashScreen, QPushButton, QProgressBar, QComboBox, QSystemTrayIcon, QMenu, QStyle, QTextEdit, QDialog, QTabWidget, \
     QCheckBox, QPlainTextEdit, QGridLayout, QSizePolicy, QAction, QTableWidget, QTableWidgetItem, QTableView, \
-    QAbstractItemView, QHeaderView
+    QAbstractItemView, QHeaderView, QStyledItemDelegate
 import dbus
 from systemd import journal
 
@@ -237,6 +238,10 @@ class Config(configparser.ConfigParser):
         if not self.refresh():
             self.read_string(DEFAULT_CONFIG)
 
+    def save(self):
+        with open(self.path, 'w') as config_file:
+            self.write(config_file)
+
     def refresh(self) -> bool:
         if self.path.is_file():
             modified_time = self.path.lstat().st_mtime
@@ -245,6 +250,8 @@ class Config(configparser.ConfigParser):
             self.modified_time = modified_time
             info(f"Reading {self.path}")
             config_text = self.path.read_text()
+            for section in ['options', 'match', 'ignore']:
+                self.remove_section(section)
             self.read_string(config_text)
             for section in ['options', 'match', 'ignore']:
                 if section not in self:
@@ -271,7 +278,8 @@ class JournalWatcher:
         if self.config is None:
             self.config = Config()
         else:
-            self.config.refresh()
+            if not self.config.refresh():
+                return
         if 'burst_truncate_messages' in self.config['options']:
             self.burst_truncate = self.config.getint('options', 'burst_truncate_messages')
         if 'burst_seconds' in self.config['options']:
@@ -281,16 +289,23 @@ class JournalWatcher:
         if 'debug' in self.config['options']:
             global debug_enabled
             debug_enabled = self.config.getboolean('options', 'debug')
-        for rule_id, rule_text in self.config['ignore'].items():
-            if rule_id.endswith('_regexp'):
-                self.ignore_regexp[rule_id] = re.compile(rule_text)
+        self.ignore_regexp: Mapping[str, re] = {}
+        self.match_regexp: Mapping[str, re] = {}
+        self.compile_patterns(self.config['match'], self.match_regexp)
+        self.compile_patterns(self.config['ignore'], self.ignore_regexp)
+
+    def compile_patterns(self, rules_map: Mapping[str, str], patterns_map: Mapping[str, re.Pattern]):
+        for rule_id, rule_text in rules_map.items():
+            if rule_id.endswith('_enabled'):
+                pass
             else:
-                self.ignore_regexp[rule_id] = re.compile(re.escape(rule_text))
-        for rule_id, rule_text in self.config['match'].items():
-            if rule_text.endswith('_regexp'):
-                self.match_regexp[rule_id] = re.compile(rule_text)
-            else:
-                self.match_regexp[rule_id] = re.compile(re.escape(rule_text))
+                rule_enable_key = rule_id + "_enabled"
+                if rule_enable_key not in rules_map or rules_map[rule_enable_key] == 'yes':
+                    debug(f"including {rule_id}")
+                    if rule_id.endswith('_regexp'):
+                        patterns_map[rule_id] = re.compile(rule_text)
+                    else:
+                        patterns_map[rule_id] = re.compile(re.escape(rule_text))
 
     def determine_app_name(self, journal_entries: List[Mapping[str, Any]]):
         app_name_info = ''
@@ -496,25 +511,40 @@ class OptionsTab(QWidget):
         super().__init__()
         default_config = configparser.ConfigParser()
         default_config.read_string(DEFAULT_CONFIG)
+        self.option_map: Mapping[str, QWidget] = {}
         layout = QGridLayout(self)
         row_number = 0
-        for option_id in default_config['options'].keys():
+        for option_id, value in default_config['options'].items():
             label_widget = QLabel(translate(option_id))
             if option_id.endswith("_enabled"):
                 input_widget = QCheckBox()
+                input_widget.setChecked(value == 'yes')
             else:
                 input_widget = QLineEdit()
+                input_widget.setValidator(QIntValidator(0, 60))
                 input_widget.setMaximumWidth(100)
+                input_widget.setText(value)
             layout.addWidget(label_widget, row_number, 0)
             layout.addWidget(input_widget, row_number, 1, 1, 2, alignment=Qt.AlignLeft)
+            self.option_map[option_id] = input_widget
             row_number += 1
         self.setLayout(layout)
 
     def copy_from_config(self, config_section: Mapping[str, str]):
-        self.table_view.copy_from_config(config_section)
+        for option_id, widget in self.option_map.items():
+            if option_id in config_section:
+                if option_id.endswith("_enabled"):
+                    widget.setChecked(config_section[option_id].lower() == "yes")
+                else:
+                    widget.setText(config_section[option_id])
 
     def copy_to_config(self, config_section: Mapping[str, str]):
-        self.table_view.copy_to_config(config_section)
+        for option_id, widget in self.option_map.items():
+            if option_id.endswith("_enabled"):
+                config_section[option_id] = "yes" if widget.isChecked() else "no"
+            else:
+                if widget.text().strip() != "":
+                    config_section[option_id] = widget.text()
 
 
 class FilterPanel(QWidget):
@@ -545,10 +575,20 @@ class FilterPanel(QWidget):
 class FilterTableModel(QStandardItemModel):
 
     def __init__(self, number_of_rows: int):
-        super().__init__(number_of_rows, 2)
+        super().__init__(number_of_rows, 3)
         row = 0
-        self.setHorizontalHeaderLabels(["rule-id", "pattern"])
+        self.setHorizontalHeaderLabels(["enabled", "rule-id", "pattern"])
 
+# class ColumnItemDelegate(QStyledItemDelegate):
+#     def createEditor(self, widget, option, index):
+#         if not index.isValid():
+#             return 0
+#         if index.column() == 0: #only on the cells in the first column
+#             editor = QLineEdit(widget)
+#             validator = QRegExpValidator(QRegExp("\d{11}"), editor)
+#             editor.setValidator(validator)
+#             return editor
+#         return super(ColumnItemDelegate, self).createEditor(widget, option, index)
 
 class FilterTableView(QTableView):
 
@@ -563,6 +603,7 @@ class FilterTableView(QTableView):
         self.verticalHeader().setDragDropMode(QAbstractItemView.InternalMove)
         self.setDragDropOverwriteMode(True)
         self.resizeColumnsToContents()
+        # self.setItemDelegateForColumn(1, ColumnItemDelegate())
         self.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
 
     def get_model(self) -> FilterTableModel:
@@ -579,6 +620,7 @@ class FilterTableView(QTableView):
         # until it returns -1 (note it can return other valid negative values, so just test
         # for -1.
         row_y_positions = []
+        debug(f"row count={self.get_model().rowCount()}")
         for row_num in range(self.get_model().rowCount()):
             y = self.rowViewportPosition(row_num)
             row_y_positions.append((y, row_num))
@@ -590,10 +632,24 @@ class FilterTableView(QTableView):
         if model.rowCount() > 0:
             model.removeRows(0, model.rowCount())
         row = 0
+        enable_map: Mapping[str, QStandardItem] = {}
         for key, value in config_section.items():
-            model.setItem(row, 0, QStandardItem(key))
-            model.setItem(row, 1, QStandardItem(value))
-            row += 1
+            if key.endswith("_enabled"):
+                pass
+            else:
+                enable_item = QStandardItem()
+                enable_item.setCheckable(True)
+                enable_item.setCheckState(Qt.Checked)
+                enable_map[key + "_enabled"] = enable_item
+                model.setItem(row, 0, enable_item)
+                model.setItem(row, 1, QStandardItem(key))
+                model.setItem(row, 2, QStandardItem(value))
+                row += 1
+        for key, value in config_section.items():
+            if key.endswith("_enabled"):
+                if value != 'yes':
+                    enable_map[key].setCheckState(Qt.Unchecked)
+
 
     def copy_to_config(self, config_section: Mapping[str, str]):
         debug(f'table order = {self.item_view_order()} ')
@@ -601,12 +657,17 @@ class FilterTableView(QTableView):
             del config_section[key]
         model = self.get_model()
         for row_num in self.item_view_order():
-            key = model.item(row_num, 0).text()
-            value = model.item(row_num, 1).text()
+            key = model.item(row_num, 1).text()
+            value = model.item(row_num, 2).text()
             config_section[key] = value
+            if model.item(row_num, 0).checkState() == Qt.Unchecked:
+                config_section[key + "_enabled"] = "no"
 
     def append_new_config_rule(self):
-        self.get_model().appendRow([QStandardItem(''), QStandardItem('')])
+        enable_item = QStandardItem()
+        enable_item.setCheckable(True)
+        enable_item.setCheckState(Qt.Checked)
+        self.get_model().appendRow([enable_item, QStandardItem(''), QStandardItem('')])
 
 
 class ConfigEditorWidget(QWidget):
@@ -641,14 +702,17 @@ class ConfigEditorWidget(QWidget):
 
         def save_action():
             debug("save")
+            options_panel.copy_to_config(config['options'])
             match_panel.copy_to_config(config['match'])
             ignore_panel.copy_to_config(config['ignore'])
+            config.save()
             debug(f'ok')
 
         save_button.clicked.connect(save_action)
 
         def revert_action():
             debug("revert")
+            options_panel.copy_from_config(config['options'])
             match_panel.copy_from_config(config['match'])
             ignore_panel.copy_from_config(config['ignore'])
 
@@ -661,6 +725,7 @@ class ConfigEditorWidget(QWidget):
         close_button.clicked.connect(close_action)
 
         layout.addWidget(button_box)
+        revert_action()
         # self.make_visible()
 
     def make_visible(self):
