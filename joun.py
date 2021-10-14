@@ -577,7 +577,7 @@ class FilterTableModel(QStandardItemModel):
     def __init__(self, number_of_rows: int):
         super().__init__(number_of_rows, 3)
         row = 0
-        self.setHorizontalHeaderLabels(["enabled", "rule-id", "pattern"])
+        self.setHorizontalHeaderLabels([translate("Enable"), translate("Rule ID"), translate("Pattern")])
 
 # class ColumnItemDelegate(QStyledItemDelegate):
 #     def createEditor(self, widget, option, index):
