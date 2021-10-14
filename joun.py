@@ -129,6 +129,7 @@ with this program. If not, see <https://www.gnu.org/licenses/>.
 
 import configparser
 import os
+import pickle
 import re
 import select
 import traceback
@@ -141,7 +142,7 @@ import multiprocessing as mp
 
 from PyQt5.QtCore import QCoreApplication, QProcess, Qt, QPoint, QAbstractTableModel, QModelIndex, QRegExp
 from PyQt5.QtGui import QPixmap, QIcon, QImage, QPainter, QCursor, QStandardItemModel, QStandardItem, QIntValidator, \
-    QRegExpValidator
+    QRegExpValidator, QHideEvent
 from PyQt5.QtSvg import QSvgWidget, QSvgRenderer
 from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QHBoxLayout, QSlider, QMessageBox, QLineEdit, QLabel, \
     QSplashScreen, QPushButton, QProgressBar, QComboBox, QSystemTrayIcon, QMenu, QStyle, QTextEdit, QDialog, QTabWidget, \
@@ -235,8 +236,7 @@ class Config(configparser.ConfigParser):
         super().__init__()
         self.path = get_config_path()
         self.modified_time = 0.0
-        if not self.refresh():
-            self.read_string(DEFAULT_CONFIG)
+        self.read_string(DEFAULT_CONFIG)
 
     def save(self):
         with open(self.path, 'w') as config_file:
@@ -576,8 +576,9 @@ class FilterTableModel(QStandardItemModel):
 
     def __init__(self, number_of_rows: int):
         super().__init__(number_of_rows, 3)
-        row = 0
-        self.setHorizontalHeaderLabels([translate("Enable"), translate("Rule ID"), translate("Pattern")])
+        # use spaces to force a wider column - seems to be no other EASY way to do this.
+        self.setHorizontalHeaderLabels(
+            [translate("Enable"), translate("          Rule ID          "), translate("Pattern")])
 
 # class ColumnItemDelegate(QStyledItemDelegate):
 #     def createEditor(self, widget, option, index):
@@ -604,7 +605,7 @@ class FilterTableView(QTableView):
         self.setDragDropOverwriteMode(True)
         self.resizeColumnsToContents()
         # self.setItemDelegateForColumn(1, ColumnItemDelegate())
-        self.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        self.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
 
     def get_model(self) -> FilterTableModel:
         return self.filter_model
@@ -697,39 +698,56 @@ class ConfigEditorWidget(QWidget):
         button_box = QWidget()
         button_box_layout = QHBoxLayout()
         button_box.setLayout(button_box_layout)
-        save_button = QPushButton(translate("Save"))
+        apply_button = QPushButton(translate("Apply"))
         revert_button = QPushButton(translate("Revert"))
-        close_button = QPushButton(translate("Close"))
-        button_box_layout.addWidget(save_button)
+
+        button_box_layout.addWidget(apply_button)
         button_box_layout.addWidget(revert_button)
-        button_box_layout.addWidget(close_button)
 
         def save_action():
-            debug("save")
+            debug("Apply")
             options_panel.copy_to_config(config['options'])
             match_panel.copy_to_config(config['match'])
             ignore_panel.copy_to_config(config['ignore'])
             config.save()
             debug(f'ok')
 
-        save_button.clicked.connect(save_action)
+        apply_button.clicked.connect(save_action)
 
         def revert_action():
             debug("revert")
+            before = pickle.dumps(config)
+            tmp = pickle.loads(before)
+            options_panel.copy_to_config(tmp['options'])
+            match_panel.copy_to_config(tmp['match'])
+            ignore_panel.copy_to_config(tmp['ignore'])
+            after = pickle.dumps(tmp)
+            if before == after:
+                revert_message = QMessageBox(self)
+                revert_message.setText(translate('There are no unapplied changes, there is nothing to revert.'))
+                revert_message.setIcon(QMessageBox.Warning)
+                revert_message.setStandardButtons(QMessageBox.Ok)
+                revert_message.exec()
+                return
+            else:
+                revert_message = QMessageBox(self)
+                revert_message.setText(translate('There are unapplied changes, revert and loose all changes?'))
+                revert_message.setIcon(QMessageBox.Question)
+                revert_message.setStandardButtons(QMessageBox.Ok | QMessageBox.Cancel)
+                if revert_message.exec() == QMessageBox.Cancel:
+                    return
+            info("reverting unsaved edits")
             options_panel.copy_from_config(config['options'])
             match_panel.copy_from_config(config['match'])
             ignore_panel.copy_from_config(config['ignore'])
 
         revert_button.clicked.connect(revert_action)
 
-        def close_action():
-            debug("close")
-            self.hide()
-
-        close_button.clicked.connect(close_action)
-
         layout.addWidget(button_box)
-        revert_action()
+
+        options_panel.copy_from_config(config['options'])
+        match_panel.copy_from_config(config['match'])
+        ignore_panel.copy_from_config(config['ignore'])
         # self.make_visible()
 
     def make_visible(self):
