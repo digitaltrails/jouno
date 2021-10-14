@@ -632,24 +632,30 @@ class FilterTableView(QTableView):
         if model.rowCount() > 0:
             model.removeRows(0, model.rowCount())
         row = 0
-        enable_map: Mapping[str, QStandardItem] = {}
+        enable_item_map: Mapping[str, QStandardItem] = {}
+        # Step one - first gather the patterns and create a row for each one
         for key, value in config_section.items():
             if key.endswith("_enabled"):
                 pass
             else:
-                enable_item = QStandardItem()
-                enable_item.setCheckable(True)
-                enable_item.setCheckState(Qt.Checked)
-                enable_map[key + "_enabled"] = enable_item
+                enable_item = self.create_checkable_item()
+                enable_item_map[key + "_enabled"] = enable_item
                 model.setItem(row, 0, enable_item)
                 model.setItem(row, 1, QStandardItem(key))
                 model.setItem(row, 2, QStandardItem(value))
                 row += 1
-        for key, value in config_section.items():
-            if key.endswith("_enabled"):
-                if value != 'yes':
-                    enable_map[key].setCheckState(Qt.Unchecked)
+        # Step two - check if any patterns should be disabled and toggle the appropriate checkable.
+        for enable_key, enable_item in enable_item_map.items():
+            if enable_key in config_section:
+                if config_section[enable_key].strip() == 'yes':
+                    enable_item.setCheckState(Qt.Unchecked)
 
+    def create_checkable_item(self):
+        enable_item = QStandardItem()
+        enable_item.setCheckable(True)
+        enable_item.setCheckState(Qt.Checked)
+        enable_item.setToolTip(translate("Enable/Disable"))
+        return enable_item
 
     def copy_to_config(self, config_section: Mapping[str, str]):
         debug(f'table order = {self.item_view_order()} ')
@@ -664,9 +670,7 @@ class FilterTableView(QTableView):
                 config_section[key + "_enabled"] = "no"
 
     def append_new_config_rule(self):
-        enable_item = QStandardItem()
-        enable_item.setCheckable(True)
-        enable_item.setCheckState(Qt.Checked)
+        enable_item = self.create_checkable_item()
         self.get_model().appendRow([enable_item, QStandardItem(''), QStandardItem('')])
 
 
@@ -720,7 +724,7 @@ class ConfigEditorWidget(QWidget):
 
         def close_action():
             debug("close")
-            pass
+            self.hide()
 
         close_button.clicked.connect(close_action)
 
