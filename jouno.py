@@ -1,7 +1,7 @@
 #!/usr/bin/python3
 """
 jouno: Journal notifications forwarder
-=====================================
+======================================
 
 A desktop journal-entry to desktop-notification forwarder.
 
