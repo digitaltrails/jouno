@@ -18,7 +18,7 @@ Getting Started
 ``jouno`` A desktop journal-entry to desktop-notification forwarder with message filtering capabilities.
 
 The application monitors the systemd-journal for new entries, filters them, and forwards them to the 
-standard ``freedesktop`` ``dbus`` notifications interface.  Typically desktops present notifications
+standard ``freedesktop`` ``dbus`` notifications interface.  Typically, desktops present notifications
 as popup messages.
 
 Bursts of messages are handled by bundling them in to a single summarising notification.
