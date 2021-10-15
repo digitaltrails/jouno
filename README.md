@@ -11,6 +11,7 @@ Description
 This software is currently pre-release, It is feature complete and quite usable but may lack some polish.
 
 ![Default](screen-shots/Screenshot_Large.png) 
+
 Getting Started
 ---------------
 
