@@ -24,17 +24,36 @@ Optional arguments:
 Description
 ===========
 
-``jouno`` A desktop journal-entry to desktop-notification forwarder with a range of filtering capabilities.
-The application monitors the systemd-journal for new entries, filters them, and forwards them to the
-standard ``freedesktop`` ``dbus`` notifications interface.  Typically desktops present notifications
-as popup messages.
+This software is currently pre-release, It is feature complete and quite usable but may lack some polish.
+
+![Default](screen-shots/Screenshot_Large.png)
+
+``jouno,`` is system-tray application for monitoring the ``systemd-journal.`` It raises selected
+entries as desktop-notifications.
+
+The application monitors the ``systemd-journal`` for new entries, filters them, and forwards them as
+standard ``freedesktop dbus notifications``.  Most linux desktops present these notifications
+as individual popup messages.
 
 Bursts of messages are handled by bundling them in to a single summarising notification.
 
-``jouno`` runs as a system-tray application.
+``jouno`` is a tool designed to improve awareness of background activity by monitoring
+the journal and raising interesting journal-entries as desktop notifications.  Possibilities for
+it use include:
 
-To get started with ``jouno``, you only need to download the ``jouno.py`` python script and
-check that the dependencies described below are in place.
+ * Monitoring specific jobs, such as the progress of the daily backups.
+ * Watching for specific events, such as background core dumps.
+ * Investigating desktop actions that raise journal log entries.
+ * Discovering unnecessary daemon activity and unnecessary services.
+ * Notifying access attempts, such as su, ssh, samba, or pam events.
+ * Prevention of undesirable desktop activity, such as shutting down during the backups.
+ * Detecting hardware events.
+ * Raising general awareness of what is going on in the background.
+
+I have previously released a gist [notify-desktop](https://gist.github.com/digitaltrails/26aad3282d8739db1de8bc2e59c812eb)
+that allows root batch-jobs, such as my daily backups, to raise notifications for the current desktop
+user, but ``notify-desktop`` only covers my own code.  ``jouno`` allows me to watch for and monitor any
+jobs on the system and potentially removes the need for my jobs to use my ``notify-desktop`` script.
 
 Configuration
 =============
