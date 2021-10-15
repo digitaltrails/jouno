@@ -139,9 +139,6 @@ with this program. If not, see <https://www.gnu.org/licenses/>.
 
 ----------
 
-# ######################## MONITOR SUB PROCESS CODE ###############################################################
-
-
 """
 
 import configparser
@@ -184,6 +181,8 @@ qt_kde_binding_loop = Binding loop detected for property
 [match]
 
 '''
+
+# ######################## MONITOR SUB PROCESS CODE ###############################################################
 
 
 class Priority(Enum):
