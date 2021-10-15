@@ -639,10 +639,11 @@ class OptionsTab(QWidget):
 
 class FilterPanel(QWidget):
 
-    def __init__(self, config_section: Mapping[str, str]):
+    def __init__(self, config_section: Mapping[str, str], tooltip=''):
         super().__init__()
         print("table", str(config_section.keys()))
-        self.table_view = FilterTableView(config_section)
+
+        self.table_view = FilterTableView(config_section, tooltip)
 
         def add_action():
             self.table_view.append_new_config_rule()
@@ -652,7 +653,7 @@ class FilterPanel(QWidget):
 
         button_box = QWidget()
         button_box_layout = QHBoxLayout()
-        add_button = QPushButton(translate("Add rule"))
+        add_button = QPushButton(translate("Add rules"))
         add_button.setToolTip("Add a new row above the selected row or at the end if no row is selected.\n"
                               "Click in the left margin to select a row.")
         add_button.clicked.connect(add_action)
@@ -676,6 +677,9 @@ class FilterPanel(QWidget):
 
     def copy_to_config(self, config_section: Mapping[str, str]):
         self.table_view.copy_to_config(config_section)
+
+    def clear_selection(self):
+        self.table_view.clearSelection()
 
 
 class FilterTableModel(QStandardItemModel):
@@ -704,8 +708,22 @@ class FilterValidationException(Exception):
 
 class FilterTableView(QTableView):
 
-    def __init__(self, config_section: Mapping[str, str]):
+    def __init__(self, config_section: Mapping[str, str], tooltip=""):
         super().__init__()
+        self.enable_tooltip = \
+            translate("Enable: rules can be selective enabled/disabled.")
+        self.rule_id_tooltip_1 = \
+            translate("Rule ID: a letter followed by letters, digits, underscores and hyphens")
+        self.rule_id_tooltip_2 = \
+            translate("A rule ID with a _regexp suffix denotes its pattern to be a regular expression.")
+        self.pattern_tooltip = \
+            translate("Pattern: Text or regexp to partially match in the journal entry's message field.")
+        tooltip += "\n\n" + translate("Columns:") + "\n" + \
+                   translate(f"    {self.enable_tooltip}\n") + \
+                   translate(f"    {self.rule_id_tooltip_1}\n") + \
+                   translate(f"          {self.rule_id_tooltip_2}\n") + \
+                   translate(f"    {self.pattern_tooltip}\n")
+        self.setToolTip(tooltip)
         self.setModel(FilterTableModel(len(config_section)))
         self.copy_from_config(config_section)
         self.setEditTriggers(QAbstractItemView.AllEditTriggers)
@@ -714,10 +732,11 @@ class FilterTableView(QTableView):
         self.verticalHeader().setDragDropMode(QAbstractItemView.InternalMove)
         self.setDragDropOverwriteMode(True)
         self.resizeColumnsToContents()
-        self.setToolTip(translate("To delete any rows, empty their Rule ID cells before clicking Apply."))
         self.setSelectionMode(QAbstractItemView.MultiSelection)
+        self.setSelectionBehavior(QAbstractItemView.SelectRows)
         # self.setItemDelegateForColumn(1, ColumnItemDelegate())
         self.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
+
 
     def item_view_order(self) -> List[int]:
         """
@@ -749,15 +768,14 @@ class FilterTableView(QTableView):
                 pass
             else:
                 enable_item = self.create_checkable_item()
+                enable_item.setToolTip(self.enable_tooltip)
                 enable_item_map[key + "_enabled"] = enable_item
                 model.setItem(row, 0, enable_item)
                 key_item = QStandardItem(key)
-                key_item.setToolTip(
-                    translate("A valid ID is a letter followed by letters, digits, underscores and hyphens\n") +
-                    translate("An ID with a _regexp suffix denotes its pattern to be a regular expression"))
+                key_item.setToolTip(self.rule_id_tooltip_1 + "\n" + self.rule_id_tooltip_2)
                 model.setItem(row, 1, key_item)
                 value_item = QStandardItem(value)
-                value_item.setToolTip("Text or regexp to match in the journal message field.")
+                value_item.setToolTip(self.pattern_tooltip)
                 model.setItem(row, 2, QStandardItem(value_item))
                 row += 1
         # Step two - check if any patterns should be disabled and toggle the appropriate checkable.
@@ -770,6 +788,7 @@ class FilterTableView(QTableView):
         enable_item = QStandardItem()
         enable_item.setCheckable(True)
         enable_item.setCheckState(Qt.Checked)
+        enable_item.setEditable(False)
         enable_item.setToolTip(translate("Enable/Disable"))
         return enable_item
 
@@ -847,11 +866,16 @@ class ConfigEditorWidget(QWidget):
         config = Config()
         config.refresh()
         options_panel = OptionsTab(config['options'])
-        tabs.addTab(options_panel, "Options")
-        match_panel = FilterPanel(config['match'])
-        tabs.addTab(match_panel, "Match Filters")
-        ignore_panel = FilterPanel(config['ignore'])
-        tabs.addTab(ignore_panel, "Ignore Filters")
+        tabs.addTab(options_panel, translate("Options"))
+        match_panel = FilterPanel(
+            config['match'],
+            tooltip=translate("Only issue notifications for journal-entry messages that match one of these rules.")
+        )
+        tabs.addTab(match_panel, translate("Match Filters"))
+        ignore_panel = FilterPanel(
+            config['ignore'],
+            tooltip=translate("Ignore journal-entry messages that match any of these rules."))
+        tabs.addTab(ignore_panel, translate("Ignore Filters"))
         self.setContextMenuPolicy(Qt.CustomContextMenu)
 
         button_box = QWidget()
@@ -871,6 +895,8 @@ class ConfigEditorWidget(QWidget):
                     match_panel.copy_to_config(config['match'])
                     ignore_panel.copy_to_config(config['ignore'])
                     config.save()
+                    match_panel.clear_selection()
+                    ignore_panel.clear_selection()
                     debug(f'ok')
             except FilterValidationException as e:
                 title, summary, text = e.args
@@ -910,6 +936,8 @@ class ConfigEditorWidget(QWidget):
             options_panel.copy_from_config(config['options'])
             match_panel.copy_from_config(config['match'])
             ignore_panel.copy_from_config(config['ignore'])
+            match_panel.clear_selection()
+            ignore_panel.clear_selection()
 
         revert_button.clicked.connect(revert_action)
 

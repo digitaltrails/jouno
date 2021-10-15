@@ -77,6 +77,12 @@ is available in the application-window and in the system-tray icon.
 
 * Configuration file in `$HOME/.config/jouno/journo.conf`
 
+Issues
+------
+
+KDE kwin-compositing has an ongoing CPU/responsiveness issue for notifications that are set to expire ([bug 436240](https://bugs.kde.org/show_bug.cgi?id=436240)).
+If this proves to be a problem, the ``jouno`` option notification_seconds can be set to zero, in 
+which case popup messages won't expire and will remain visible until dismissed.  
 
 Development
 -----------
