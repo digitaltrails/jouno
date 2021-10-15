@@ -34,7 +34,7 @@ Bursts of messages are handled by bundling them in to a single summarising notif
 ``jouno`` runs as a system-tray application.
 
 To get started with ``jouno``, you only need to download the ``jouno.py`` python script and
-check that the dependencies described below are in place. 
+check that the dependencies described below are in place.
 
 Configuration
 =============
