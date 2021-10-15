@@ -3,7 +3,7 @@
 jouno: Journal notifications forwarder
 ======================================
 
-A desktop journal-entry to desktop-notification forwarder.
+A Systemd Journal to Freedesktop Notifications forwarder with burst-handling and filtering.
 
 Usage:
 ======
@@ -25,11 +25,16 @@ Description
 ===========
 
 ``jouno`` A desktop journal-entry to desktop-notification forwarder with a range of filtering capabilities.
-The systemd-journal is continuously monitored for new entries which are then filtered to select those that
-need to be forwarded to the standard ``freedesktop`` ``dbus`` notifications interface.  Bursts of messages
-are handled by bundling them in to single summarising notification.
+The application monitors the systemd-journal for new entries, filters them, and forwards them to the
+standard ``freedesktop`` ``dbus`` notifications interface.  Typically desktops present notifications
+as popup messages.
+
+Bursts of messages are handled by bundling them in to a single summarising notification.
 
 ``jouno`` runs as a system-tray application.
+
+To get started with ``jouno``, you only need to download the ``jouno.py`` python script and
+check that the dependencies described below are in place. 
 
 Configuration
 =============
