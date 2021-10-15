@@ -66,8 +66,10 @@ The config files are in INI-format divided into a number of sections as outlined
 
         # The options section controls notice timeouts, burst treatment
         [options]
+        # Polling interval, how often to wait for journal entries between checking for config changes
+        poll_seconds = 2
         # Wait at lease burst_seconds before declaring a burst of messages to have finished
-        burst_seconds = 2
+        burst_seconds = 5
         # Only show the the first burst_truncate_messages of a burst
         burst_truncate_messages = 3
         # Set journo messages to timeout/auto-dismiss after notification-seconds
@@ -151,6 +153,7 @@ import os
 import pickle
 import re
 import select
+import time
 import traceback
 from enum import Enum
 from pathlib import Path
@@ -172,7 +175,8 @@ from systemd import journal
 
 DEFAULT_CONFIG = '''
 [options]
-burst_seconds = 2
+poll_seconds = 2
+burst_seconds = 5
 burst_truncate_messages = 3
 notification_seconds = 60
 debug_enabled = yes
@@ -186,6 +190,7 @@ qt_kde_binding_loop = Binding loop detected for property
 [match]
 
 '''
+
 
 # ######################## MONITOR SUB PROCESS CODE ###############################################################
 
@@ -222,6 +227,19 @@ def debug(*arg):
 
 def info(*arg):
     print('INFO:', *arg)
+
+
+xml_escape_table = str.maketrans({
+    "<": "&lt;",
+    ">": "&gt;",
+    "&": "&amp;",
+    "'": "&apos;",
+    '"': "&quot;",
+})
+
+
+def xmlesc(txt: str):
+    return txt.translate(xml_escape_table)
 
 
 class NotifyFreeDesktop:
@@ -290,7 +308,8 @@ class JournalWatcher:
         self.config: Config = None
         self.burst_truncate: int = 3
         self.polling_millis: int = 2000
-        self.notification_timeout: int = 60000
+        self.notification_timeout_millis: int = 60000
+        self.burst_max_millis = 10000
         self.ignore_regexp: Mapping[str, re] = {}
         self.match_regexp: Mapping[str, re] = {}
         self.update_config()
@@ -300,12 +319,14 @@ class JournalWatcher:
             self.config = Config()
         if not self.config.refresh():
             return
+        if 'poll_seconds' in self.config['options']:
+            self.polling_millis = 1000 * self.config.getint('options', 'poll_seconds')
         if 'burst_truncate_messages' in self.config['options']:
             self.burst_truncate = self.config.getint('options', 'burst_truncate_messages')
         if 'burst_seconds' in self.config['options']:
-            self.polling_millis = 1000 * self.config.getint('options', 'burst_seconds')
+            self.burst_max_millis = 1000 * self.config.getint('options', 'burst_seconds')
         if 'notification_seconds' in self.config['options']:
-            self.notification_timeout = 1000 * self.config.getint('options', 'notification_seconds')
+            self.notification_timeout_millis = 1000 * self.config.getint('options', 'notification_seconds')
         if 'debug' in self.config['options']:
             global debug_enabled
             debug_enabled = self.config.getboolean('options', 'debug')
@@ -427,7 +448,8 @@ class JournalWatcher:
             self.update_config()
             burst_count = 0
             notable = []
-            while journal_reader_poll.poll(self.polling_millis):
+            limit_time_ns = self.burst_max_millis * 1_000_000 + time.time_ns()
+            while journal_reader_poll.poll(self.polling_millis) and time.time_ns() < limit_time_ns:
                 if journal_reader.process() == journal.APPEND:
                     for journal_entry in journal_reader:
                         burst_count += 1
@@ -440,7 +462,7 @@ class JournalWatcher:
                                       summary=self.determine_summary(notable),
                                       message=self.determine_message(notable),
                                       priority=self.determine_priority(notable),
-                                      timeout=self.notification_timeout)
+                                      timeout=self.notification_timeout_millis)
 
 
 def translate(source_text: str):
@@ -478,19 +500,6 @@ more details.
 You should have received a copy of the GNU General Public License along
 with this program. If not, see <a href="https://www.gnu.org/licenses/">https://www.gnu.org/licenses/</a>.
 
-"""
-
-CONTRAST_SVG = b"""
-<svg xmlns="http://www.w3.org/2000/svg" version="1.1" viewBox="0 0 24 24" width="24" height="24">
-  <defs>
-    <style type="text/css" id="current-color-scheme">
-      .ColorScheme-Text { color:#232629; }
-    </style>
-  </defs>
-  <g transform="translate(1,1)">
-    <path style="fill:currentColor;fill-opacity:1;stroke:none" transform="translate(-1,-1)" d="m 12,7 c -2.761424,0 -5,2.2386 -5,5 0,2.7614 2.238576,5 5,5 2.761424,0 5,-2.2386 5,-5 0,-2.7614 -2.238576,-5 -5,-5 z m 0,1 v 8 C 9.790861,16 8,14.2091 8,12 8,9.7909 9.790861,8 12,8" class="ColorScheme-Text" id="path79" />
-  </g>
-</svg>
 """
 
 # https://www.svgrepo.com/svg/335387/filter
@@ -658,6 +667,7 @@ class FilterTableModel(QStandardItemModel):
         self.setHorizontalHeaderLabels(
             [translate("Enable"), translate("          Rule ID          "), translate("Pattern")])
 
+
 # class ColumnItemDelegate(QStyledItemDelegate):
 #     def createEditor(self, widget, option, index):
 #         if not index.isValid():
@@ -671,6 +681,7 @@ class FilterTableModel(QStandardItemModel):
 
 class FilterValidationException(Exception):
     pass
+
 
 class FilterTableView(QTableView):
 
@@ -750,7 +761,7 @@ class FilterTableView(QTableView):
             value = model.item(row_num, 2).text()
             if re.fullmatch("[a-zA-Z]([a-zA-Z0-9_-])*", key) is None:
                 raise FilterValidationException(
-                        self.__class__.__name__, "Invalid rule ID", f"ID='{key}'")
+                    self.__class__.__name__, "Invalid rule ID", f"ID='{key}'")
             if key.endswith("_enabled"):
                 pass
             elif key.endswith("_regexp"):
@@ -801,6 +812,7 @@ class FilterTableView(QTableView):
         for index in sorted(selected_row_indices, reverse=True):
             model.removeRow(index.row())
 
+
 class ConfigEditorWidget(QWidget):
 
     def __init__(self):
@@ -850,7 +862,6 @@ class ConfigEditorWidget(QWidget):
                 message.setStandardButtons(QMessageBox.Ok)
                 # message.setDetailedText()
                 message.exec()
-
 
         apply_button.clicked.connect(save_action)
 
