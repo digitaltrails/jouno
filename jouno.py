@@ -29,7 +29,7 @@ The systemd-journal is continuously monitored for new entries which are then fil
 need to be forwarded to the standard ``freedesktop`` ``dbus`` notifications interface.  Bursts of messages
 are handled by bundling them in to single summarising notification.
 
-``jouno`` runs in the system-tray.
+``jouno`` runs as a system-tray application.  
 
 Configuration
 =============
