@@ -584,6 +584,8 @@ class OptionsTab(QWidget):
             layout.addWidget(input_widget, row_number, 1, 1, 2, alignment=Qt.AlignLeft)
             self.option_map[option_id] = input_widget
             row_number += 1
+        # Add a spacer to force those above to scrunch up.
+        layout.addWidget(QWidget(), row_number, 1, 2, 2, alignment=Qt.AlignLeft)
         self.setLayout(layout)
 
     def copy_from_config(self, config_section: Mapping[str, str]):
@@ -801,6 +803,7 @@ class ConfigEditorWidget(QWidget):
         super().__init__()
         self.setWindowTitle(translate('Control Panel'))
         self.setMinimumWidth(1024)
+        self.setMinimumHeight(720)
         layout = QVBoxLayout()
         self.setLayout(layout)
         tabs = QTabWidget()
