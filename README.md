@@ -54,7 +54,7 @@ Dependencies
 All the following runtime dependencies are likely to be available pre-packaged on any modern Linux distribution 
 (``jouno`` was originally developed on OpenSUSE Tumbleweed).
 
-* python 3.8: ``journo`` is written in python and may depend on some features present only in 3.8 onward.
+* python 3.8: ``jouno`` is written in python and may depend on some features present only in 3.8 onward.
 * python 3.8 QtPy: the python GUI library used by ``jouno``.
 * python 3.8 systemd: python module for native access to the systemd facilities.
 * python 3.8 dbus: python module for dbus used for issuing notifications
@@ -85,15 +85,27 @@ The current options for installation are the following:
 Executing the program
 ---------------------
 
-  ``% python3 jouno.py``
+* If installed by the current user via the ``--install`` option, ``jouno`` should be in
+  the current user's application menu under **System**. The ``jouno`` command will be in ``$HOME/bin``.
+  If ``$HOME/bin`` is on the user's ``PATH``, ``jouno`` will be able to be run from the command
+  line:
+  ```
+  % jouno
+  ```
+* If the script has not been installed, it can still be run on the command line via the python interpreter, 
+  for example:\
+  ```
+  % python3 jouno.py``
+  ```
 
 Help
 ----
 
-Detailed help can be accessed by using the right mouse-button to bring up a context-menu.  Access to the context-menu
-is available in the application-window and in the system-tray icon.
+Detailed help can be accessed by using the right mouse-button to bring up a context-menu or --help on the 
+command line.  Access to the context-menu is available via a right-mouse click in both the application-window 
+and the system-tray icon.
 
-* Configuration file in `$HOME/.config/jouno/journo.conf`
+The configuration file is saved to `$HOME/.config/jouno/jouno.conf`
 
 Issues
 ------
@@ -105,7 +117,7 @@ which case popup messages won't expire and will remain visible until dismissed.
 Development
 -----------
 
-At this time there is only one real source file, ``journo.py``
+At this time there is only one real source file, ``jouno.py``
 
 My IDE for this project is [PyCharm Community Edition](https://www.jetbrains.com/pycharm/).
 
