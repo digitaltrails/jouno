@@ -75,7 +75,7 @@ The current options for installation are the following:
    % python3 jouno.py
    ```
 2. The script can be self installed as desktop application in the current user's desktop menu 
-   as *Applications->Settings->VDU Controls* by running:
+   as *Applications->System->jouno* by running:
    ```
     % python3 jouno.py --install
    ```
