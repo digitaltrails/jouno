@@ -36,7 +36,7 @@ it use include:
  * Raising general awareness of what is going on in the background.
 
 
-> I had previously wrote a gist called [notify-desktop](https://gist.github.com/digitaltrails/26aad3282d8739db1de8bc2e59c812eb).
+> I've also written a gist called [notify-desktop](https://gist.github.com/digitaltrails/26aad3282d8739db1de8bc2e59c812eb).
 > I use ``notify-desktop`` in root-owned timer-jobs so the jobs can raise notifications with 
 > the current desktop.  user.  While ``notify-desktop`` helps keep me informed about the
 > status of jobs I've written, ``jouno`` allows me to watch for and monitor all journaled 
