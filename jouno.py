@@ -1055,7 +1055,7 @@ class ContextMenu(QMenu):
         self.main_window = None
 
         toggle_action = self.addAction(
-            self.style().standardIcon(QStyle.SP_ComputerIcon),
+            self.style().standardIcon(QStyle.SP_BrowserStop),
             translate('Pause'),
             enable_action)
         self.addAction(self.style().standardIcon(QStyle.SP_MessageBoxInformation),
@@ -1072,7 +1072,12 @@ class ContextMenu(QMenu):
         def triggered(action: QAction):
             print('triggered', action.text(), toggle_action.text())
             if action == toggle_action:
-                action.setText(translate('Continue') if action.text() == translate("Pause") else translate("Pause"))
+                if action.text() == translate("Pause"):
+                    action.setText(translate('Continue'))
+                    action.setIcon(self.style().standardIcon(QStyle.SP_BrowserReload))
+                else:
+                    action.setText(translate("Pause"))
+                    action.setIcon(self.style().standardIcon(QStyle.SP_BrowserStop))
 
         self.triggered.connect(triggered)
 
