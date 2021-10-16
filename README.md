@@ -41,7 +41,7 @@ it use include:
 > the current desktop user.   While ``notify-desktop`` helps keep me informed about the
 > status of jobs I've written, ``jouno`` allows me to watch for and monitor all journaled 
 > activities.  ``jouno`` potentially removes the need for my jobs to use ``notify-desktop,`` 
-> My own jobs might now use more standard tools such as ``logger`` and ``systemd-cat``
+> my own jobs might now use more standard tools such as ``logger`` and ``systemd-cat``
 > and rely on ``jouno`` to forward these as desktop notifications.
 
 
