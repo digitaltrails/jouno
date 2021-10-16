@@ -40,9 +40,8 @@ it use include:
 > I use ``notify-desktop`` in root-owned timer-jobs so the jobs can raise notifications with 
 > the current desktop user.   While ``notify-desktop`` helps keep me informed about the
 > status of jobs I've written, ``jouno`` allows me to watch for and monitor all journaled 
-> activities.  ``jouno`` potentially removes the need for my jobs to use ``notify-desktop,`` 
-> my own jobs might now use more standard tools such as ``logger`` and ``systemd-cat``
-> and rely on ``jouno`` to forward these as desktop notifications.
+> activities.  My own jobs might now use more standard logging tools such as ``logger`` 
+> and ``systemd-cat`` and rely on ``jouno`` to raise any desktop notifications.
 
 
 Getting Started
