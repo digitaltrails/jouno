@@ -145,7 +145,7 @@ All the following runtime dependencies are likely to be available pre-packaged o
 * python 3.8 systemd: python module for native access to the systemd facilities.
 * python 3.8 dbus: python module for dbus used for issuing notifications
 
-Software installation on ``OpenSUSE``::
+Dependency installation on ``OpenSUSE``::
 
         zypper install python38-QtPy python38-systemd python38-dbus
 
