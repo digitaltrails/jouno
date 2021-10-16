@@ -12,8 +12,8 @@ This software is currently pre-release, It is feature complete and quite usable 
 
 ![Default](screen-shots/Screenshot_Large.png) 
 
-``jouno,`` is system-tray application for monitoring the ``systemd-journal.`` It raises selected 
-entries as desktop-notifications.
+``jouno`` is a system-tray application for monitoring the ``systemd-journal,`` it raises  desktop-notifications
+for journal entries selected according to filter patterns.
 
 The application monitors the ``systemd-journal`` for new entries, filters them, and forwards them as 
 standard ``freedesktop dbus notifications``.  Most linux desktops present these notifications
@@ -32,12 +32,17 @@ it use include:
  * Notifying access attempts, such as su, ssh, samba, or pam events.
  * Prevention of undesirable desktop activity, such as shutting down during the backups.
  * Detecting hardware events. 
+ * Providing new jobs with a simple way to raise desktop notifications.
  * Raising general awareness of what is going on in the background.
 
-I have previously released a gist [notify-desktop](https://gist.github.com/digitaltrails/26aad3282d8739db1de8bc2e59c812eb)
-that allows root batch-jobs, such as my daily backups, to raise notifications for the current desktop 
-user, but ``notify-desktop`` only covers my own code.  ``jouno`` allows me to watch for and monitor any
-jobs on the system and potentially removes the need for my jobs to use my ``notify-desktop`` script.
+
+> I had previously wrote a gist called [notify-desktop](https://gist.github.com/digitaltrails/26aad3282d8739db1de8bc2e59c812eb).
+> I use ``notify-desktop`` in root-owned timer-jobs so the jobs can raise notifications with 
+> the current desktop.  user.  While ``notify-desktop`` helps keep me informed about the
+> status of jobs I've written, ``jouno`` allows me to watch for and monitor all journaled 
+> activities.  ``jouno`` potentially removes the need for my jobs to use ``notify-desktop,`` 
+> My own jobs might now use more standard tools such as ``logger`` and ``systemd-cat``
+> and rely on ``jouno`` to forward these as desktop notifications.
 
 
 Getting Started

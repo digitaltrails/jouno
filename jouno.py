@@ -666,6 +666,7 @@ class FilterPanel(QWidget):
         button_box_layout.addWidget(del_button)
         button_box.setLayout(button_box_layout)
 
+        # TODO add a test rules button that pops up a testing dialog with an input field.
         layout = QVBoxLayout(self)
         layout.addWidget(self.table_view)
         layout.addWidget(button_box)
