@@ -3,7 +3,7 @@
 jouno: Journal notifications forwarder
 ======================================
 
-A Systemd Journal to Freedesktop Notifications forwarder with burst-handling and filtering.
+A Systemd-Journal to Freedesktop-Notifications forwarder with burst-handling and filtering.
 
 Usage:
 ======
@@ -170,7 +170,8 @@ with this program. If not, see <https://www.gnu.org/licenses/>.
 ----------
 
 """
-
+import argparse
+import base64
 import configparser
 import multiprocessing as mp
 import os
@@ -178,7 +179,9 @@ import pickle
 import re
 import select
 import signal
+import stat
 import sys
+import textwrap
 import time
 import traceback
 from enum import Enum
@@ -187,7 +190,8 @@ from typing import Mapping, Any, List, Type
 
 import dbus
 from PyQt5.QtCore import QCoreApplication, QProcess, Qt, QPoint
-from PyQt5.QtGui import QPixmap, QIcon, QImage, QPainter, QCursor, QStandardItemModel, QStandardItem, QIntValidator
+from PyQt5.QtGui import QPixmap, QIcon, QImage, QPainter, QCursor, QStandardItemModel, QStandardItem, QIntValidator, \
+    QPicture
 from PyQt5.QtSvg import QSvgRenderer
 from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QHBoxLayout, QMessageBox, QLineEdit, QLabel, \
     QPushButton, QSystemTrayIcon, QMenu, QStyle, QTextEdit, QDialog, QTabWidget, \
@@ -489,7 +493,7 @@ class JournalWatcher:
 
 def translate(source_text: str):
     """For future internationalization - recommended way to do this at this time."""
-    return QCoreApplication.translate('vdu_controls', source_text)
+    return QCoreApplication.translate('jouno', source_text)
 
 
 # ######################## USER INTERFACE CODE ######################################################################
@@ -535,36 +539,25 @@ FILTER_SVG_OLD = b"""
 </svg>
 """
 
-FILTER_SVG = b"""
+JOUNO_ICON_SVG = b"""
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">
-  <defs id="defs3051">
-    <style type="text/css" id="current-color-scheme">
-      .ColorScheme-Text {
-        color:#232629;
-      }
-      </style>
-  </defs>
- <path style="fill:currentColor;fill-opacity:1;stroke:none" 
-      d="M 4 2 L 4 3 L 13 3 L 13 13 L 4 13 L 4 14 L 13 14 L 14 14 L 14 3 L 14 2 L 7 2 z M 8 6 L 8 8 L 12 8 L 12 7 L 8 7 z M 8 8 L 8 10 L 12 10 L 12 9 L 8 9 z M 8 11 L 8 12 L 12 12 L 12 11 L 10 11 z "
+ <path fill="#232629" style="fill:currentColor;fill-opacity:1;stroke:none" 
+      d="M 4 2 L 4 3 L 13 3 L 13 13 L 4 13 L 4 14 L 13 14 L 14 14 L 14 3 L 14 2 L 7 2 z"
       class="ColorScheme-Text"
      />
+ <path fill="#3491e1" style="fill-opacity:1;stroke:none" 
+      d="M 8 6 L 8 8 L 12 8 L 12 7 L 8 7 z M 8 8 L 8 10 L 12 10 L 12 9 L 8 9 z M 8 11 L 8 12 L 12 12 L 12 11 L 10 11 z "
+      
+     />
+
 </svg>
 """
 # d="M 4 2 L 4 3 L 13 3 L 13 13 L 4 13 L 4 14 L 13 14 L 14 14 L 14 3 L 14 2 L 7 2 z M 7 6 L 7 8 L 12 8 L 12 7 L 7 7 z M 8 8 L 8 10 L 12 10 L 12 9 L 8 9 z M 9 11 L 9 12 L 12 12 L 12 11 L 10 11 z "
 # d = "M 4 2 L 4 3 L 13 3 L 13 13 L 4 13 L 4 14 L 13 14 L 14 14 L 14 3 L 14 2 L 7 2 z M 7 6 L 7 7 L 12 7 L 12 6 L 7 6 z M 8 8 L 8 9 L 12 9 L 12 8 L 8 8 z M 9 10 L 9 11 L 12 11 L 12 10 L 10 10 z "
 
-WINDOW_ICON_SVG = FILTER_SVG.replace(b'color:#232629;', b'color:#bbbbbb;')
+JOUNO_WINDOW_ICON_SVG = JOUNO_ICON_SVG.replace(b'#232629', b'#bbbbbb')
 
-FILTER_OFF_SVG_OLD = b"""
-<svg width="24px" height="24px" viewBox="0 -1 18 19" xmlns="http://www.w3.org/2000/svg">
-  <path fill="#da4453" d="M14.35 4.855L10 9.21v2.8c0 1.31-2 2.45-2 1.89V9.2L3.65 4.856a.476.476 0 0 1-.11-.54A.5.5 0 0 1 4 4h10a.5.5 0 0 1 .46.31.476.476 0 0 1-.11.545z"/>
-  <circle fill="#494c4e" cx="5" cy="1" r="1"/>
-  <circle fill="#494c4e" cx="13" cy="1" r="1"/>
-  <circle fill="#494c4e" cx="9" cy="1" r="1"/>
-</svg>
-"""
-
-FILTER_OFF_SVG = b"""
+JOUNO_PAUSED_ICON_SVG = b"""
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">
   <defs id="defs3051">
     <style type="text/css" id="current-color-scheme">
@@ -585,14 +578,20 @@ FILTER_OFF_SVG = b"""
 """
 
 
-def create_icon_from_svg_string(svg_str: bytes) -> QIcon:
-    """There is no QIcon option for loading SVG from a string, only from a SVG file, so roll our own."""
+def create_image_from_svg_string(svg_str: bytes) -> QImage:
+    """There is no QIcon option for loading QImage from a string, only from a SVG file, so roll our own."""
     renderer = QSvgRenderer(svg_str)
     image = QImage(64, 64, QImage.Format_ARGB32)
     image.fill(0x0)
     painter = QPainter(image)
     renderer.render(painter)
     painter.end()
+    return image
+
+
+def create_icon_from_svg_string(svg_str: bytes) -> QIcon:
+    """There is no QIcon option for loading SVG from a string, only from a SVG file, so roll our own."""
+    image = create_image_from_svg_string(svg_str)
     return QIcon(QPixmap.fromImage(image))
 
 
@@ -1081,9 +1080,6 @@ class ContextMenu(QMenu):
 
         self.triggered.connect(triggered)
 
-    def set_vdu_controls_main_window(self, main_window) -> None:
-        self.main_window = main_window
-
 
 def exception_handler(e_type, e_value, e_traceback):
     """Overarching error handler in case something unexpected happens."""
@@ -1106,9 +1102,9 @@ def user_interface():
 
     app = QApplication(sys.argv)
 
-    window_icon = create_icon_from_svg_string(WINDOW_ICON_SVG)
-    watch_on_icon = create_icon_from_svg_string(FILTER_SVG)
-    watch_off_icon = create_icon_from_svg_string(FILTER_OFF_SVG)
+    window_icon = create_icon_from_svg_string(JOUNO_WINDOW_ICON_SVG)
+    watch_on_icon = create_icon_from_svg_string(JOUNO_ICON_SVG)
+    watch_off_icon = create_icon_from_svg_string(JOUNO_PAUSED_ICON_SVG)
 
     def toggle_watcher() -> None:
         global watcher_process
@@ -1195,8 +1191,103 @@ def stop_watch_journal():
         print(f"terminated watcher PID={watcher_process.pid} exit code={watcher_process.exitcode}")
 
 
+def install_as_desktop_application(uninstall: bool = False):
+    """Self install this script in the current Linux user's bin directory and desktop applications->settings menu."""
+    desktop_dir = Path.home().joinpath('.local', 'share', 'applications')
+    icon_dir = Path.home().joinpath('.local', 'share', 'icons')
+    if not desktop_dir.exists():
+        print(f"ERROR: No desktop directory is present:{desktop_dir.as_posix()}"
+              " Cannot proceed - is this a non-standard desktop?")
+        return
+
+    bin_dir = Path.home().joinpath('bin')
+    if not bin_dir.is_dir():
+        print(f"WARNING: creating:{bin_dir.as_posix()}")
+        os.mkdir(bin_dir)
+
+    if not icon_dir.is_dir():
+        print(f"WARNING: creating:{icon_dir.as_posix()}")
+        os.mkdir(icon_dir)
+
+    installed_script_path = bin_dir.joinpath("jouno")
+    desktop_definition_path = desktop_dir.joinpath("jouno.desktop")
+    icon_path = icon_dir.joinpath("jouno.png")
+
+    if uninstall:
+        os.remove(installed_script_path)
+        print(f'INFO: removed {installed_script_path.as_posix()}')
+        os.remove(desktop_definition_path)
+        print(f'INFO: removed {desktop_definition_path.as_posix()}')
+        os.remove(icon_path)
+        print(f'INFO: removed {icon_path.as_posix()}')
+        return
+
+    if installed_script_path.exists():
+        print(f"WARNING: skipping installation of {installed_script_path.as_posix()}, it is already present.")
+    else:
+        source = open(__file__).read()
+        source = source.replace("#!/usr/bin/python3", '#!' + sys.executable)
+        print(f'INFO: creating {installed_script_path.as_posix()}')
+        open(installed_script_path, 'w').write(source)
+        print(f'INFO: chmod u+rwx {installed_script_path.as_posix()}')
+        os.chmod(installed_script_path, stat.S_IRWXU)
+
+    if desktop_definition_path.exists():
+        print(f"WARNING: skipping installation of {desktop_definition_path.as_posix()}, it is already present.")
+    else:
+        print(f'INFO: creating {desktop_definition_path.as_posix()}')
+        desktop_definition = textwrap.dedent(f"""
+            [Desktop Entry]
+            Type=Application
+            Exec={installed_script_path.as_posix()}
+            Name=jouno
+            GenericName=juno
+            Comment=A Systemd-Journal to Freedesktop-Notifications forwarder.
+            Icon={icon_path.as_posix()}
+            Categories=Qt;System;Monitor;System;
+            """)
+        open(desktop_definition_path, 'w').write(desktop_definition)
+
+    if icon_path.exists():
+        print(f"WARNING: skipping installation of {icon_path.as_posix()}, it is already present.")
+    else:
+        print(f'INFO: creating {icon_path.as_posix()}')
+        create_image_from_svg_string(JOUNO_ICON_SVG).save(icon_path.as_posix())
+
+    print('INFO: installation complete. Your desktop->applications->system should now contain jouno')
+
+
+def parse_args():
+    args = sys.argv[1:]
+    parser = argparse.ArgumentParser(
+        description="A Systemd-Journal to Freedesktop-Notifications forwarder",
+        formatter_class=argparse.RawTextHelpFormatter)
+    parser.epilog = textwrap.dedent(f"""
+            """)
+    parser.add_argument('--detailed-help', default=False, action='store_true',
+                        help='Detailed help (in markdown format).')
+    parser.add_argument('--debug', default=False, action='store_true', help='enable debug output to stdout')
+    parser.add_argument('--install', action='store_true',
+                        help="installs the jouno application in the current user's path and desktop application menu.")
+    parser.add_argument('--uninstall', action='store_true',
+                        help='uninstalls the jouno application menu file and script for the current user.')
+    parsed_args = parser.parse_args(args=args)
+    if parsed_args.install:
+        install_as_desktop_application()
+        sys.exit()
+    if parsed_args.uninstall:
+        install_as_desktop_application(uninstall=True)
+        sys.exit()
+    if parsed_args.detailed_help:
+        print(__doc__)
+        sys.exit()
+
+
 def main():
     signal.signal(signal.SIGINT, signal.SIG_DFL)
+
+    args = parse_args()
+
     start_watch_journal()
     user_interface()
 

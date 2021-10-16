@@ -68,6 +68,20 @@ Installing
 
 As previously stated, the ``jouno.py`` script is only file required beyond the prerequisites. 
 
+The current options for installation are the following:
+
+1. The script can be run without installation by using a python interpreter, for example:
+   ```
+   % python3 jouno.py
+   ```
+2. The script can be self installed as desktop application in the current user's desktop menu 
+   as *Applications->Settings->VDU Controls* by running:
+   ```
+    % python3 jouno.py --install
+   ```
+      Depending on which desktop you're running menu changes may require logout before they become visible.
+
+
 Executing the program
 ---------------------
 
