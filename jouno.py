@@ -26,8 +26,6 @@ Description
 
 This software is currently pre-release, It is feature complete and quite usable but may lack some polish.
 
-![Default](screen-shots/Screenshot_Large.png)
-
 ``jouno,`` is system-tray application for monitoring the ``systemd-journal.`` It raises selected
 entries as desktop-notifications.
 
@@ -81,7 +79,7 @@ in response to notices being posted.
 Config files
 ------------------------------------
 
-The config files are in INI-format divided into a number of sections as outlined below:
+The config files are in INI-format divided into a number of sections as outlined below::
 
         # The options section controls notice timeouts, burst treatment
         [options]
@@ -139,11 +137,17 @@ Examples
 Prerequisites
 =============
 
-Described for OpenSUSE, similar for other distros:
+All the following runtime dependencies are likely to be available pre-packaged on any modern Linux distribution
+(``jouno`` was originally developed on OpenSUSE Tumbleweed).
 
-Software::
+* python 3.8: ``journo`` is written in python and may depend on some features present only in 3.8 onward.
+* python 3.8 QtPy: the python GUI library used by ``jouno``.
+* python 3.8 systemd: python module for native access to the systemd facilities.
+* python 3.8 dbus: python module for dbus used for issuing notifications
 
-        zypper install python38-QtPy python38-systemd
+Software installation on ``OpenSUSE``::
+
+        zypper install python38-QtPy python38-systemd python38-dbus
 
 
 jouno Copyright (C) 2021 Michael Hamilton
@@ -168,28 +172,27 @@ with this program. If not, see <https://www.gnu.org/licenses/>.
 """
 
 import configparser
+import multiprocessing as mp
 import os
 import pickle
 import re
 import select
+import signal
+import sys
 import time
 import traceback
 from enum import Enum
 from pathlib import Path
 from typing import Mapping, Any, List, Type
-import signal
-import sys
-import multiprocessing as mp
 
-from PyQt5.QtCore import QCoreApplication, QProcess, Qt, QPoint, QAbstractTableModel, QModelIndex, QRegExp
-from PyQt5.QtGui import QPixmap, QIcon, QImage, QPainter, QCursor, QStandardItemModel, QStandardItem, QIntValidator, \
-    QRegExpValidator, QHideEvent
-from PyQt5.QtSvg import QSvgWidget, QSvgRenderer
-from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QHBoxLayout, QSlider, QMessageBox, QLineEdit, QLabel, \
-    QSplashScreen, QPushButton, QProgressBar, QComboBox, QSystemTrayIcon, QMenu, QStyle, QTextEdit, QDialog, QTabWidget, \
-    QCheckBox, QPlainTextEdit, QGridLayout, QSizePolicy, QAction, QTableWidget, QTableWidgetItem, QTableView, \
-    QAbstractItemView, QHeaderView, QStyledItemDelegate
 import dbus
+from PyQt5.QtCore import QCoreApplication, QProcess, Qt, QPoint
+from PyQt5.QtGui import QPixmap, QIcon, QImage, QPainter, QCursor, QStandardItemModel, QStandardItem, QIntValidator
+from PyQt5.QtSvg import QSvgRenderer
+from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QHBoxLayout, QMessageBox, QLineEdit, QLabel, \
+    QPushButton, QSystemTrayIcon, QMenu, QStyle, QTextEdit, QDialog, QTabWidget, \
+    QCheckBox, QGridLayout, QAction, QTableView, \
+    QAbstractItemView, QHeaderView
 from systemd import journal
 
 DEFAULT_CONFIG = '''
@@ -326,9 +329,9 @@ class JournalWatcher:
     def __init__(self):
         self.config: Config = None
         self.burst_truncate: int = 3
-        self.polling_millis: int = 2000
-        self.notification_timeout_millis: int = 60000
-        self.burst_max_millis = 10000
+        self.polling_millis: int = 2_000
+        self.notification_timeout_millis: int = 60_000
+        self.burst_max_millis = 10_000
         self.ignore_regexp: Mapping[str, re] = {}
         self.match_regexp: Mapping[str, re] = {}
         self.update_config()
@@ -339,13 +342,13 @@ class JournalWatcher:
         if not self.config.refresh():
             return
         if 'poll_seconds' in self.config['options']:
-            self.polling_millis = 1000 * self.config.getint('options', 'poll_seconds')
+            self.polling_millis = 1_000 * self.config.getint('options', 'poll_seconds')
         if 'burst_truncate_messages' in self.config['options']:
             self.burst_truncate = self.config.getint('options', 'burst_truncate_messages')
         if 'burst_seconds' in self.config['options']:
-            self.burst_max_millis = 1000 * self.config.getint('options', 'burst_seconds')
+            self.burst_max_millis = 1_000 * self.config.getint('options', 'burst_seconds')
         if 'notification_seconds' in self.config['options']:
-            self.notification_timeout_millis = 1000 * self.config.getint('options', 'notification_seconds')
+            self.notification_timeout_millis = 1_000 * self.config.getint('options', 'notification_seconds')
         if 'debug' in self.config['options']:
             global debug_enabled
             debug_enabled = self.config.getboolean('options', 'debug')
@@ -491,11 +494,11 @@ def translate(source_text: str):
 
 # ######################## USER INTERFACE CODE ######################################################################
 
-jouno_VERSION = '0.9.0'
+JOUNO_VERSION = '0.9.0'
 
 ABOUT_TEXT = f"""
 
-<b>jouno version {jouno_VERSION}</b>
+<b>jouno version {JOUNO_VERSION}</b>
 <p>
 A journal-entry to desktop-notification forwarder. 
 <p>
@@ -688,19 +691,8 @@ class FilterTableModel(QStandardItemModel):
         super().__init__(number_of_rows, 3)
         # use spaces to force a wider column - seems to be no other EASY way to do this.
         self.setHorizontalHeaderLabels(
-            [translate("Enable"), translate("          Rule ID          "), translate("Pattern")])
+            [translate("Enable"), translate(f"          Rule ID          "), translate("Pattern")])
 
-
-# class ColumnItemDelegate(QStyledItemDelegate):
-#     def createEditor(self, widget, option, index):
-#         if not index.isValid():
-#             return 0
-#         if index.column() == 0: #only on the cells in the first column
-#             editor = QLineEdit(widget)
-#             validator = QRegExpValidator(QRegExp("\d{11}"), editor)
-#             editor.setValidator(validator)
-#             return editor
-#         return super(ColumnItemDelegate, self).createEditor(widget, option, index)
 
 class FilterValidationException(Exception):
     pass
@@ -736,7 +728,6 @@ class FilterTableView(QTableView):
         self.setSelectionBehavior(QAbstractItemView.SelectRows)
         # self.setItemDelegateForColumn(1, ColumnItemDelegate())
         self.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
-
 
     def item_view_order(self) -> List[int]:
         """
@@ -1106,6 +1097,8 @@ def exception_handler(e_type, e_value, e_traceback):
 def user_interface():
     sys.excepthook = exception_handler
 
+    app_name = translate('Jouno - journal notifications')
+
     app = QApplication(sys.argv)
 
     window_icon = create_icon_from_svg_string(WINDOW_ICON_SVG)
@@ -1117,9 +1110,11 @@ def user_interface():
         if watcher_process.is_alive():
             stop_watch_journal()
             tray.setIcon(watch_off_icon)
+            tray.setToolTip(f"{app_name} - {translate('Paused')}")
         else:
             start_watch_journal()
             tray.setIcon(watch_on_icon)
+            tray.setToolTip(app_name)
 
     def quit_action():
         stop_watch_journal()
@@ -1136,7 +1131,8 @@ def user_interface():
     tray.setContextMenu(app_context_menu)
 
     app.setWindowIcon(window_icon)
-    app.setApplicationDisplayName(translate('Journal Notification Forwarder'))
+    app.setApplicationDisplayName(app_name)
+    app.setApplicationVersion(JOUNO_VERSION)
 
     def open_context_menu(position: QPoint) -> None:
         print("context menu")

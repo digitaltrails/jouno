@@ -52,11 +52,12 @@ Dependencies
 ------------
 
 All the following runtime dependencies are likely to be available pre-packaged on any modern Linux distribution 
-(``vdu_controls`` was originally developed on OpenSUSE Tumbleweed).
+(``jouno`` was originally developed on OpenSUSE Tumbleweed).
 
 * python 3.8: ``journo`` is written in python and may depend on some features present only in 3.8 onward.
-* python 3.8 QtPy: the python GUI library used by ``vdu_controls``.
+* python 3.8 QtPy: the python GUI library used by ``jouno``.
 * python 3.8 systemd: python module for native access to the systemd facilities.
+* python 3.8 dbus: python module for dbus used for issuing notifications
 
 
 Installing
