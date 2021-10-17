@@ -212,9 +212,7 @@ with this program. If not, see <https://www.gnu.org/licenses/>.
 
 """
 import argparse
-import base64
 import configparser
-import multiprocessing as mp
 import os
 import pickle
 import re
@@ -230,16 +228,15 @@ from pathlib import Path
 from typing import Mapping, Any, List, Type
 
 import dbus
-from PyQt5.QtCore import QCoreApplication, QProcess, Qt, QPoint, pyqtSignal, QThread, QRunnable, QMetaObject, Q_ARG, \
-    pyqtSlot, QThreadPool, QModelIndex
-from PyQt5.QtGui import QPixmap, QIcon, QImage, QPainter, QCursor, QStandardItemModel, QStandardItem, QIntValidator, \
-    QPicture
+from systemd import journal
+
+from PyQt5.QtCore import QCoreApplication, QProcess, Qt, QPoint, pyqtSignal, QThread
+from PyQt5.QtGui import QPixmap, QIcon, QImage, QPainter, QCursor, QStandardItemModel, QStandardItem, QIntValidator
 from PyQt5.QtSvg import QSvgRenderer
-from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QHBoxLayout, QMessageBox, QLineEdit, QLabel, \
+from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QMessageBox, QLineEdit, QLabel, \
     QPushButton, QSystemTrayIcon, QMenu, QStyle, QTextEdit, QDialog, QTabWidget, \
     QCheckBox, QGridLayout, QAction, QTableView, \
     QAbstractItemView, QHeaderView, QSplitter
-from systemd import journal
 
 DEFAULT_CONFIG = '''
 [options]
@@ -372,7 +369,7 @@ class Config(configparser.ConfigParser):
 
 class JournalWatcher:
 
-    def __init__(self, supervisor = None):
+    def __init__(self, supervisor=None):
         self.config: Config = None
         self.burst_truncate: int = 3
         self.polling_millis: int = 2_000
@@ -490,7 +487,7 @@ class JournalWatcher:
     def is_notable(self, journal_entry: Mapping[str, Any]):
         # Is a list comprehension slower than a for-loop for string construction?
         # Use an easy a format that is easy to pattern match
-        fields_str = ', '.join((f"'{key}={str(value)}'" for key,value in journal_entry.items()))
+        fields_str = ', '.join((f"'{key}={str(value)}'" for key, value in journal_entry.items()))
         debug(fields_str)
         for rule_id, match_re in self.match_regexp.items():
             if match_re.search(fields_str) is not None:
@@ -508,7 +505,7 @@ class JournalWatcher:
     def is_stop_requested(self) -> bool:
         return self.supervisor.isInterruptionRequested()
 
-    def watch_journal(self, entry_callback = None):
+    def watch_journal(self, entry_callback=None):
         self._stop = False
         notify = NotifyFreeDesktop()
 
@@ -544,7 +541,6 @@ class JournalWatcher:
                                       message=self.determine_message(notable),
                                       priority=self.determine_priority(notable),
                                       timeout=self.notification_timeout_millis)
-
 
 
 def translate(source_text: str):
@@ -702,8 +698,6 @@ class FilterPanel(QWidget):
         print("table", str(config_section.keys()))
 
         self.table_view = FilterTableView(config_section, tooltip)
-
-
 
         # TODO add a test rules button that pops up a testing dialog with an input field.
         layout = QVBoxLayout(self)
@@ -891,7 +885,6 @@ class FilterTableView(QTableView):
 
 
 class JournalWatcherTask(QThread):
-
     signal_new_entry = pyqtSignal(dict)
 
     def __init__(self) -> None:
@@ -909,11 +902,11 @@ def title(widget: QLabel) -> QLabel:
     widget.setStyleSheet("font-weight: bold;")
     return widget
 
+
 class ConfigWidget(QWidget):
 
     def __init__(self):
         super().__init__()
-
 
         layout = QVBoxLayout()
         self.setLayout(layout)
@@ -932,8 +925,6 @@ class ConfigWidget(QWidget):
         ignore_panel = FilterPanel(
             config['ignore'],
             tooltip=translate("Ignore journal-entry messages that match any of these rules."))
-
-
 
         button_box = QWidget()
         button_box_layout = QGridLayout()
@@ -1044,6 +1035,7 @@ class ConfigWidget(QWidget):
         self.raise_()
         self.activateWindow()
 
+
 class MainWindow(QWidget):
 
     def __init__(self, journal_watcher_task: JournalWatcherTask):
@@ -1064,7 +1056,7 @@ class MainWindow(QWidget):
 
 class JournalPanel(QWidget):
 
-    def __init__(self,  journal_watcher_task: JournalWatcherTask):
+    def __init__(self, journal_watcher_task: JournalWatcherTask):
         super().__init__()
 
         self.table_view = JournalTableView(journal_watcher_task)
@@ -1096,7 +1088,7 @@ class JournalPanel(QWidget):
         layout = QVBoxLayout(self)
         layout.addWidget(title(QLabel(translate("Recently notified journal events"))))
         layout.addWidget(self.table_view)
-        #layout.addWidget(button_box)
+        # layout.addWidget(button_box)
         self.setLayout(layout)
 
 
@@ -1120,8 +1112,8 @@ class JournalTableView(QTableView):
         self.setColumnWidth(3, 5 * 14)
         self.horizontalHeader().setSectionResizeMode(4, QHeaderView.Stretch)
 
-        #self.setGridStyle(Qt.NoPen)
-        #self.setShowGrid(False)
+        # self.setGridStyle(Qt.NoPen)
+        # self.setShowGrid(False)
 
         def new_entry(journal_entry):
             debug(f">>>>>>>>>>>>>>>>>>>>>>>>>>>Received{os.getpid()}{journal_entry}")
@@ -1146,6 +1138,7 @@ class JournalTableView(QTableView):
 
         journal_watcher_task.signal_new_entry.connect(new_entry)
 
+
 class JournalTableModel(QStandardItemModel):
 
     def __init__(self, number_of_rows: int):
@@ -1153,9 +1146,6 @@ class JournalTableModel(QStandardItemModel):
         # use spaces to force a wider column - seems to be no other EASY way to do this.
         self.setHorizontalHeaderLabels(
             [translate("Time"), translate("Host"), translate("Source"), translate("PID"), translate("Message")])
-
-
-
 
 
 class DialogSingletonMixin:
