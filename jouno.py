@@ -231,14 +231,14 @@ from typing import Mapping, Any, List, Type
 
 import dbus
 from PyQt5.QtCore import QCoreApplication, QProcess, Qt, QPoint, pyqtSignal, QThread, QRunnable, QMetaObject, Q_ARG, \
-    pyqtSlot, QThreadPool
+    pyqtSlot, QThreadPool, QModelIndex
 from PyQt5.QtGui import QPixmap, QIcon, QImage, QPainter, QCursor, QStandardItemModel, QStandardItem, QIntValidator, \
     QPicture
 from PyQt5.QtSvg import QSvgRenderer
 from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QHBoxLayout, QMessageBox, QLineEdit, QLabel, \
     QPushButton, QSystemTrayIcon, QMenu, QStyle, QTextEdit, QDialog, QTabWidget, \
     QCheckBox, QGridLayout, QAction, QTableView, \
-    QAbstractItemView, QHeaderView
+    QAbstractItemView, QHeaderView, QSplitter
 from systemd import journal
 
 DEFAULT_CONFIG = '''
@@ -703,29 +703,11 @@ class FilterPanel(QWidget):
 
         self.table_view = FilterTableView(config_section, tooltip)
 
-        def add_action():
-            self.table_view.append_new_config_rule()
 
-        def del_action():
-            self.table_view.delete_selected_rows()
-
-        button_box = QWidget()
-        button_box_layout = QHBoxLayout()
-        add_button = QPushButton(translate("Add rules"))
-        add_button.setToolTip("Add a new row above the selected row or at the end if no row is selected.\n"
-                              "Click in the left margin to select a row.")
-        add_button.clicked.connect(add_action)
-        button_box_layout.addWidget(add_button)
-        del_button = QPushButton(translate("Delete rules"))
-        del_button.setToolTip("Remove selected rows. Click in the left margin to select some rows.")
-        del_button.clicked.connect(del_action)
-        button_box_layout.addWidget(del_button)
-        button_box.setLayout(button_box_layout)
 
         # TODO add a test rules button that pops up a testing dialog with an input field.
         layout = QVBoxLayout(self)
         layout.addWidget(self.table_view)
-        layout.addWidget(button_box)
         self.setLayout(layout)
 
     def is_valid(self):
@@ -739,6 +721,12 @@ class FilterPanel(QWidget):
 
     def clear_selection(self):
         self.table_view.clearSelection()
+
+    def add_rule(self):
+        self.table_view.add_new_rule()
+
+    def delete_rules(self):
+        self.table_view.delete_selected_rules()
 
 
 class FilterTableModel(QStandardItemModel):
@@ -871,17 +859,21 @@ class FilterTableView(QTableView):
             if model.item(row_num, 0).checkState() == Qt.Unchecked:
                 config_section[key + "_enabled"] = "no"
 
-    def append_new_config_rule(self):
+    def add_new_rule(self):
         model = self.model()
         enable_item = self.create_checkable_item()
         selected_row_indices = self.selectionModel().selectedRows()
         if len(selected_row_indices) > 0:
             index = sorted(selected_row_indices)[0]
             model.insertRow(index.row(), [enable_item, QStandardItem(''), QStandardItem('')])
+            self.scrollTo(index)
+            self.clearSelection()
+            self.selectRow(index.row())
         else:
-            self.model().appendRow([enable_item, QStandardItem(''), QStandardItem('')])
+            model.appendRow([enable_item, QStandardItem(''), QStandardItem('')])
+            self.scrollToBottom()
 
-    def delete_selected_rows(self):
+    def delete_selected_rules(self):
         model = self.model()
         selected_row_indices = self.selectionModel().selectedRows()
         if len(selected_row_indices) == 0:
@@ -913,21 +905,22 @@ class JournalWatcherTask(QThread):
         self.signal_new_entry.emit(journal_entry)
 
 
-class JounoMainWidget(QWidget):
+def title(widget: QLabel) -> QLabel:
+    widget.setStyleSheet("font-weight: bold;")
+    return widget
 
-    def __init__(self, journal_watcher_task: JournalWatcherTask):
+class ConfigWidget(QWidget):
+
+    def __init__(self):
         super().__init__()
-        self.setWindowTitle(translate('Control Panel'))
-        self.setMinimumWidth(1024)
-        self.setMinimumHeight(720)
+
+
         layout = QVBoxLayout()
         self.setLayout(layout)
         tabs = QTabWidget()
-        layout.addWidget(tabs)
 
         config = Config()
         config.refresh()
-        journal_panel = JournalPanel(journal_watcher_task)
 
         options_panel = OptionsTab(config['options'])
 
@@ -940,16 +933,33 @@ class JounoMainWidget(QWidget):
             config['ignore'],
             tooltip=translate("Ignore journal-entry messages that match any of these rules."))
 
-        self.setContextMenuPolicy(Qt.CustomContextMenu)
+
 
         button_box = QWidget()
-        button_box_layout = QHBoxLayout()
+        button_box_layout = QGridLayout()
         button_box.setLayout(button_box_layout)
         apply_button = QPushButton(translate("Apply"))
         revert_button = QPushButton(translate("Revert"))
 
-        button_box_layout.addWidget(apply_button)
-        button_box_layout.addWidget(revert_button)
+        def add_action():
+            tabs.currentWidget().add_rule()
+
+        def del_action():
+            tabs.currentWidget().delete_rules()
+
+        add_button = QPushButton(translate("Add rules"))
+        add_button.setToolTip("Add a new row above the selected row or at the end if no row is selected.\n"
+                              "Click in the left margin to select a row.")
+        add_button.clicked.connect(add_action)
+        del_button = QPushButton(translate("Delete rules"))
+        del_button.setToolTip("Remove selected rows. Click in the left margin to select some rows.")
+        del_button.clicked.connect(del_action)
+
+        button_box_layout.addWidget(apply_button, 0, 0)
+        button_box_layout.addWidget(revert_button, 0, 1)
+        button_box_layout.setColumnMinimumWidth(3, 200)
+        button_box_layout.addWidget(add_button, 0, 4)
+        button_box_layout.addWidget(del_button, 0, 5)
 
         def save_action():
             debug("Apply")
@@ -1008,13 +1018,15 @@ class JounoMainWidget(QWidget):
         tabs.addTab(ignore_panel, translate("Ignore Filters"))
         tabs.addTab(match_panel, translate("Match Filters"))
         tabs.addTab(options_panel, translate("Options"))
-        tabs.addTab(journal_panel, translate("Recent Entries"))
         tabs.setCurrentIndex(0)
-        button_box.show()
+
+        layout.addWidget(title(QLabel("Configuration")))
+        layout.addWidget(tabs)
         layout.addWidget(button_box)
 
         def tab_change(tab_number):
-            button_box.hide() if tab_number == 3 else button_box.show()
+            add_button.setEnabled(tab_number != 2)
+            del_button.setEnabled(tab_number != 2)
 
         tabs.currentChanged.connect(tab_change)
 
@@ -1031,6 +1043,24 @@ class JounoMainWidget(QWidget):
         self.show()
         self.raise_()
         self.activateWindow()
+
+class MainWindow(QWidget):
+
+    def __init__(self, journal_watcher_task: JournalWatcherTask):
+        super().__init__()
+        self.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.setWindowTitle(translate('Control Panel'))
+        self.setMinimumWidth(1200)
+        self.setMinimumHeight(1000)
+        splitter = QSplitter()
+        splitter.setOrientation(Qt.Vertical)
+        layout = QVBoxLayout()
+        splitter.setStyleSheet("QSplitter::handle{background: #333333;}")
+        splitter.addWidget(JournalPanel(journal_watcher_task))
+        splitter.addWidget(ConfigWidget())
+        layout.addWidget(splitter)
+        self.setLayout(layout)
+
 
 class JournalPanel(QWidget):
 
@@ -1064,6 +1094,7 @@ class JournalPanel(QWidget):
 
         # TODO add a test rules button that pops up a testing dialog with an input field.
         layout = QVBoxLayout(self)
+        layout.addWidget(title(QLabel(translate("Recently notified journal events"))))
         layout.addWidget(self.table_view)
         #layout.addWidget(button_box)
         self.setLayout(layout)
@@ -1074,7 +1105,7 @@ class JournalTableView(QTableView):
     def __init__(self, journal_watcher_task: JournalWatcherTask):
         super().__init__()
         self.setToolTip(translate("Blah."))
-        self.setModel(JournalTableModel(number_of_rows=0, journal_watcher_task=journal_watcher_task))
+        self.setModel(JournalTableModel(number_of_rows=0))
         self.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.verticalHeader().setSectionsMovable(False)
         self.verticalHeader().setDragEnabled(False)
@@ -1083,36 +1114,49 @@ class JournalTableView(QTableView):
         self.resizeColumnsToContents()
         self.setSelectionMode(QAbstractItemView.MultiSelection)
         self.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.setColumnWidth(0, 8 * 16)
-        self.setColumnWidth(1, 10 * 16)
-        self.setColumnWidth(2, 10 * 16)
-        self.setColumnWidth(3, 5 * 16)
+        self.setColumnWidth(0, 8 * 14)
+        self.setColumnWidth(1, 10 * 14)
+        self.setColumnWidth(2, 10 * 14)
+        self.setColumnWidth(3, 5 * 14)
         self.horizontalHeader().setSectionResizeMode(4, QHeaderView.Stretch)
 
+        #self.setGridStyle(Qt.NoPen)
+        #self.setShowGrid(False)
+
+        def new_entry(journal_entry):
+            debug(f">>>>>>>>>>>>>>>>>>>>>>>>>>>Received{os.getpid()}{journal_entry}")
+            model = self.model()
+            while model.rowCount() > 100:
+                model.removeRow(0)
+
+            def align_right(item: QStandardItem):
+                item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                return item
+
+            model.appendRow(
+                [
+                    align_right(QStandardItem(f"{journal_entry['__REALTIME_TIMESTAMP']:%H:%M:%S}")),
+                    QStandardItem(journal_entry['_HOSTNAME']),
+                    # TODO smarter choice of source value
+                    QStandardItem(journal_entry['_COMM'] if '_COMM' in journal_entry else 'unknown'),
+                    align_right(QStandardItem(str(journal_entry['_PID']))),
+                    QStandardItem(journal_entry['MESSAGE'])
+                ])
+            self.scrollToBottom()
+
+        journal_watcher_task.signal_new_entry.connect(new_entry)
 
 class JournalTableModel(QStandardItemModel):
 
-    def __init__(self, number_of_rows: int, journal_watcher_task: JournalWatcherTask):
+    def __init__(self, number_of_rows: int):
         super().__init__(number_of_rows, 5)
         # use spaces to force a wider column - seems to be no other EASY way to do this.
         self.setHorizontalHeaderLabels(
             [translate("Time"), translate("Host"), translate("Source"), translate("PID"), translate("Message")])
 
-        def new_entry(journal_entry):
-            debug(f">>>>>>>>>>>>>>>>>>>>>>>>>>>Received{os.getpid()}{journal_entry}")
-            while self.rowCount() > 100:
-                self.removeRow(0)
-            self.appendRow(
-                [
-                    QStandardItem(f"{journal_entry['__REALTIME_TIMESTAMP']:%H:%M:%S}"),
-                    QStandardItem(journal_entry['_HOSTNAME']),
-                    # TODO smarter choice of source value
-                    QStandardItem(journal_entry['_COMM'] if '_COMM' in journal_entry else 'unknown'),
-                    QStandardItem(str(journal_entry['_PID'])),
-                    QStandardItem(journal_entry['MESSAGE'])
-                ])
 
-        journal_watcher_task.signal_new_entry.connect(new_entry)
+
+
 
 class DialogSingletonMixin:
     """
@@ -1305,7 +1349,7 @@ def user_interface():
         print("context menu")
         app_context_menu.exec(main_window.mapToGlobal(position))
 
-    main_window = JounoMainWidget(journal_watcher_task)
+    main_window = MainWindow(journal_watcher_task)
     main_window.customContextMenuRequested.connect(open_context_menu)
 
     def show_window():
