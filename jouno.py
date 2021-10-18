@@ -768,7 +768,7 @@ class FilterTableView(QTableView):
         self.setSelectionMode(QAbstractItemView.MultiSelection)
         self.setSelectionBehavior(QAbstractItemView.SelectRows)
         # self.setItemDelegateForColumn(1, ColumnItemDelegate())
-        self.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
+        self.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
         self.horizontalHeader().setDefaultAlignment(Qt.AlignLeft)
         self.horizontalHeader().setStyleSheet(TABLE_HEADER_STYLE)
         self.setShowGrid(False)
