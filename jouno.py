@@ -1122,14 +1122,26 @@ class JournalTableView(QTableView):
         def view_journal_entry(index: QModelIndex):
             entry = self.model().get_journal_entry(index.row())
             show = QDialog(self)
-            layout = QVBoxLayout()
-            editor = QTextEdit()
-            editor.setText('\n'.join([ f"{k}: {v}" for k, v in entry.items()]))
-            editor.setMinimumWidth(1000)
-            editor.setMinimumHeight(1000)
-            editor.setReadOnly(True)
-            layout.addWidget(editor)
+            layout = QGridLayout(self)
+            row = 0
+            for k, v in sorted(list(entry.items())):
+                key_widget = QLineEdit(k)
+                key_widget.setReadOnly(True)
+                val_widget = QLineEdit(str(v))
+                val_widget.setReadOnly(True)
+                val_widget.setMinimumWidth(700)
+                layout.addWidget(key_widget, row, 0, 1, 0, alignment=Qt.AlignLeft)
+                layout.addWidget(val_widget, row, 1, 1, 3, alignment=Qt.AlignLeft)
+                row += 1
+            # editor = QTextEdit()
+            # editor.setText('\n'.join(sorted([ f"{k:30}{v}" for k, v in entry.items()])))
+            # editor.setMinimumWidth(1000)
+            # editor.setMinimumHeight(1000)
+            # editor.setReadOnly(True)
+            #layout.addWidget(editor)
+            show.setMinimumWidth(1000)
             show.setLayout(layout)
+            layout.expandingDirections()
             show.show()
 
         self.doubleClicked.connect(view_journal_entry)
