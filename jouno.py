@@ -729,7 +729,7 @@ class FilterPanel(QWidget):
 class FilterTableModel(QStandardItemModel):
 
     def __init__(self, number_of_rows: int):
-        super().__init__(number_of_rows, 3)
+        super().__init__(number_of_rows, 2)
         # use spaces to force a wider column - seems to be no other EASY way to do this.
         self.setHorizontalHeaderLabels(
             [translate("Enable/Disable Rule-ID"), translate("Pattern")])
