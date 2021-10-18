@@ -230,7 +230,7 @@ from typing import Mapping, Any, List, Type
 import dbus
 from systemd import journal
 
-from PyQt5.QtCore import QCoreApplication, QProcess, Qt, QPoint, pyqtSignal, QThread
+from PyQt5.QtCore import QCoreApplication, QProcess, Qt, QPoint, pyqtSignal, QThread, QModelIndex
 from PyQt5.QtGui import QPixmap, QIcon, QImage, QPainter, QCursor, QStandardItemModel, QStandardItem, QIntValidator
 from PyQt5.QtSvg import QSvgRenderer
 from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QMessageBox, QLineEdit, QLabel, \
@@ -732,7 +732,7 @@ class FilterTableModel(QStandardItemModel):
         super().__init__(number_of_rows, 3)
         # use spaces to force a wider column - seems to be no other EASY way to do this.
         self.setHorizontalHeaderLabels(
-            [translate("Active"), translate("Rule ID"), translate("Pattern")])
+            [translate("Enable/Disable Rule-ID"), translate("Pattern")])
 
 
 class FilterValidationException(Exception):
@@ -791,47 +791,19 @@ class FilterTableView(QTableView):
         row_y_positions.sort()
         return [row_num for _, row_num in row_y_positions]
 
-    def copy_from_config(self, config_section: Mapping[str, str]):
-        model = self.model()
-        if model.rowCount() > 0:
-            model.removeRows(0, model.rowCount())
-        row = 0
-        enable_item_map: Mapping[str, QStandardItem] = {}
-        # Step one - first gather the patterns and create a row for each one
-        for key, value in config_section.items():
-            if key.endswith("_enabled"):
-                pass
-            else:
-                enable_item = self.create_checkable_item()
-                enable_item.setToolTip(self.enable_tooltip)
-                enable_item_map[key + "_enabled"] = enable_item
-                model.setItem(row, 0, enable_item)
-                key_item = QStandardItem(key)
-                key_item.setToolTip(self.rule_id_tooltip_1 + "\n" + self.rule_id_tooltip_2)
-                model.setItem(row, 1, key_item)
-                value_item = QStandardItem(value)
-                value_item.setToolTip(self.pattern_tooltip)
-                model.setItem(row, 2, QStandardItem(value_item))
-                row += 1
-        # Step two - check if any patterns should be disabled and toggle the appropriate checkable.
-        for enable_key, enable_item in enable_item_map.items():
-            if enable_key in config_section:
-                if config_section[enable_key].strip() == 'yes':
-                    enable_item.setCheckState(Qt.Unchecked)
-
-    def create_checkable_item(self):
-        enable_item = QStandardItem()
+    def create_rule_item(self, rule_id: str):
+        enable_item = QStandardItem(rule_id)
         enable_item.setCheckable(True)
         enable_item.setCheckState(Qt.Checked)
-        enable_item.setEditable(False)
-        enable_item.setToolTip(translate("Enable/Disable"))
+        enable_item.setEditable(True)
+        enable_item.setToolTip(translate(self.rule_id_tooltip_1 + "\n" + self.rule_id_tooltip_2))
         return enable_item
 
     def is_valid(self) -> bool:
         model = self.model()
         for row_num in self.item_view_order():
-            key = model.item(row_num, 1).text()
-            value = model.item(row_num, 2).text()
+            key = model.item(row_num, 0).text()
+            value = model.item(row_num, 1).text()
             if re.fullmatch("[a-zA-Z]([a-zA-Z0-9_-])*", key) is None:
                 raise FilterValidationException(
                     self.__class__.__name__, "Invalid rule ID", f"ID='{key}'")
@@ -845,32 +817,53 @@ class FilterTableView(QTableView):
                         self.__class__.__name__, "Invalid Regular Expression", f"\n{key}={value}\n\n{str(e)}")
         return True
 
+    def copy_from_config(self, config_section: Mapping[str, str]):
+        model = self.model()
+        if model.rowCount() > 0:
+            model.removeRows(0, model.rowCount())
+        row = 0
+        enable_item_map: Mapping[str, QStandardItem] = {}
+        # Step one - first gather the patterns and create a row for each one
+        for key, value in config_section.items():
+            if key.endswith("_enabled"):
+                pass
+            else:
+                key_item = self.create_rule_item(key)
+                key_enabled = key + "_enabled"
+                if key_enabled in config_section:
+                    if config_section[key_enabled].strip().lower() != 'yes':
+                        key_item.setCheckState(Qt.Unchecked)
+                model.setItem(row, 0, key_item)
+                value_item = QStandardItem(value)
+                value_item.setToolTip(self.pattern_tooltip)
+                model.setItem(row, 1, QStandardItem(value_item))
+                row += 1
+
     def copy_to_config(self, config_section: Mapping[str, str]):
         debug(f'table order = {self.item_view_order()} ')
         for key in config_section.keys():
             del config_section[key]
         model = self.model()
         for row_num in self.item_view_order():
-            key = model.item(row_num, 1).text()
+            key = model.item(row_num, 0).text()
             if key.strip() == '':
                 continue
-            value = model.item(row_num, 2).text()
+            value = model.item(row_num, 1).text()
             config_section[key] = value
             if model.item(row_num, 0).checkState() == Qt.Unchecked:
                 config_section[key + "_enabled"] = "no"
 
     def add_new_rule(self):
         model = self.model()
-        enable_item = self.create_checkable_item()
         selected_row_indices = self.selectionModel().selectedRows()
         if len(selected_row_indices) > 0:
             index = sorted(selected_row_indices)[0]
-            model.insertRow(index.row(), [enable_item, QStandardItem(''), QStandardItem('')])
+            model.insertRow(index.row(), [self.create_rule_item(''), QStandardItem('')])
             self.scrollTo(index)
             self.clearSelection()
             self.selectRow(index.row())
         else:
-            model.appendRow([enable_item, QStandardItem(''), QStandardItem('')])
+            model.appendRow([self.create_rule_item(''), QStandardItem('')])
             self.scrollToBottom()
 
     def delete_selected_rules(self):
@@ -1099,7 +1092,7 @@ class JournalPanel(QWidget):
 
         # TODO add a test rules button that pops up a testing dialog with an input field.
         layout = QVBoxLayout(self)
-        layout.addWidget(title(QLabel(translate("Recently notified journal events"))))
+        layout.addWidget(title(QLabel(translate("Recently notified"))))
         layout.addWidget(self.table_view)
         # layout.addWidget(button_box)
         self.setLayout(layout)
@@ -1109,12 +1102,9 @@ class JournalTableView(QTableView):
 
     def __init__(self, journal_watcher_task: JournalWatcherTask):
         super().__init__()
-        self.setToolTip(translate("Blah."))
+        self.setToolTip(translate("Double click to view the complete journal entry.") + "\n" +
+                        translate("Control-C to copy a selected field's text."))
         self.setModel(JournalTableModel(number_of_rows=0))
-        self.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.verticalHeader().setSectionsMovable(False)
-        self.verticalHeader().setDragEnabled(False)
-        self.verticalHeader().setDragDropMode(QAbstractItemView.NoDragDrop)
         self.setDragDropOverwriteMode(False)
         self.resizeColumnsToContents()
         self.setSelectionMode(QAbstractItemView.MultiSelection)
@@ -1129,37 +1119,66 @@ class JournalTableView(QTableView):
         # self.setGridStyle(Qt.NoPen)
         self.setShowGrid(False)
 
-        def new_entry(journal_entry):
+        def view_journal_entry(index: QModelIndex):
+            entry = self.model().get_journal_entry(index.row())
+            show = QDialog(self)
+            layout = QVBoxLayout()
+            editor = QTextEdit()
+            editor.setText('\n'.join([ f"{k}: {v}" for k, v in entry.items()]))
+            editor.setMinimumWidth(1000)
+            editor.setMinimumHeight(1000)
+            editor.setReadOnly(True)
+            layout.addWidget(editor)
+            show.setLayout(layout)
+            show.show()
+
+        self.doubleClicked.connect(view_journal_entry)
+
+        def new_journal_entry(journal_entry):
             debug(f">>>>>>>>>>>>>>>>>>>>>>>>>>>Received{os.getpid()}{journal_entry}")
-            model = self.model()
-            while model.rowCount() > 100:
-                model.removeRow(0)
-
-            def align_right(item: QStandardItem):
-                item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
-                return item
-
-            model.appendRow(
-                [
-                    align_right(QStandardItem(f"{journal_entry['__REALTIME_TIMESTAMP']:%H:%M:%S}")),
-                    QStandardItem(journal_entry['_HOSTNAME']),
-                    # TODO smarter choice of source value
-                    QStandardItem(journal_entry['_COMM'] if '_COMM' in journal_entry else 'unknown'),
-                    align_right(QStandardItem(str(journal_entry['_PID']))),
-                    QStandardItem(journal_entry['MESSAGE'])
-                ])
+            self.model().new_journal_entry(journal_entry)
             self.scrollToBottom()
 
-        journal_watcher_task.signal_new_entry.connect(new_entry)
+        journal_watcher_task.signal_new_entry.connect(new_journal_entry)
 
 
 class JournalTableModel(QStandardItemModel):
 
     def __init__(self, number_of_rows: int):
         super().__init__(number_of_rows, 5)
+        self.journal_entries = []
         # use spaces to force a wider column - seems to be no other EASY way to do this.
         self.setHorizontalHeaderLabels(
             [translate("Time"), translate("Host"), translate("Source"), translate("PID"), translate("Message")])
+
+    def get_journal_entry(self, row: int):
+        return self.journal_entries[row]
+
+    def new_journal_entry(self, journal_entry):
+
+        while self.rowCount() > 100:
+            self.removeRow(0)
+            self.journal_entries.remove(0)
+
+        def align_right(item: QStandardItem):
+            item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            return item
+
+        def selectable(item: QStandardItem):
+            item.setFlags(Qt.ItemIsSelectable | Qt.ItemIsEnabled)
+            return item
+
+        self.journal_entries.append(journal_entry)
+
+        self.appendRow(
+            [
+                selectable(align_right(QStandardItem(f"{journal_entry['__REALTIME_TIMESTAMP']:%H:%M:%S}"))),
+                selectable(QStandardItem(journal_entry['_HOSTNAME'])),
+                # TODO smarter choice of source value
+                selectable(QStandardItem(journal_entry['_COMM'] if '_COMM' in journal_entry else 'unknown')),
+                selectable(align_right(QStandardItem(str(journal_entry['_PID'])))),
+                selectable(QStandardItem(journal_entry['MESSAGE']))
+            ])
 
 
 class DialogSingletonMixin:
