@@ -211,6 +211,21 @@ with this program. If not, see <https://www.gnu.org/licenses/>.
 ----------
 
 """
+
+# TODO Try the default context menu in the app panel. See what that does, a standard menu with copy paste would be nice.
+# TODO _PID isn't always set! Fix Journal Panel.
+# TODO Use a table for displaying the log entry - have a copy entire text button or similar.
+# TODO Change to singe row selection in filters - less confusing
+# TODO Change 'Enable/Disable Rule-ID' to 'Rule-ID (Enabled/Disabled) - maybe try checkbox on the right if pos.
+# TODO Make insert and delete intelligently change selection so that another insert/delete will do something reasonable.
+# TODO Change add/remove rules to add/remove rule singular, intelligent selection should make multiple deletes easy.
+# TODO Consider removing the Add Remove Rule in favour of shift-insert or shift-delete or similar?
+# TODO Use a toolbar to replace the custom context menu in the main app.
+# TODO Add option for how many journal rows to show - if zero hide panel.
+# TODO Add option for non-tray use.
+# TODO Consider creating a separate full log browser making use of the journal API for search and random access.
+
+
 import argparse
 import configparser
 import os
