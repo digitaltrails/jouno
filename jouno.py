@@ -1112,13 +1112,6 @@ class JournalTableView(QTableView):
                 layout.addWidget(key_widget, row, 0, 1, 0, alignment=Qt.AlignLeft)
                 layout.addWidget(val_widget, row, 1, 1, 2, alignment=Qt.AlignLeft)
                 row += 1
-            # editor = QTextEdit()
-            # editor.setText('\n'.join(sorted([ f"{k:30}{v}" for k, v in entry.items()])))
-            # editor.setMinimumWidth(1000)
-            # editor.setMinimumHeight(1000)
-            # editor.setReadOnly(True)
-            #layout.addWidget(editor)
-
             entry_dialog.setLayout(layout)
             layout.expandingDirections()
             entry_dialog.adjustSize()
