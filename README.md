@@ -9,6 +9,7 @@ Description
 -----------
 
 This software is currently pre-release, It is feature complete and quite usable but may lack some polish.
+The README.MD is generally in the ballpark, but it is somewhat out of date, it will be updated after the current TODO's are complete.
 
 ![Default](screen-shots/Screenshot_Large.png) 
 
