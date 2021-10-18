@@ -238,6 +238,7 @@ from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QMessageBox, QLi
     QCheckBox, QGridLayout, QAction, QTableView, \
     QAbstractItemView, QHeaderView, QSplitter
 
+
 DEFAULT_CONFIG = '''
 [options]
 poll_seconds = 2
@@ -552,6 +553,8 @@ def translate(source_text: str):
 
 JOUNO_VERSION = '0.9.0'
 
+TABLE_HEADER_STYLE = "font-weight: bold;font-size: 9pt;"
+
 ABOUT_TEXT = f"""
 
 <b>jouno version {JOUNO_VERSION}</b>
@@ -729,7 +732,7 @@ class FilterTableModel(QStandardItemModel):
         super().__init__(number_of_rows, 3)
         # use spaces to force a wider column - seems to be no other EASY way to do this.
         self.setHorizontalHeaderLabels(
-            [translate("Enable"), translate(f"          Rule ID          "), translate("Pattern")])
+            [translate("Active"), translate("Rule ID"), translate("Pattern")])
 
 
 class FilterValidationException(Exception):
@@ -766,6 +769,9 @@ class FilterTableView(QTableView):
         self.setSelectionBehavior(QAbstractItemView.SelectRows)
         # self.setItemDelegateForColumn(1, ColumnItemDelegate())
         self.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
+        self.horizontalHeader().setDefaultAlignment(Qt.AlignLeft)
+        self.horizontalHeader().setStyleSheet(TABLE_HEADER_STYLE)
+        self.setShowGrid(False)
 
     def item_view_order(self) -> List[int]:
         """
@@ -899,11 +905,11 @@ class JournalWatcherTask(QThread):
 
 
 def title(widget: QLabel) -> QLabel:
-    widget.setStyleSheet("font-weight: bold;")
+    widget.setStyleSheet("font-weight: normal;font-size: 13pt;")
     return widget
 
 
-class ConfigWidget(QWidget):
+class ConfigPanel(QWidget):
 
     def __init__(self):
         super().__init__()
@@ -962,6 +968,13 @@ class ConfigWidget(QWidget):
                     config.save()
                     match_panel.clear_selection()
                     ignore_panel.clear_selection()
+                    message = QMessageBox(self)
+                    message.setWindowTitle(translate('Applied'))
+                    message.setText(translate('Changes are now active.'))
+                    message.setIcon(QMessageBox.Information)
+                    message.setStandardButtons(QMessageBox.Ok)
+                    # message.setDetailedText()
+                    message.exec()
                     debug(f'ok')
             except FilterValidationException as e:
                 title, summary, text = e.args
@@ -1049,7 +1062,7 @@ class MainWindow(QWidget):
         layout = QVBoxLayout()
         splitter.setStyleSheet("QSplitter::handle{background: #333333;}")
         splitter.addWidget(JournalPanel(journal_watcher_task))
-        splitter.addWidget(ConfigWidget())
+        splitter.addWidget(ConfigPanel())
         layout.addWidget(splitter)
         self.setLayout(layout)
 
@@ -1111,9 +1124,10 @@ class JournalTableView(QTableView):
         self.setColumnWidth(2, 10 * 14)
         self.setColumnWidth(3, 5 * 14)
         self.horizontalHeader().setSectionResizeMode(4, QHeaderView.Stretch)
-
+        self.horizontalHeader().setDefaultAlignment(Qt.AlignLeft)
+        self.horizontalHeader().setStyleSheet(TABLE_HEADER_STYLE)
         # self.setGridStyle(Qt.NoPen)
-        # self.setShowGrid(False)
+        self.setShowGrid(False)
 
         def new_entry(journal_entry):
             debug(f">>>>>>>>>>>>>>>>>>>>>>>>>>>Received{os.getpid()}{journal_entry}")
@@ -1239,8 +1253,8 @@ class HelpDialog(QDialog, DialogSingletonMixin):
         layout.addWidget(markdown_view)
         self.setLayout(layout)
         # TODO maybe compute a minimum from the actual screen size
-        self.setMinimumWidth(1600)
-        self.setMinimumHeight(1024)
+        self.setMinimumWidth(1400)
+        self.setMinimumHeight(1000)
         # .show() is non-modal, .exec() is modal
         self.make_visible()
 
