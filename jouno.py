@@ -1067,34 +1067,11 @@ class JournalPanel(QWidget):
 
         self.table_view = JournalTableView(journal_watcher_task)
 
-        # def pause_action():
-        #     if pause_button.text() == translate("Pause"):
-        #         journal_watcher_task.requestInterruption()
-        #         pause_button.setText(translate("Resume"))
-        #     else:
-        #         journal_watcher_task.start()
-        #         pause_button.setText(translate("Pause"))
-
-        def del_action():
-            pass
-
-        # button_box = QWidget()
-        # button_box_layout = QHBoxLayout()
-        # pause_button = QPushButton(translate("Pause"))
-        # pause_button.setToolTip("What")
-        # pause_button.clicked.connect(pause_action)
-        # button_box_layout.addWidget(pause_button)
-        # del_button = QPushButton(translate("Continue"))
-        # del_button.setToolTip("What")
-        # del_button.clicked.connect(del_action)
-        # button_box_layout.addWidget(del_button)
-        # button_box.setLayout(button_box_layout)
-
         # TODO add a test rules button that pops up a testing dialog with an input field.
         layout = QVBoxLayout(self)
         layout.addWidget(title(QLabel(translate("Recently notified"))))
         layout.addWidget(self.table_view)
-        # layout.addWidget(button_box)
+
         self.setLayout(layout)
 
 
@@ -1121,17 +1098,19 @@ class JournalTableView(QTableView):
 
         def view_journal_entry(index: QModelIndex):
             entry = self.model().get_journal_entry(index.row())
-            show = QDialog(self)
+            entry_dialog = QDialog(self)
+            entry_dialog.setMinimumWidth(1100)
             layout = QGridLayout(self)
             row = 0
             for k, v in sorted(list(entry.items())):
                 key_widget = QLineEdit(k)
                 key_widget.setReadOnly(True)
+                key_widget.setMinimumWidth(350)
                 val_widget = QLineEdit(str(v))
                 val_widget.setReadOnly(True)
                 val_widget.setMinimumWidth(700)
                 layout.addWidget(key_widget, row, 0, 1, 0, alignment=Qt.AlignLeft)
-                layout.addWidget(val_widget, row, 1, 1, 3, alignment=Qt.AlignLeft)
+                layout.addWidget(val_widget, row, 1, 1, 2, alignment=Qt.AlignLeft)
                 row += 1
             # editor = QTextEdit()
             # editor.setText('\n'.join(sorted([ f"{k:30}{v}" for k, v in entry.items()])))
@@ -1139,10 +1118,11 @@ class JournalTableView(QTableView):
             # editor.setMinimumHeight(1000)
             # editor.setReadOnly(True)
             #layout.addWidget(editor)
-            show.setMinimumWidth(1000)
-            show.setLayout(layout)
+
+            entry_dialog.setLayout(layout)
             layout.expandingDirections()
-            show.show()
+            entry_dialog.adjustSize()
+            entry_dialog.show()
 
         self.doubleClicked.connect(view_journal_entry)
 
@@ -1170,7 +1150,7 @@ class JournalTableModel(QStandardItemModel):
 
         while self.rowCount() > 100:
             self.removeRow(0)
-            self.journal_entries.remove(0)
+            self.journal_entries.pop(0)
 
         def align_right(item: QStandardItem):
             item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
