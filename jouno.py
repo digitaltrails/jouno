@@ -1176,7 +1176,7 @@ class JournalTableModel(QStandardItemModel):
                 selectable(QStandardItem(journal_entry['_HOSTNAME'])),
                 # TODO smarter choice of source value
                 selectable(QStandardItem(journal_entry['_COMM'] if '_COMM' in journal_entry else 'unknown')),
-                selectable(align_right(QStandardItem(str(journal_entry['_PID'])))),
+                selectable(align_right(QStandardItem(str(journal_entry['_PID'] if '_PID' in journal_entry else '')))),
                 selectable(QStandardItem(journal_entry['MESSAGE']))
             ])
 
