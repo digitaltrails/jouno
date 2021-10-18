@@ -1084,7 +1084,7 @@ class JournalTableView(QTableView):
         self.setModel(JournalTableModel(number_of_rows=0))
         self.setDragDropOverwriteMode(False)
         self.resizeColumnsToContents()
-        self.setSelectionMode(QAbstractItemView.MultiSelection)
+        self.setSelectionMode(QAbstractItemView.SingleSelection)
         self.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.setColumnWidth(0, 8 * 14)
         self.setColumnWidth(1, 10 * 14)
