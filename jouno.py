@@ -216,9 +216,6 @@ with this program. If not, see <https://www.gnu.org/licenses/>.
 # TODO _PID isn't always set! Fix Journal Panel.
 # TODO Use a table for displaying the log entry - have a copy entire text button or similar.
 # TODO Change to singe row selection in filters - less confusing
-# TODO Change 'Enable/Disable Rule-ID' to 'Rule-ID (Enabled/Disabled) - maybe try checkbox on the right if pos.
-# TODO Make insert and delete intelligently change selection so that another insert/delete will do something reasonable.
-# TODO Change add/remove rules to add/remove rule singular, intelligent selection should make multiple deletes easy.
 # TODO Consider removing the Add Remove Rule in favour of shift-insert or shift-delete or similar?
 # TODO Use a toolbar to replace the custom context menu in the main app.
 # TODO Add option for how many journal rows to show - if zero hide panel.
@@ -245,14 +242,13 @@ from typing import Mapping, Any, List, Type
 import dbus
 from systemd import journal
 
-from PyQt5.QtCore import QCoreApplication, QProcess, Qt, QPoint, pyqtSignal, QThread, QModelIndex
+from PyQt5.QtCore import QCoreApplication, QProcess, Qt, QPoint, pyqtSignal, QThread, QModelIndex, QItemSelectionModel
 from PyQt5.QtGui import QPixmap, QIcon, QImage, QPainter, QCursor, QStandardItemModel, QStandardItem, QIntValidator
 from PyQt5.QtSvg import QSvgRenderer
 from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QMessageBox, QLineEdit, QLabel, \
     QPushButton, QSystemTrayIcon, QMenu, QStyle, QTextEdit, QDialog, QTabWidget, \
     QCheckBox, QGridLayout, QAction, QTableView, \
-    QAbstractItemView, QHeaderView, QSplitter
-
+    QAbstractItemView, QHeaderView, QSplitter, QMainWindow, QSizePolicy
 
 DEFAULT_CONFIG = '''
 [options]
@@ -647,6 +643,82 @@ JOUNO_PAUSED_ICON_SVG = b"""
 </svg>
 """
 
+ABOUT_SVG = b"""
+<svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">
+    <style type="text/css" id="current-color-scheme">
+        .ColorScheme-Text {
+            color:#232629;
+        }
+    </style>
+    <g class="ColorScheme-Text" fill="currentColor" fill-rule="evenodd">
+        <path d="m8 2a6 6 0 0 0 -6 6 6 6 0 0 0 6 6 6 6 0 0 0 6-6 6 6 0 0 0 -6-6zm0 1a5 5 0 0 1 5 5 5 5 0 0 1 -5 5 5 5 0 0 1 -5-5 5 5 0 0 1 5-5z"/>
+        <path d="m7 4h2v2h-2z"/>
+        <path d="m7 7h2v5h-2z"/>
+    </g>
+</svg>
+"""
+
+HELP_SVG = b"""
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">
+  <defs id="defs3051">
+    <style type="text/css" id="current-color-scheme">
+      .ColorScheme-Text {
+        color:#232629;
+      }
+      </style>
+  </defs>
+ <path 
+     style="fill:currentColor;fill-opacity:1;stroke:none" 
+     d="M 8 2 A 6 6 0 0 0 2 8 A 6 6 0 0 0 8 14 A 6 6 0 0 0 14 8 A 6 6 0 0 0 8 2 z M 2 3 L 2 5 L 4 3 L 2 3 z M 8 3 A 5 5 0 0 1 10.390625 3.609375 L 8.8691406 5.1308594 A 3 3 0 0 0 8 5 A 3 3 0 0 0 7.1308594 5.1308594 L 5.6132812 3.6132812 A 5 5 0 0 1 8 3 z M 12 3 L 14 5 L 14 3 L 12 3 z M 3.609375 5.609375 L 5.1308594 7.1308594 A 3 3 0 0 0 5 8 A 3 3 0 0 0 5.1308594 8.8691406 L 3.6132812 10.386719 A 5 5 0 0 1 3 8 A 5 5 0 0 1 3.609375 5.609375 z M 12.386719 5.6132812 A 5 5 0 0 1 13 8 A 5 5 0 0 1 12.390625 10.390625 L 10.869141 8.8691406 A 3 3 0 0 0 11 8 A 3 3 0 0 0 10.869141 7.1308594 L 12.386719 5.6132812 z M 8 6 A 2 2 0 0 1 10 8 A 2 2 0 0 1 8 10 A 2 2 0 0 1 6 8 A 2 2 0 0 1 8 6 z M 7.1308594 10.869141 A 3 3 0 0 0 8 11 A 3 3 0 0 0 8.8691406 10.869141 L 10.386719 12.386719 A 5 5 0 0 1 8 13 A 5 5 0 0 1 5.609375 12.390625 L 7.1308594 10.869141 z M 2 11 L 2 13 L 4 13 L 2 11 z M 14 11 L 12 13 L 14 13 L 14 11 z "
+     class="ColorScheme-Text"
+     />
+</svg>
+"""
+
+PAUSE_SVG = b"""
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">
+    <style type="text/css" id="current-color-scheme">
+        .ColorScheme-Text {
+            color:#232629;
+        }
+    </style>
+    <path d="m2 2v12h4v-12zm8 0v12h4v-12z" class="ColorScheme-Text" fill="currentColor"/>
+</svg>
+"""
+
+PAUSE_ACTIVE_SVG = b"""
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">
+    <style type="text/css" id="current-color-scheme">
+        .ColorScheme-Text {
+            color:#da4453;
+        }
+    </style>
+    <path d="m2 2v12h4v-12zm8 0v12h4v-12z" class="ColorScheme-Text" fill="currentColor"/>
+</svg>
+"""
+
+PLAY_SVG = b"""
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">
+    <style type="text/css" id="current-color-scheme">
+        .ColorScheme-Text {
+            color:#232629;
+        }
+    </style>
+    <path d="m2 2v12l12-6z" class="ColorScheme-Text" fill="currentColor"/>
+</svg>
+"""
+
+PLAY_ACTIVE_SVG = b"""
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">
+    <style type="text/css" id="current-color-scheme">
+        .ColorScheme-Text {
+            color:#59a869;
+        }
+    </style>
+    <path d="m2 2v12l12-6z" class="ColorScheme-Text" fill="currentColor"/>
+</svg>
+"""
+
 
 def create_image_from_svg_string(svg_str: bytes) -> QImage:
     """There is no QIcon option for loading QImage from a string, only from a SVG file, so roll our own."""
@@ -747,7 +819,7 @@ class FilterTableModel(QStandardItemModel):
         super().__init__(number_of_rows, 2)
         # use spaces to force a wider column - seems to be no other EASY way to do this.
         self.setHorizontalHeaderLabels(
-            [translate("Enable/Disable Rule-ID"), translate("Pattern")])
+            [translate("Rule-ID (enabled/disabled)"), translate("Pattern")])
 
 
 class FilterValidationException(Exception):
@@ -780,7 +852,7 @@ class FilterTableView(QTableView):
         self.verticalHeader().setDragDropMode(QAbstractItemView.InternalMove)
         self.setDragDropOverwriteMode(True)
         self.resizeColumnsToContents()
-        self.setSelectionMode(QAbstractItemView.MultiSelection)
+        self.setSelectionMode(QAbstractItemView.SingleSelection)
         self.setSelectionBehavior(QAbstractItemView.SelectRows)
         # self.setItemDelegateForColumn(1, ColumnItemDelegate())
         self.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
@@ -816,20 +888,23 @@ class FilterTableView(QTableView):
 
     def is_valid(self) -> bool:
         model = self.model()
+        seen = []
         for row_num in self.item_view_order():
             key = model.item(row_num, 0).text()
             value = model.item(row_num, 1).text()
             if re.fullmatch("[a-zA-Z]([a-zA-Z0-9_-])*", key) is None:
                 raise FilterValidationException(
-                    self.__class__.__name__, "Invalid rule ID", f"ID='{key}'")
-            if key.endswith("_enabled"):
-                pass
+                    self.__class__.__name__, "Invalid Rule-ID", f"ID='{key}'")
+            elif key in seen:
+                raise FilterValidationException(
+                    self.__class__.__name__, "Duplicate Rule-ID", f"ID='{key}'")
             elif key.endswith("_regexp"):
                 try:
                     re.compile(value)
                 except Exception as e:
                     raise FilterValidationException(
                         self.__class__.__name__, "Invalid Regular Expression", f"\n{key}={value}\n\n{str(e)}")
+            seen.append(key)
         return True
 
     def copy_from_config(self, config_section: Mapping[str, str]):
@@ -868,6 +943,8 @@ class FilterTableView(QTableView):
             if model.item(row_num, 0).checkState() == Qt.Unchecked:
                 config_section[key + "_enabled"] = "no"
 
+    select_flags = QItemSelectionModel.Clear | QItemSelectionModel.Rows | QItemSelectionModel.SelectCurrent | QItemSelectionModel.Rows
+
     def add_new_rule(self):
         model = self.model()
         selected_row_indices = self.selectionModel().selectedRows()
@@ -880,6 +957,7 @@ class FilterTableView(QTableView):
         else:
             model.appendRow([self.create_rule_item(''), QStandardItem('')])
             self.scrollToBottom()
+            self.selectRow(model.rowCount() - 1)
 
     def delete_selected_rules(self):
         model = self.model()
@@ -896,6 +974,10 @@ class FilterTableView(QTableView):
         # Reverse the order so we delete from bottom up preserving the positions of yet to be removed rows.
         for index in sorted(selected_row_indices, reverse=True):
             model.removeRow(index.row())
+            if model.rowCount() > index.row():
+                self.selectRow(model.rowCount())
+            else:
+                self.selectRow(model.rowCount() - 1)
 
 
 class JournalWatcherTask(QThread):
@@ -1057,11 +1139,107 @@ class ConfigPanel(QWidget):
         self.activateWindow()
 
 
-class MainWindow(QWidget):
+class MainWindow(QMainWindow):
+
+    def __init__(self, app):
+        super().__init__()
+
+        main_tool_bar = self.addToolBar(translate("Toolbar"));
+
+        journal_watcher_task = JournalWatcherTask()
+
+        app_name = translate('Jouno - journal notifications')
+        app.setWindowIcon(create_icon_from_svg_string(JOUNO_WINDOW_ICON_SVG))
+        app.setApplicationDisplayName(app_name)
+        app.setApplicationVersion(JOUNO_VERSION)
+
+        watch_on_icon = create_icon_from_svg_string(JOUNO_ICON_SVG)
+        watch_off_icon = create_icon_from_svg_string(JOUNO_PAUSED_ICON_SVG)
+        play_icon = create_icon_from_svg_string(PLAY_SVG)
+        play_active_icon = create_icon_from_svg_string(PLAY_ACTIVE_SVG)
+        pause_icon = create_icon_from_svg_string(PAUSE_SVG)
+        pause_active_icon = create_icon_from_svg_string(PAUSE_ACTIVE_SVG)
+        help_icon = create_icon_from_svg_string(HELP_SVG)
+        about_icon = create_icon_from_svg_string(ABOUT_SVG)
+
+        def toggle_watcher() -> None:
+            if journal_watcher_task.isRunning():
+                journal_watcher_task.requestInterruption()
+                tray.setIcon(watch_off_icon)
+                tray.setToolTip(f"{app_name} - {translate('Paused')}")
+                app_context_menu.set_journal_playing(False)
+                play_action.setIcon(play_icon)
+                pause_action.setIcon(pause_active_icon)
+            else:
+                journal_watcher_task.start()
+                tray.setIcon(watch_on_icon)
+                tray.setToolTip(app_name)
+                app_context_menu.set_journal_playing(True)
+                play_action.setIcon(play_active_icon)
+                pause_action.setIcon(pause_icon)
+
+        def quit_action():
+            journal_watcher_task.requestInterruption()
+            app.quit()
+
+        app_context_menu = ContextMenu(
+            about_action=AboutDialog.invoke,
+            help_action=HelpDialog.invoke,
+            enable_action=toggle_watcher,
+            quit_action=quit_action)
+
+        def play():
+            if not journal_watcher_task.isRunning():
+                toggle_watcher()
+
+        def pause():
+            if journal_watcher_task.isRunning():
+                toggle_watcher()
+
+        play_action = main_tool_bar.addAction(play_active_icon, translate('Monitor journal'), play);
+        pause_action = main_tool_bar.addAction(pause_icon, translate('Pause monitoring journal'), pause);
+        spacer = QWidget()
+        spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        main_tool_bar.addSeparator()
+        main_tool_bar.addWidget(spacer)
+        main_tool_bar.addAction(help_icon, translate('Help'), HelpDialog.invoke);
+        main_tool_bar.addAction(about_icon, translate('About'), AboutDialog.invoke);
+        self.setCentralWidget(CentralPanel(journal_watcher_task))
+
+        tray = QSystemTrayIcon()
+        tray.setIcon(watch_on_icon)
+        tray.setContextMenu(app_context_menu)
+
+        def show_window():
+            if self.isVisible():
+                self.hide()
+            else:
+                # Use the mouse pos as a guess to where the system tray is.  The Linux Qt x,y geometry returned by
+                # the tray icon is 0,0, so we can't use that.
+                p = QCursor.pos()
+                wg = self.geometry()
+                # Also try to cope with the tray not being at the bottom right of the screen.
+                x = p.x() - wg.width() if p.x() > wg.width() else p.x()
+                y = p.y() - wg.height() if p.y() > wg.height() else p.y()
+                self.setGeometry(x, y, wg.width(), wg.height())
+                self.show()
+                # Attempt to force it to the top with raise and activate
+                self.raise_()
+                self.activateWindow()
+
+        tray.activated.connect(show_window)
+        tray.setVisible(True)
+        journal_watcher_task.start()
+        rc = app.exec_()
+        if rc == 999:  # EXIT_CODE_FOR_RESTART:
+            QProcess.startDetached(app.arguments()[0], app.arguments()[1:])
+
+
+class CentralPanel(QWidget):
 
     def __init__(self, journal_watcher_task: JournalWatcherTask):
         super().__init__()
-        self.setContextMenuPolicy(Qt.CustomContextMenu)
+        # self.setContextMenuPolicy(Qt.CustomContextMenu)
         self.setWindowTitle(translate('Control Panel'))
         self.setMinimumWidth(1200)
         self.setMinimumHeight(1000)
@@ -1155,7 +1333,6 @@ class JournalTableModel(QStandardItemModel):
         return self.journal_entries[row]
 
     def new_journal_entry(self, journal_entry):
-
         while self.rowCount() > 100:
             self.removeRow(0)
             self.journal_entries.pop(0)
@@ -1285,7 +1462,7 @@ class ContextMenu(QMenu):
                  quit_action=None) -> None:
         super().__init__()
 
-        toggle_action = self.addAction(
+        self.play_pause_action = self.addAction(
             self.style().standardIcon(QStyle.SP_BrowserStop),
             translate('Pause'),
             enable_action)
@@ -1300,17 +1477,13 @@ class ContextMenu(QMenu):
                        translate('Quit'),
                        quit_action)
 
-        def triggered(action: QAction):
-            print('triggered', action.text(), toggle_action.text())
-            if action == toggle_action:
-                if action.text() == translate("Pause"):
-                    action.setText(translate('Continue'))
-                    action.setIcon(self.style().standardIcon(QStyle.SP_BrowserReload))
-                else:
-                    action.setText(translate("Pause"))
-                    action.setIcon(self.style().standardIcon(QStyle.SP_BrowserStop))
-
-        self.triggered.connect(triggered)
+    def set_journal_playing(self, is_playing: bool):
+        if is_playing:
+            self.play_pause_action.setText(translate("Pause"))
+            self.play_pause_action.setIcon(self.style().standardIcon(QStyle.SP_BrowserStop))
+        else:
+            self.play_pause_action.setText(translate('Continue'))
+            self.play_pause_action.setIcon(self.style().standardIcon(QStyle.SP_BrowserReload))
 
 
 def exception_handler(e_type, e_value, e_traceback):
@@ -1324,80 +1497,6 @@ def exception_handler(e_type, e_value, e_traceback):
     alert.setIcon(QMessageBox.Critical)
     alert.exec()
     QApplication.quit()
-
-
-def user_interface():
-    sys.excepthook = exception_handler
-
-    app_name = translate('Jouno - journal notifications')
-
-    app = QApplication(sys.argv)
-
-    window_icon = create_icon_from_svg_string(JOUNO_WINDOW_ICON_SVG)
-    watch_on_icon = create_icon_from_svg_string(JOUNO_ICON_SVG)
-    watch_off_icon = create_icon_from_svg_string(JOUNO_PAUSED_ICON_SVG)
-
-    journal_watcher_task = JournalWatcherTask()
-
-    def toggle_watcher() -> None:
-        global watcher_process
-        if journal_watcher_task.isRunning():
-            journal_watcher_task.requestInterruption()
-            tray.setIcon(watch_off_icon)
-            tray.setToolTip(f"{app_name} - {translate('Paused')}")
-        else:
-            journal_watcher_task.start()
-            tray.setIcon(watch_on_icon)
-            tray.setToolTip(app_name)
-
-    def quit_action():
-        journal_watcher_task.requestInterruption()
-        app.quit()
-
-    app_context_menu = ContextMenu(
-        about_action=AboutDialog.invoke,
-        help_action=HelpDialog.invoke,
-        enable_action=toggle_watcher,
-        quit_action=quit_action)
-
-    tray = QSystemTrayIcon()
-    tray.setIcon(watch_on_icon)
-    tray.setContextMenu(app_context_menu)
-
-    app.setWindowIcon(window_icon)
-    app.setApplicationDisplayName(app_name)
-    app.setApplicationVersion(JOUNO_VERSION)
-
-    def open_context_menu(position: QPoint) -> None:
-        print("context menu")
-        app_context_menu.exec(main_window.mapToGlobal(position))
-
-    main_window = MainWindow(journal_watcher_task)
-    main_window.customContextMenuRequested.connect(open_context_menu)
-
-    def show_window():
-        if main_window.isVisible():
-            main_window.hide()
-        else:
-            # Use the mouse pos as a guess to where the system tray is.  The Linux Qt x,y geometry returned by
-            # the tray icon is 0,0, so we can't use that.
-            p = QCursor.pos()
-            wg = main_window.geometry()
-            # Also try to cope with the tray not being at the bottom right of the screen.
-            x = p.x() - wg.width() if p.x() > wg.width() else p.x()
-            y = p.y() - wg.height() if p.y() > wg.height() else p.y()
-            main_window.setGeometry(x, y, wg.width(), wg.height())
-            main_window.show()
-            # Attempt to force it to the top with raise and activate
-            main_window.raise_()
-            main_window.activateWindow()
-
-    tray.activated.connect(show_window)
-    tray.setVisible(True)
-    journal_watcher_task.start()
-    rc = app.exec_()
-    if rc == 999:  # EXIT_CODE_FOR_RESTART:
-        QProcess.startDetached(app.arguments()[0], app.arguments()[1:])
 
 
 def install_as_desktop_application(uninstall: bool = False):
@@ -1494,10 +1593,10 @@ def parse_args():
 
 def main():
     signal.signal(signal.SIGINT, signal.SIG_DFL)
-
+    sys.excepthook = exception_handler
     args = parse_args()
-
-    user_interface()
+    app = QApplication(sys.argv)
+    MainWindow(app)
 
 
 if __name__ == '__main__':
