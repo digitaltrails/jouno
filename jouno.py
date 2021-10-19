@@ -212,15 +212,11 @@ with this program. If not, see <https://www.gnu.org/licenses/>.
 
 """
 
-# TODO Try the default context menu in the app panel. See what that does, a standard menu with copy paste would be nice.
-# TODO _PID isn't always set! Fix Journal Panel.
-# TODO Use a table for displaying the log entry - have a copy entire text button or similar.
-# TODO Change to singe row selection in filters - less confusing
 # TODO Consider removing the Add Remove Rule in favour of shift-insert or shift-delete or similar?
-# TODO Use a toolbar to replace the custom context menu in the main app.
 # TODO Add option for how many journal rows to show - if zero hide panel.
 # TODO Add option for non-tray use.
 # TODO Consider creating a separate full log browser making use of the journal API for search and random access.
+# TODO Add a control to temporarily mute popups - but still feed the journal panel
 
 
 import argparse
@@ -248,7 +244,7 @@ from PyQt5.QtSvg import QSvgRenderer
 from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QMessageBox, QLineEdit, QLabel, \
     QPushButton, QSystemTrayIcon, QMenu, QStyle, QTextEdit, QDialog, QTabWidget, \
     QCheckBox, QGridLayout, QAction, QTableView, \
-    QAbstractItemView, QHeaderView, QSplitter, QMainWindow, QSizePolicy
+    QAbstractItemView, QHeaderView, QSplitter, QMainWindow, QSizePolicy, QTableWidget, QTableWidgetItem
 
 DEFAULT_CONFIG = '''
 [options]
@@ -708,11 +704,12 @@ PLAY_SVG = b"""
 </svg>
 """
 
+# #59a869;
 PLAY_ACTIVE_SVG = b"""
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">
     <style type="text/css" id="current-color-scheme">
         .ColorScheme-Text {
-            color:#59a869;
+            color:#3daee9;
         }
     </style>
     <path d="m2 2v12l12-6z" class="ColorScheme-Text" fill="currentColor"/>
@@ -739,14 +736,12 @@ def create_icon_from_svg_string(svg_str: bytes) -> QIcon:
 
 class OptionsTab(QWidget):
 
-    def __init__(self, config_section: Mapping[str, str]):
+    def __init__(self, config_section: Mapping[str, str], main_widget: QWidget = None):
         super().__init__()
-        default_config = configparser.ConfigParser()
-        default_config.read_string(DEFAULT_CONFIG)
         self.option_map: Mapping[str, QWidget] = {}
         layout = QGridLayout(self)
         row_number = 0
-        for option_id, value in default_config['options'].items():
+        for option_id, value in config_section.items():
             label_widget = QLabel(translate(option_id))
             if option_id.endswith("_enabled"):
                 input_widget = QCheckBox()
@@ -783,7 +778,7 @@ class OptionsTab(QWidget):
 
 class FilterPanel(QWidget):
 
-    def __init__(self, config_section: Mapping[str, str], tooltip=''):
+    def __init__(self, config_section: Mapping[str, str], tooltip='', main_widget=None):
         super().__init__()
         print("table", str(config_section.keys()))
 
@@ -1001,8 +996,8 @@ def title(widget: QLabel) -> QLabel:
 
 class ConfigPanel(QWidget):
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, main_widget: QWidget = None):
+        super().__init__(main_widget)
 
         layout = QVBoxLayout()
         self.setLayout(layout)
@@ -1015,12 +1010,13 @@ class ConfigPanel(QWidget):
 
         match_panel = FilterPanel(
             config['match'],
-            tooltip=translate("Only issue notifications for journal-entry messages that match one of these rules.")
-        )
+            tooltip=translate("Only issue notifications for journal-entry messages that match one of these rules."),
+            main_widget=main_widget)
 
         ignore_panel = FilterPanel(
             config['ignore'],
-            tooltip=translate("Ignore journal-entry messages that match any of these rules."))
+            tooltip=translate("Ignore journal-entry messages that match any of these rules."),
+            main_widget=main_widget)
 
         button_box = QWidget()
         button_box_layout = QGridLayout()
@@ -1255,7 +1251,7 @@ class CentralPanel(QWidget):
 
 class JournalPanel(QWidget):
 
-    def __init__(self, journal_watcher_task: JournalWatcherTask):
+    def __init__(self, journal_watcher_task: JournalWatcherTask, main_widget: QWidget = None):
         super().__init__()
 
         self.table_view = JournalTableView(journal_watcher_task)
@@ -1290,24 +1286,7 @@ class JournalTableView(QTableView):
         self.setShowGrid(False)
 
         def view_journal_entry(index: QModelIndex):
-            entry = self.model().get_journal_entry(index.row())
-            entry_dialog = QDialog(self)
-            entry_dialog.setMinimumWidth(1100)
-            layout = QGridLayout(self)
-            row = 0
-            for k, v in sorted(list(entry.items())):
-                key_widget = QLineEdit(k)
-                key_widget.setReadOnly(True)
-                key_widget.setMinimumWidth(350)
-                val_widget = QLineEdit(str(v))
-                val_widget.setReadOnly(True)
-                val_widget.setMinimumWidth(700)
-                layout.addWidget(key_widget, row, 0, 1, 0, alignment=Qt.AlignLeft)
-                layout.addWidget(val_widget, row, 1, 1, 2, alignment=Qt.AlignLeft)
-                row += 1
-            entry_dialog.setLayout(layout)
-            layout.expandingDirections()
-            entry_dialog.adjustSize()
+            entry_dialog = DisplayJournalEntryDialog(self, self.model().get_journal_entry(index.row()))
             entry_dialog.show()
 
         self.doubleClicked.connect(view_journal_entry)
@@ -1325,7 +1304,6 @@ class JournalTableModel(QStandardItemModel):
     def __init__(self, number_of_rows: int):
         super().__init__(number_of_rows, 5)
         self.journal_entries = []
-        # use spaces to force a wider column - seems to be no other EASY way to do this.
         self.setHorizontalHeaderLabels(
             [translate("Time"), translate("Host"), translate("Source"), translate("PID"), translate("Message")])
 
@@ -1353,9 +1331,30 @@ class JournalTableModel(QStandardItemModel):
                 selectable(QStandardItem(journal_entry['_HOSTNAME'])),
                 # TODO smarter choice of source value
                 selectable(QStandardItem(journal_entry['_COMM'] if '_COMM' in journal_entry else 'unknown')),
+                # TODO smarter choice when _PID is not present.
                 selectable(align_right(QStandardItem(str(journal_entry['_PID'] if '_PID' in journal_entry else '')))),
                 selectable(QStandardItem(journal_entry['MESSAGE']))
             ])
+
+
+class DisplayJournalEntryDialog(QDialog):
+
+    def __init__(self, parent, journal_entry):
+        super().__init__(parent)
+        # grid of QLineEdit's is easier than a table - the read-only editor allows context menu with a copy option.
+        # Tables are a pain in most API's - seems to be no exception with Qt.
+        layout = QGridLayout(self)
+        for row, (k, v) in enumerate(sorted(list(journal_entry.items()))):
+            key_widget = QLineEdit(k)
+            key_widget.setReadOnly(True)
+            key_widget.setMinimumWidth(350)
+            val_widget = QLineEdit(str(v))
+            val_widget.setReadOnly(True)
+            val_widget.setMinimumWidth(700)
+            layout.addWidget(key_widget, row, 0, 1, 1, alignment=Qt.AlignLeft)
+            layout.addWidget(val_widget, row, 1, 1, 2, alignment=Qt.AlignLeft)
+        self.setLayout(layout)
+        self.adjustSize()
 
 
 class DialogSingletonMixin:
