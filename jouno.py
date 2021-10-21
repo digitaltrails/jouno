@@ -216,9 +216,8 @@ with this program. If not, see <https://www.gnu.org/licenses/>.
 # TODO Add option for how many journal rows to show - if zero hide panel.
 # TODO Add option for non-tray use.
 # TODO Consider creating a separate full log browser making use of the journal API for search and random access.
-# TODO Add a toolbar control to temporarily mute popups - but still feed the journal panel
-# TODO Search 'resents' on toolbar
-# TODO Display more fields in 'recents' - priority as icon perhaps.
+# TODO Search 'recent' on toolbar
+# TODO Display more fields in 'recent' - priority as icon perhaps.
 # TODO https://specifications.freedesktop.org/icon-naming-spec/latest/
 
 import argparse
@@ -231,7 +230,6 @@ import signal
 import stat
 import sys
 import textwrap
-import threading
 import time
 import traceback
 from enum import Enum
@@ -239,18 +237,15 @@ from pathlib import Path
 from typing import Mapping, Any, List, Type
 
 import dbus
-from systemd import journal
-
-from PyQt5.QtCore import QCoreApplication, QProcess, Qt, QPoint, pyqtSignal, QThread, QModelIndex, QItemSelectionModel, \
-    QRegExp, QSize
+from PyQt5.QtCore import QCoreApplication, QProcess, Qt, pyqtSignal, QThread, QModelIndex, QItemSelectionModel
 from PyQt5.QtGui import QPixmap, QIcon, QImage, QPainter, QCursor, QStandardItemModel, QStandardItem, QIntValidator, \
-    QRegExpValidator, QValidator, QFont, QFontDatabase
+    QFontDatabase
 from PyQt5.QtSvg import QSvgRenderer
 from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QMessageBox, QLineEdit, QLabel, \
-    QPushButton, QSystemTrayIcon, QMenu, QStyle, QTextEdit, QDialog, QTabWidget, \
-    QCheckBox, QGridLayout, QAction, QTableView, \
-    QAbstractItemView, QHeaderView, QSplitter, QMainWindow, QSizePolicy, QTableWidget, QTableWidgetItem, \
-    QStyledItemDelegate
+    QPushButton, QSystemTrayIcon, QMenu, QTextEdit, QDialog, QTabWidget, \
+    QCheckBox, QGridLayout, QTableView, \
+    QAbstractItemView, QHeaderView, QSplitter, QMainWindow, QSizePolicy, QStyledItemDelegate
+from systemd import journal
 
 JOUNO_VERSION = '0.9.0'
 
@@ -546,12 +541,10 @@ class JournalWatcher:
         self.notifications_enabled = True
 
     def is_notifying(self) -> bool:
-        debug(self.notifications_enabled)
         return self.notifications_enabled
 
     def enable_notifications(self, enable: bool):
         self.notifications_enabled = enable
-        debug(self.notifications_enabled)
 
     def update_config(self):
         if self.config is None:
@@ -1176,20 +1169,17 @@ class MainWindow(QMainWindow):
 
         def toggle_notifier():
             if not journal_watcher_task.is_notifying():
-                debug("xxxxx")
                 journal_watcher_task.enable_notifications(True)
                 notifier_action.setIcon(icon_toolbar_notifier_enabled)
                 notifier_action.setText(translate('Notifying'))
                 cm_notifier_action.setText(translate("Disable notifications"))
                 cm_notifier_action.setIcon(icon_toolbar_notifier_disabled)
             else:
-                debug("yyyy")
                 journal_watcher_task.enable_notifications(False)
                 notifier_action.setIcon(icon_toolbar_notifier_disabled)
                 notifier_action.setText(translate('Discarding'))
                 cm_notifier_action.setText(translate("Enable notifications"))
                 cm_notifier_action.setIcon(icon_toolbar_notifier_enabled)
-
 
         def quit_action():
             journal_watcher_task.requestInterruption()
