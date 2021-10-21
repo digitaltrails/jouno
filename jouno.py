@@ -1111,7 +1111,7 @@ class MainWindow(QMainWindow):
         super().__init__()
 
         main_tool_bar = self.addToolBar(translate("Toolbar"));
-
+        main_tool_bar.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
         journal_watcher_task = JournalWatcherTask()
 
         app_name = translate('Jouno - journal notifications')
@@ -1159,7 +1159,7 @@ class MainWindow(QMainWindow):
                 toggle_watcher()
 
         play_action = main_tool_bar.addAction(play_active_icon, translate('Monitor journal'), play);
-        pause_action = main_tool_bar.addAction(pause_icon, translate('Pause monitoring journal'), pause);
+        pause_action = main_tool_bar.addAction(pause_icon, translate('Pause monitoring'), pause);
         spacer = QWidget()
         spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         main_tool_bar.addSeparator()
