@@ -217,7 +217,9 @@ with this program. If not, see <https://www.gnu.org/licenses/>.
 # TODO Add option for non-tray use.
 # TODO Consider creating a separate full log browser making use of the journal API for search and random access.
 # TODO Add a control to temporarily mute popups - but still feed the journal panel
-
+# TODO Search 'resents' on toolbar
+# TODO Display more fields in 'recents' - priority as icon perhaps.
+# TODO https://specifications.freedesktop.org/icon-naming-spec/latest/
 
 import argparse
 import configparser
@@ -238,13 +240,156 @@ from typing import Mapping, Any, List, Type
 import dbus
 from systemd import journal
 
-from PyQt5.QtCore import QCoreApplication, QProcess, Qt, QPoint, pyqtSignal, QThread, QModelIndex, QItemSelectionModel
-from PyQt5.QtGui import QPixmap, QIcon, QImage, QPainter, QCursor, QStandardItemModel, QStandardItem, QIntValidator
+from PyQt5.QtCore import QCoreApplication, QProcess, Qt, QPoint, pyqtSignal, QThread, QModelIndex, QItemSelectionModel, \
+    QRegExp
+from PyQt5.QtGui import QPixmap, QIcon, QImage, QPainter, QCursor, QStandardItemModel, QStandardItem, QIntValidator, \
+    QRegExpValidator, QValidator, QFont, QFontDatabase
 from PyQt5.QtSvg import QSvgRenderer
 from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QMessageBox, QLineEdit, QLabel, \
     QPushButton, QSystemTrayIcon, QMenu, QStyle, QTextEdit, QDialog, QTabWidget, \
     QCheckBox, QGridLayout, QAction, QTableView, \
-    QAbstractItemView, QHeaderView, QSplitter, QMainWindow, QSizePolicy, QTableWidget, QTableWidgetItem
+    QAbstractItemView, QHeaderView, QSplitter, QMainWindow, QSizePolicy, QTableWidget, QTableWidgetItem, \
+    QStyledItemDelegate
+
+
+JOUNO_VERSION = '0.9.0'
+
+ICON_HELP_ABOUT = QIcon.fromTheme("help-about")
+ICON_HELP_CONTENTS = QIcon.fromTheme("help-contents")
+ICON_APPLICATION_EXIT = QIcon.fromTheme("application-exit")
+ICON_CONTEXT_MENU_RESUME = QIcon.fromTheme("view-refresh")
+ICON_CONTEXT_MENU_PAUSE = QIcon.fromTheme("process-stop")
+ICON_TRAY_PAUSED = ICON_CONTEXT_MENU_PAUSE
+
+
+def create_image_from_svg_string(svg_str: bytes) -> QImage:
+    """There is no QIcon option for loading QImage from a string, only from a SVG file, so roll our own."""
+    renderer = QSvgRenderer(svg_str)
+    image = QImage(64, 64, QImage.Format_ARGB32)
+    image.fill(0x0)
+    painter = QPainter(image)
+    renderer.render(painter)
+    painter.end()
+    return image
+
+
+def create_icon_from_svg_string(svg_str: bytes) -> QIcon:
+    """There is no QIcon option for loading SVG from a string, only from a SVG file, so roll our own."""
+    image = create_image_from_svg_string(svg_str)
+    return QIcon(QPixmap.fromImage(image))
+
+
+JOUNO_ICON_SVG = b"""
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">
+ <path fill="#232629" style="fill:currentColor;fill-opacity:1;stroke:none" 
+      d="M 4 2 L 4 3 L 13 3 L 13 13 L 4 13 L 4 14 L 13 14 L 14 14 L 14 3 L 14 2 L 7 2 z"
+      class="ColorScheme-Text"
+     />
+ <path fill="#3491e1" style="fill-opacity:1;stroke:none" 
+      d="M 8 6 L 8 8 L 12 8 L 12 7 L 8 7 z M 8 8 L 8 10 L 12 10 L 12 9 L 8 9 z M 8 11 L 8 12 L 12 12 L 12 11 L 10 11 z "
+
+     />
+
+</svg>
+"""
+
+icon_jouno_dark: QIcon = None
+
+
+def get_icon_jouno_dark() -> QIcon:
+    global icon_jouno_dark
+    if icon_jouno_dark is None:
+        icon_jouno_dark = create_icon_from_svg_string(JOUNO_ICON_SVG)
+    return icon_jouno_dark
+
+
+icon_jouno_light: QIcon = None
+
+
+def get_icon_jouno_light():
+    global icon_jouno_light
+    if icon_jouno_light is None:
+        icon_jouno_light = create_icon_from_svg_string(JOUNO_ICON_SVG.replace(b'#232629', b'#bbbbbb'))
+    return icon_jouno_light
+
+
+TABLE_HEADER_STYLE = "font-weight: bold;font-size: 9pt;"
+
+ABOUT_TEXT = f"""
+
+<b>jouno version {JOUNO_VERSION}</b>
+<p>
+A journal-entry to desktop-notification forwarder. 
+<p>
+<i>Right-mouse &rarr; context-menu &rarr; help</i> for help.
+<p>
+Visit <a href="https://github.com/digitaltrails/jouno">https://github.com/digitaltrails/jouno</a> for 
+more details.
+<p><p>
+
+<b>jouno Copyright (C) 2021 Michael Hamilton</b>
+<p>
+This program is free software: you can redistribute it and/or modify it
+under the terms of the GNU General Public License as published by the
+Free Software Foundation, version 3.
+<p>
+This program is distributed in the hope that it will be useful, but
+WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
+or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
+more details.
+<p>
+You should have received a copy of the GNU General Public License along
+with this program. If not, see <a href="https://www.gnu.org/licenses/">https://www.gnu.org/licenses/</a>.
+
+"""
+
+PAUSE_SVG = b"""
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">
+    <style type="text/css" id="current-color-scheme">
+        .ColorScheme-Text {
+            color:#232629;
+        }
+    </style>
+    <path d="m2 2v12h4v-12zm8 0v12h4v-12z" class="ColorScheme-Text" fill="currentColor"/>
+</svg>
+"""
+
+PAUSE_ACTIVE_SVG = b"""
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">
+    <style type="text/css" id="current-color-scheme">
+        .ColorScheme-Text {
+            color:#da4453;
+        }
+    </style>
+    <path d="m2 2v12h4v-12zm8 0v12h4v-12z" class="ColorScheme-Text" fill="currentColor"/>
+</svg>
+"""
+
+PLAY_SVG = b"""
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">
+    <style type="text/css" id="current-color-scheme">
+        .ColorScheme-Text {
+            color:#232629;
+        }
+    </style>
+    <path d="m2 2v12l12-6z" class="ColorScheme-Text" fill="currentColor"/>
+</svg>
+"""
+
+# #59a869;
+PLAY_ACTIVE_SVG = b"""
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">
+    <style type="text/css" id="current-color-scheme">
+        .ColorScheme-Text {
+            color:#3daee9;
+        }
+    </style>
+    <path d="m2 2v12l12-6z" class="ColorScheme-Text" fill="currentColor"/>
+</svg>
+"""
+
+
+
 
 DEFAULT_CONFIG = '''
 [options]
@@ -280,14 +425,14 @@ class Priority(Enum):
 
 
 NOTIFICATION_ICONS = {
-    Priority.EMERGENCY: 'dialog-error.png',
-    Priority.ALERT: 'dialog-error.png',
-    Priority.CRITICAL: 'dialog-error.png',
-    Priority.ERR: 'dialog-error.png',
-    Priority.WARNING: 'dialog-warning.png',
-    Priority.NOTICE: 'dialog-information.png',
-    Priority.INFO: 'dialog-information.png',
-    Priority.DEBUG: 'dialog-information.png',
+    Priority.EMERGENCY: 'dialog-error',
+    Priority.ALERT: 'dialog-error',
+    Priority.CRITICAL: 'dialog-error',
+    Priority.ERR: 'dialog-error',
+    Priority.WARNING: 'dialog-warning',
+    Priority.NOTICE: 'dialog-information',
+    Priority.INFO: 'dialog-information',
+    Priority.DEBUG: 'dialog-information',
 }
 
 debug_enabled = True
@@ -325,7 +470,7 @@ class NotifyFreeDesktop:
     def notify_desktop(self, app_name: str, summary: str, message: str, priority: Priority, timeout: int):
         # https://specifications.freedesktop.org/notification-spec/notification-spec-latest.html
         replace_id = 0
-        notification_icon = NOTIFICATION_ICONS[priority]
+        notification_icon = NOTIFICATION_ICONS[priority] + ".png"
         action_requests = []
         # extra_hints = {"urgency": 1, "sound-name": "dialog-warning", }
         extra_hints = {}
@@ -557,181 +702,6 @@ def translate(source_text: str):
 
 
 # ######################## USER INTERFACE CODE ######################################################################
-
-JOUNO_VERSION = '0.9.0'
-
-TABLE_HEADER_STYLE = "font-weight: bold;font-size: 9pt;"
-
-ABOUT_TEXT = f"""
-
-<b>jouno version {JOUNO_VERSION}</b>
-<p>
-A journal-entry to desktop-notification forwarder. 
-<p>
-<i>Right-mouse &rarr; context-menu &rarr; help</i> for help.
-<p>
-Visit <a href="https://github.com/digitaltrails/jouno">https://github.com/digitaltrails/jouno</a> for 
-more details.
-<p><p>
-
-<b>jouno Copyright (C) 2021 Michael Hamilton</b>
-<p>
-This program is free software: you can redistribute it and/or modify it
-under the terms of the GNU General Public License as published by the
-Free Software Foundation, version 3.
-<p>
-This program is distributed in the hope that it will be useful, but
-WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
-or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
-more details.
-<p>
-You should have received a copy of the GNU General Public License along
-with this program. If not, see <a href="https://www.gnu.org/licenses/">https://www.gnu.org/licenses/</a>.
-
-"""
-
-# https://www.svgrepo.com/svg/335387/filter
-FILTER_SVG_OLD = b"""
-<svg width="24px" height="24px" viewBox="0 -1 18 19" xmlns="http://www.w3.org/2000/svg">
-  <path fill="#494c4e" d="M14.35 4.855L10 9.21v2.8c0 1.31-2 2.45-2 1.89V9.2L3.65 4.856a.476.476 0 0 1-.11-.54A.5.5 0 0 1 4 4h10a.5.5 0 0 1 .46.31.476.476 0 0 1-.11.545z"/>
-  <circle fill="#494c4e" cx="9" cy="17" r="1"/>
-  <circle fill="#494c4e" cx="5" cy="1" r="1"/>
-  <circle fill="#494c4e" cx="13" cy="1" r="1"/>
-  <circle fill="#494c4e" cx="9" cy="1" r="1"/>
-</svg>
-"""
-
-JOUNO_ICON_SVG = b"""
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">
- <path fill="#232629" style="fill:currentColor;fill-opacity:1;stroke:none" 
-      d="M 4 2 L 4 3 L 13 3 L 13 13 L 4 13 L 4 14 L 13 14 L 14 14 L 14 3 L 14 2 L 7 2 z"
-      class="ColorScheme-Text"
-     />
- <path fill="#3491e1" style="fill-opacity:1;stroke:none" 
-      d="M 8 6 L 8 8 L 12 8 L 12 7 L 8 7 z M 8 8 L 8 10 L 12 10 L 12 9 L 8 9 z M 8 11 L 8 12 L 12 12 L 12 11 L 10 11 z "
-      
-     />
-
-</svg>
-"""
-# d="M 4 2 L 4 3 L 13 3 L 13 13 L 4 13 L 4 14 L 13 14 L 14 14 L 14 3 L 14 2 L 7 2 z M 7 6 L 7 8 L 12 8 L 12 7 L 7 7 z M 8 8 L 8 10 L 12 10 L 12 9 L 8 9 z M 9 11 L 9 12 L 12 12 L 12 11 L 10 11 z "
-# d = "M 4 2 L 4 3 L 13 3 L 13 13 L 4 13 L 4 14 L 13 14 L 14 14 L 14 3 L 14 2 L 7 2 z M 7 6 L 7 7 L 12 7 L 12 6 L 7 6 z M 8 8 L 8 9 L 12 9 L 12 8 L 8 8 z M 9 10 L 9 11 L 12 11 L 12 10 L 10 10 z "
-
-JOUNO_WINDOW_ICON_SVG = JOUNO_ICON_SVG.replace(b'#232629', b'#bbbbbb')
-
-JOUNO_PAUSED_ICON_SVG = b"""
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">
-  <defs id="defs3051">
-    <style type="text/css" id="current-color-scheme">
-      .ColorScheme-Text {
-        color:#232629;
-      }
-      .ColorScheme-NegativeText {
-        color:#da4453;
-      }
-      </style>
-  </defs>
-  <path
-     style="fill:currentColor;fill-opacity:1;stroke:none" 
-     class="ColorScheme-NegativeText"
-    d="M 8 2 A 6 5.9999852 0 0 0 4.5273438 3.1132812 L 5.2460938 3.8320312 A 5 5 0 0 1 8 3 A 5 5 0 0 1 13 8 A 5 5 0 0 1 12.167969 10.753906 L 12.884766 11.470703 A 6 5.9999852 0 0 0 14 8 A 6 5.9999852 0 0 0 8 2 z M 3.1152344 4.5292969 A 6 5.9999852 0 0 0 2 8 A 6 5.9999852 0 0 0 8 14 A 6 5.9999852 0 0 0 11.472656 12.886719 L 10.753906 12.167969 A 5 5 0 0 1 8 13 A 5 5 0 0 1 3 8 A 5 5 0 0 1 3.8320312 5.2460938 L 3.1152344 4.5292969 z M 5 7 L 5 9 L 11 9 L 11 7 L 5 7 z "
-          />
-</svg>
-"""
-
-ABOUT_SVG = b"""
-<svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">
-    <style type="text/css" id="current-color-scheme">
-        .ColorScheme-Text {
-            color:#232629;
-        }
-    </style>
-    <g class="ColorScheme-Text" fill="currentColor" fill-rule="evenodd">
-        <path d="m8 2a6 6 0 0 0 -6 6 6 6 0 0 0 6 6 6 6 0 0 0 6-6 6 6 0 0 0 -6-6zm0 1a5 5 0 0 1 5 5 5 5 0 0 1 -5 5 5 5 0 0 1 -5-5 5 5 0 0 1 5-5z"/>
-        <path d="m7 4h2v2h-2z"/>
-        <path d="m7 7h2v5h-2z"/>
-    </g>
-</svg>
-"""
-
-HELP_SVG = b"""
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">
-  <defs id="defs3051">
-    <style type="text/css" id="current-color-scheme">
-      .ColorScheme-Text {
-        color:#232629;
-      }
-      </style>
-  </defs>
- <path 
-     style="fill:currentColor;fill-opacity:1;stroke:none" 
-     d="M 8 2 A 6 6 0 0 0 2 8 A 6 6 0 0 0 8 14 A 6 6 0 0 0 14 8 A 6 6 0 0 0 8 2 z M 2 3 L 2 5 L 4 3 L 2 3 z M 8 3 A 5 5 0 0 1 10.390625 3.609375 L 8.8691406 5.1308594 A 3 3 0 0 0 8 5 A 3 3 0 0 0 7.1308594 5.1308594 L 5.6132812 3.6132812 A 5 5 0 0 1 8 3 z M 12 3 L 14 5 L 14 3 L 12 3 z M 3.609375 5.609375 L 5.1308594 7.1308594 A 3 3 0 0 0 5 8 A 3 3 0 0 0 5.1308594 8.8691406 L 3.6132812 10.386719 A 5 5 0 0 1 3 8 A 5 5 0 0 1 3.609375 5.609375 z M 12.386719 5.6132812 A 5 5 0 0 1 13 8 A 5 5 0 0 1 12.390625 10.390625 L 10.869141 8.8691406 A 3 3 0 0 0 11 8 A 3 3 0 0 0 10.869141 7.1308594 L 12.386719 5.6132812 z M 8 6 A 2 2 0 0 1 10 8 A 2 2 0 0 1 8 10 A 2 2 0 0 1 6 8 A 2 2 0 0 1 8 6 z M 7.1308594 10.869141 A 3 3 0 0 0 8 11 A 3 3 0 0 0 8.8691406 10.869141 L 10.386719 12.386719 A 5 5 0 0 1 8 13 A 5 5 0 0 1 5.609375 12.390625 L 7.1308594 10.869141 z M 2 11 L 2 13 L 4 13 L 2 11 z M 14 11 L 12 13 L 14 13 L 14 11 z "
-     class="ColorScheme-Text"
-     />
-</svg>
-"""
-
-PAUSE_SVG = b"""
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">
-    <style type="text/css" id="current-color-scheme">
-        .ColorScheme-Text {
-            color:#232629;
-        }
-    </style>
-    <path d="m2 2v12h4v-12zm8 0v12h4v-12z" class="ColorScheme-Text" fill="currentColor"/>
-</svg>
-"""
-
-PAUSE_ACTIVE_SVG = b"""
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">
-    <style type="text/css" id="current-color-scheme">
-        .ColorScheme-Text {
-            color:#da4453;
-        }
-    </style>
-    <path d="m2 2v12h4v-12zm8 0v12h4v-12z" class="ColorScheme-Text" fill="currentColor"/>
-</svg>
-"""
-
-PLAY_SVG = b"""
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">
-    <style type="text/css" id="current-color-scheme">
-        .ColorScheme-Text {
-            color:#232629;
-        }
-    </style>
-    <path d="m2 2v12l12-6z" class="ColorScheme-Text" fill="currentColor"/>
-</svg>
-"""
-
-# #59a869;
-PLAY_ACTIVE_SVG = b"""
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">
-    <style type="text/css" id="current-color-scheme">
-        .ColorScheme-Text {
-            color:#3daee9;
-        }
-    </style>
-    <path d="m2 2v12l12-6z" class="ColorScheme-Text" fill="currentColor"/>
-</svg>
-"""
-
-
-def create_image_from_svg_string(svg_str: bytes) -> QImage:
-    """There is no QIcon option for loading QImage from a string, only from a SVG file, so roll our own."""
-    renderer = QSvgRenderer(svg_str)
-    image = QImage(64, 64, QImage.Format_ARGB32)
-    image.fill(0x0)
-    painter = QPainter(image)
-    renderer.render(painter)
-    painter.end()
-    return image
-
-
-def create_icon_from_svg_string(svg_str: bytes) -> QIcon:
-    """There is no QIcon option for loading SVG from a string, only from a SVG file, so roll our own."""
-    image = create_image_from_svg_string(svg_str)
-    return QIcon(QPixmap.fromImage(image))
 
 
 class OptionsTab(QWidget):
@@ -1145,30 +1115,26 @@ class MainWindow(QMainWindow):
         journal_watcher_task = JournalWatcherTask()
 
         app_name = translate('Jouno - journal notifications')
-        app.setWindowIcon(create_icon_from_svg_string(JOUNO_WINDOW_ICON_SVG))
+        app.setWindowIcon(get_icon_jouno_light())
         app.setApplicationDisplayName(app_name)
         app.setApplicationVersion(JOUNO_VERSION)
 
-        watch_on_icon = create_icon_from_svg_string(JOUNO_ICON_SVG)
-        watch_off_icon = create_icon_from_svg_string(JOUNO_PAUSED_ICON_SVG)
         play_icon = create_icon_from_svg_string(PLAY_SVG)
         play_active_icon = create_icon_from_svg_string(PLAY_ACTIVE_SVG)
         pause_icon = create_icon_from_svg_string(PAUSE_SVG)
         pause_active_icon = create_icon_from_svg_string(PAUSE_ACTIVE_SVG)
-        help_icon = create_icon_from_svg_string(HELP_SVG)
-        about_icon = create_icon_from_svg_string(ABOUT_SVG)
 
         def toggle_watcher() -> None:
             if journal_watcher_task.isRunning():
                 journal_watcher_task.requestInterruption()
-                tray.setIcon(watch_off_icon)
+                tray.setIcon(ICON_TRAY_PAUSED)
                 tray.setToolTip(f"{app_name} - {translate('Paused')}")
                 app_context_menu.set_journal_playing(False)
                 play_action.setIcon(play_icon)
                 pause_action.setIcon(pause_active_icon)
             else:
                 journal_watcher_task.start()
-                tray.setIcon(watch_on_icon)
+                tray.setIcon(get_icon_jouno_dark())
                 tray.setToolTip(app_name)
                 app_context_menu.set_journal_playing(True)
                 play_action.setIcon(play_active_icon)
@@ -1198,12 +1164,12 @@ class MainWindow(QMainWindow):
         spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         main_tool_bar.addSeparator()
         main_tool_bar.addWidget(spacer)
-        main_tool_bar.addAction(help_icon, translate('Help'), HelpDialog.invoke);
-        main_tool_bar.addAction(about_icon, translate('About'), AboutDialog.invoke);
+        main_tool_bar.addAction(ICON_HELP_CONTENTS, translate('Help'), HelpDialog.invoke);
+        main_tool_bar.addAction(ICON_HELP_ABOUT, translate('About'), AboutDialog.invoke);
         self.setCentralWidget(CentralPanel(journal_watcher_task))
 
         tray = QSystemTrayIcon()
-        tray.setIcon(watch_on_icon)
+        tray.setIcon(get_icon_jouno_dark())
         tray.setContextMenu(app_context_menu)
 
         def show_window():
@@ -1273,7 +1239,6 @@ class JournalTableView(QTableView):
         self.setModel(JournalTableModel(number_of_rows=0))
         self.setDragDropOverwriteMode(False)
         self.resizeColumnsToContents()
-        self.setSelectionMode(QAbstractItemView.SingleSelection)
         self.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.setColumnWidth(0, 8 * 14)
         self.setColumnWidth(1, 10 * 14)
@@ -1282,17 +1247,18 @@ class JournalTableView(QTableView):
         self.horizontalHeader().setSectionResizeMode(4, QHeaderView.Stretch)
         self.horizontalHeader().setDefaultAlignment(Qt.AlignLeft)
         self.horizontalHeader().setStyleSheet(TABLE_HEADER_STYLE)
+        self.setItemDelegate(JournalEntryDelegate(self.model()))
+        self.setEditTriggers(QAbstractItemView.SelectedClicked)
         # self.setGridStyle(Qt.NoPen)
         self.setShowGrid(False)
 
         def view_journal_entry(index: QModelIndex):
-            entry_dialog = DisplayJournalEntryDialog(self, self.model().get_journal_entry(index.row()))
+            entry_dialog = JournalEntryDialog(self, self.model().get_journal_entry(index.row()))
             entry_dialog.show()
 
         self.doubleClicked.connect(view_journal_entry)
 
         def new_journal_entry(journal_entry):
-            debug(f">>>>>>>>>>>>>>>>>>>>>>>>>>>Received{os.getpid()}{journal_entry}")
             self.model().new_journal_entry(journal_entry)
             self.scrollToBottom()
 
@@ -1303,6 +1269,7 @@ class JournalTableModel(QStandardItemModel):
 
     def __init__(self, number_of_rows: int):
         super().__init__(number_of_rows, 5)
+        self.icon_cache = {}
         self.journal_entries = []
         self.setHorizontalHeaderLabels(
             [translate("Time"), translate("Host"), translate("Source"), translate("PID"), translate("Message")])
@@ -1320,7 +1287,20 @@ class JournalTableModel(QStandardItemModel):
             return item
 
         def selectable(item: QStandardItem):
-            item.setFlags(Qt.ItemIsSelectable | Qt.ItemIsEnabled)
+            item.setFlags(Qt.ItemIsSelectable | Qt.ItemIsEnabled | Qt.ItemIsEditable)
+            return item
+
+        def setIcon(item: QStandardItem):
+            priority = journal_entry['PRIORITY'] if 'PRIORITY' in journal_entry else Priority.NOTICE.value
+            if not Priority.EMERGENCY.value <= priority <= Priority.DEBUG.value:
+                priority = Priority.NOTICE.value
+            notification_icon_name = NOTIFICATION_ICONS[Priority(priority)]
+            if notification_icon_name in self.icon_cache:
+                icon = self.icon_cache[notification_icon_name]
+            else:
+                icon = QIcon.fromTheme(notification_icon_name)
+                self.icon_cache[notification_icon_name] = icon
+            item.setIcon(icon)
             return item
 
         self.journal_entries.append(journal_entry)
@@ -1333,11 +1313,20 @@ class JournalTableModel(QStandardItemModel):
                 selectable(QStandardItem(journal_entry['_COMM'] if '_COMM' in journal_entry else 'unknown')),
                 # TODO smarter choice when _PID is not present.
                 selectable(align_right(QStandardItem(str(journal_entry['_PID'] if '_PID' in journal_entry else '')))),
-                selectable(QStandardItem(journal_entry['MESSAGE']))
+                setIcon(selectable(QStandardItem(journal_entry['MESSAGE'])))
             ])
 
 
-class DisplayJournalEntryDialog(QDialog):
+class JournalEntryDelegate(QStyledItemDelegate):
+
+    def createEditor(self, parent, option, index):
+            line_edit = QLineEdit(parent)
+            # Makes it behave line a normal readonly text entry (unlike making the whole table read only).
+            line_edit.setReadOnly(True)
+            return line_edit
+
+
+class JournalEntryDialog(QDialog):
 
     def __init__(self, parent, journal_entry):
         super().__init__(parent)
@@ -1356,6 +1345,56 @@ class DisplayJournalEntryDialog(QDialog):
         self.setLayout(layout)
         self.adjustSize()
 
+class JournalEntryDialogPlain(QDialog):
+
+    def __init__(self, parent, journal_entry):
+        super().__init__(parent)
+        # grid of QLineEdit's is easier than a table - the read-only editor allows context menu with a copy option.
+        # Tables are a pain in most API's - seems to be no exception with Qt.
+        self.setWindowTitle(translate(f"Journal Entry {journal_entry['__REALTIME_TIMESTAMP']}"))
+        layout = QVBoxLayout()
+        text_view = QTextEdit()
+        text_view.setFont(QFontDatabase.systemFont(QFontDatabase.FixedFont))
+        text_view.setReadOnly(True)
+        text = translate(f"Journal Entry {journal_entry['__REALTIME_TIMESTAMP']}\n\n")
+        for row, (k, v) in enumerate(sorted(list(journal_entry.items()))):
+            text += f"{k:25}: {str(v)}\n"
+        text_view.setText(text)
+        layout.addWidget(text_view)
+        self.setLayout(layout)
+        # TODO maybe compute a minimum from the actual screen size
+        self.setMinimumWidth(1100)
+        self.setMinimumHeight(900)
+        # .show() is non-modal, .exec() is modal
+        self.show()
+
+class JournalEntryDialog(QDialog):
+
+    def __init__(self, parent, journal_entry):
+        super().__init__(parent)
+        # grid of QLineEdit's is easier than a table - the read-only editor allows context menu with a copy option.
+        # Tables are a pain in most API's - seems to be no exception with Qt.
+        self.setWindowTitle(translate(f"Journal Entry {journal_entry['__REALTIME_TIMESTAMP']}"))
+        layout = QVBoxLayout()
+        # TODO toolbar with copy to plain text
+        text_view = QTextEdit()
+
+        # text_view.setFont(QFontDatabase.systemFont(QFontDatabase.FixedFont))
+        text_view.setReadOnly(True)
+        text = translate(f"Journal Entry {journal_entry['__REALTIME_TIMESTAMP']}\n\n")
+        text += "| Journal Entry Field | Value |\n"
+        text += "| --- | --- |\n"
+        for row, (k, v) in enumerate(sorted(list(journal_entry.items()))):
+            text += f"| {k:25} | {str(v)} |\n"
+        text_view.setMarkdown(text)
+        text_view.setStyleSheet(" { font-weight: bold; }")
+        layout.addWidget(text_view)
+        self.setLayout(layout)
+        # TODO maybe compute a minimum from the actual screen size
+        self.setMinimumWidth(1100)
+        self.setMinimumHeight(900)
+        # .show() is non-modal, .exec() is modal
+        self.show()
 
 class DialogSingletonMixin:
     """
@@ -1465,24 +1504,24 @@ class ContextMenu(QMenu):
             self.style().standardIcon(QStyle.SP_BrowserStop),
             translate('Pause'),
             enable_action)
-        self.addAction(self.style().standardIcon(QStyle.SP_MessageBoxInformation),
+        self.addAction(ICON_HELP_ABOUT,
                        translate('About'),
                        about_action)
-        self.addAction(self.style().standardIcon(QStyle.SP_TitleBarContextHelpButton),
+        self.addAction(ICON_HELP_CONTENTS,
                        translate('Help'),
                        help_action)
         self.addSeparator()
-        self.addAction(self.style().standardIcon(QStyle.SP_DialogCloseButton),
+        self.addAction(ICON_APPLICATION_EXIT,
                        translate('Quit'),
                        quit_action)
 
     def set_journal_playing(self, is_playing: bool):
         if is_playing:
             self.play_pause_action.setText(translate("Pause"))
-            self.play_pause_action.setIcon(self.style().standardIcon(QStyle.SP_BrowserStop))
+            self.play_pause_action.setIcon(ICON_CONTEXT_MENU_PAUSE)
         else:
             self.play_pause_action.setText(translate('Continue'))
-            self.play_pause_action.setIcon(self.style().standardIcon(QStyle.SP_BrowserReload))
+            self.play_pause_action.setIcon(ICON_CONTEXT_MENU_RESUME)
 
 
 def exception_handler(e_type, e_value, e_traceback):
@@ -1559,7 +1598,7 @@ def install_as_desktop_application(uninstall: bool = False):
         print(f"WARNING: skipping installation of {icon_path.as_posix()}, it is already present.")
     else:
         print(f'INFO: creating {icon_path.as_posix()}')
-        create_image_from_svg_string(JOUNO_ICON_SVG).save(icon_path.as_posix())
+        get_icon_jouno_dark().save(icon_path.as_posix())
 
     print('INFO: installation complete. Your desktop->applications->system should now contain jouno')
 
