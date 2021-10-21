@@ -231,6 +231,7 @@ import signal
 import stat
 import sys
 import textwrap
+import threading
 import time
 import traceback
 from enum import Enum
@@ -241,7 +242,7 @@ import dbus
 from systemd import journal
 
 from PyQt5.QtCore import QCoreApplication, QProcess, Qt, QPoint, pyqtSignal, QThread, QModelIndex, QItemSelectionModel, \
-    QRegExp
+    QRegExp, QSize
 from PyQt5.QtGui import QPixmap, QIcon, QImage, QPainter, QCursor, QStandardItemModel, QStandardItem, QIntValidator, \
     QRegExpValidator, QValidator, QFont, QFontDatabase
 from PyQt5.QtSvg import QSvgRenderer
@@ -251,15 +252,16 @@ from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QMessageBox, QLi
     QAbstractItemView, QHeaderView, QSplitter, QMainWindow, QSizePolicy, QTableWidget, QTableWidgetItem, \
     QStyledItemDelegate
 
-
 JOUNO_VERSION = '0.9.0'
 
 ICON_HELP_ABOUT = QIcon.fromTheme("help-about")
 ICON_HELP_CONTENTS = QIcon.fromTheme("help-contents")
 ICON_APPLICATION_EXIT = QIcon.fromTheme("application-exit")
-ICON_CONTEXT_MENU_RESUME = QIcon.fromTheme("view-refresh")
-ICON_CONTEXT_MENU_PAUSE = QIcon.fromTheme("process-stop")
-ICON_TRAY_PAUSED = ICON_CONTEXT_MENU_PAUSE
+ICON_CONTEXT_MENU_LISTENING_ENABLE = QIcon.fromTheme("view-refresh")
+ICON_CONTEXT_MENU_LISTENING_DISABLE = QIcon.fromTheme("process-stop")
+ICON_TRAY_LISTENING_DISABLED = ICON_CONTEXT_MENU_LISTENING_DISABLE
+ICON_TOOLBAR_NOTIFIER_ENABLED = QIcon.fromTheme("dialog-information")
+ICON_TOOLBAR_NOTIFIER_DISABLED = QIcon.fromTheme("dialog-error")
 
 
 def create_image_from_svg_string(svg_str: bytes) -> QImage:
@@ -313,7 +315,7 @@ def get_icon_jouno_light():
     return icon_jouno_light
 
 
-TOOLBAR_MONITOING_DISABLED_SVG = b"""
+TOOLBAR_JNL_LISTENING_DISABLED_SVG = b"""
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">
     <style type="text/css" id="current-color-scheme">
         .ColorScheme-Text {
@@ -325,7 +327,7 @@ TOOLBAR_MONITOING_DISABLED_SVG = b"""
 """
 
 # #59a869;
-TOOLBAR_MONITORING_ENABLED_SVG = b"""
+TOOLBAR_JNL_LISTENING_ENABLED_SVG = b"""
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">
     <style type="text/css" id="current-color-scheme">
         .ColorScheme-Text {
@@ -336,6 +338,38 @@ TOOLBAR_MONITORING_ENABLED_SVG = b"""
 </svg>
 """
 
+TOOLBAR_NOTIFIER_ENABLED_SVG = b"""
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 22 22">
+  <defs id="defs3051">
+    <style type="text/css" id="current-color-scheme">
+      .ColorScheme-Text {
+        color:#232629;
+      }
+      </style>
+  </defs>
+ <path style="fill:currentColor;fill-opacity:1;stroke:none"
+       d="M 3 4 L 3 16 L 6 20 L 6 17 L 6 16 L 19 16 L 19 4 L 3 4 z M 4 5 L 18 5 L 18 15 L 4 15 L 4 5 z M 16 6 L 9.5 12.25 L 7 10 L 6 11 L 9.5 14 L 17 7 L 16 6 z "
+     class="ColorScheme-Text"
+     />
+</svg>
+"""
+
+TOOLBAR_NOTIFIER_DISABLED_SVG = b"""
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 22 22">
+  <defs id="defs3051">
+    <style type="text/css" id="current-color-scheme">
+      .ColorScheme-Text {
+        color:#da4453;
+      }
+      </style>
+  </defs>
+ <path style="fill:currentColor;fill-opacity:1;stroke:none"
+       d="M 3 4 L 3 16 L 6 20 L 6 17 L 6 16 L 19 16 L 19 4 L 3 4 z M 4 5 L 18 5 L 18 15 L 4 15 L 4 5 z M 8 6 L 7 7 L 10 10 L 7 13 L 8 14 L 11 11 L 14 14 L 15 13 L 12 10 L 15 7 L 14 6 L 11 9 L 8 6 z "
+     class="ColorScheme-Text"
+     />
+</svg>
+
+"""
 
 TABLE_HEADER_STYLE = "font-weight: bold;font-size: 9pt;"
 
@@ -509,6 +543,15 @@ class JournalWatcher:
         self.update_config()
         self._stop = False
         self.supervisor = supervisor
+        self.notifications_enabled = True
+
+    def is_notifying(self) -> bool:
+        debug(self.notifications_enabled)
+        return self.notifications_enabled
+
+    def enable_notifications(self, enable: bool):
+        self.notifications_enabled = enable
+        debug(self.notifications_enabled)
 
     def update_config(self):
         if self.config is None:
@@ -664,7 +707,7 @@ class JournalWatcher:
                             debug(f"Notable: burst_count={len(notable)}: {journal_entry['MESSAGE']}")
                             notable.append(journal_entry)
                             self.supervisor.new_journal_entry(journal_entry)
-            if len(notable):
+            if self.notifications_enabled and len(notable):
                 notify.notify_desktop(app_name=self.determine_app_name(notable),
                                       summary=self.determine_summary(notable),
                                       message=self.determine_message(notable),
@@ -928,6 +971,12 @@ class JournalWatcherTask(QThread):
         super().__init__()
         self.watcher = JournalWatcher(self)
 
+    def is_notifying(self) -> bool:
+        return self.watcher.is_notifying()
+
+    def enable_notifications(self, enable: bool):
+        self.watcher.enable_notifications(enable)
+
     def run(self) -> None:
         self.watcher.watch_journal()
 
@@ -1087,7 +1136,10 @@ class MainWindow(QMainWindow):
         super().__init__()
 
         main_tool_bar = self.addToolBar(translate("Toolbar"));
+        # main_tool_bar.setFixedHeight(80)
+        # main_tool_bar.setIconSize(QSize(30,30))
         main_tool_bar.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        main_tool_bar.setStyleSheet("QToolButton {width: 120px;}")
         journal_watcher_task = JournalWatcherTask()
 
         app_name = translate('Jouno - journal notifications')
@@ -1095,36 +1147,76 @@ class MainWindow(QMainWindow):
         app.setApplicationDisplayName(app_name)
         app.setApplicationVersion(JOUNO_VERSION)
 
-        play_active_icon = create_icon_from_svg_string(TOOLBAR_MONITORING_ENABLED_SVG)
-        pause_icon = create_icon_from_svg_string(TOOLBAR_MONITOING_DISABLED_SVG)
+        icon_toolbar_listening_enabled = create_icon_from_svg_string(TOOLBAR_JNL_LISTENING_ENABLED_SVG)
+        icon_toolbar_listening_disabled = create_icon_from_svg_string(TOOLBAR_JNL_LISTENING_DISABLED_SVG)
+        icon_toolbar_notifier_enabled = create_icon_from_svg_string(TOOLBAR_NOTIFIER_ENABLED_SVG)
+        icon_toolbar_notifier_disabled = create_icon_from_svg_string(TOOLBAR_NOTIFIER_DISABLED_SVG)
 
-        def toggle_watcher() -> None:
+        def toggle_listener() -> None:
             if journal_watcher_task.isRunning():
                 journal_watcher_task.requestInterruption()
-                tray.setIcon(ICON_TRAY_PAUSED)
+                while journal_watcher_task.isRunning():
+                    time.sleep(0.5)
+                tray.setIcon(ICON_TRAY_LISTENING_DISABLED)
                 tray.setToolTip(f"{app_name} - {translate('Paused')}")
-                app_context_menu.set_journal_playing(False)
-                play_action.setIcon(pause_icon)
-                play_action.setText(translate("Paused"))
+                bar_listen_action.setIcon(icon_toolbar_listening_disabled)
+                bar_listen_action.setText(translate("Paused"))
+                ctxm_listen_action.setText(translate("Resume journal monitoring"))
+                ctxm_listen_action.setIcon(ICON_CONTEXT_MENU_LISTENING_ENABLE)
             else:
                 journal_watcher_task.start()
+                while not journal_watcher_task.isRunning():
+                    time.sleep(0.5)
                 tray.setIcon(get_icon_jouno_dark())
                 tray.setToolTip(app_name)
-                app_context_menu.set_journal_playing(True)
-                play_action.setIcon(play_active_icon)
-                play_action.setText(translate("Monitoring journal"))
+                bar_listen_action.setIcon(icon_toolbar_listening_enabled)
+                bar_listen_action.setText(translate("Running"))
+                ctxm_listen_action.setText(translate("Stop journal monitoring"))
+                ctxm_listen_action.setIcon(ICON_CONTEXT_MENU_LISTENING_DISABLE)
+
+        def toggle_notifier():
+            if not journal_watcher_task.is_notifying():
+                debug("xxxxx")
+                journal_watcher_task.enable_notifications(True)
+                notifier_action.setIcon(icon_toolbar_notifier_enabled)
+                notifier_action.setText(translate('Notifying'))
+                cm_notifier_action.setText(translate("Disable notifications"))
+                cm_notifier_action.setIcon(icon_toolbar_notifier_disabled)
+            else:
+                debug("yyyy")
+                journal_watcher_task.enable_notifications(False)
+                notifier_action.setIcon(icon_toolbar_notifier_disabled)
+                notifier_action.setText(translate('Discarding'))
+                cm_notifier_action.setText(translate("Enable notifications"))
+                cm_notifier_action.setIcon(icon_toolbar_notifier_enabled)
+
 
         def quit_action():
             journal_watcher_task.requestInterruption()
             app.quit()
 
-        app_context_menu = ContextMenu(
-            about_action=AboutDialog.invoke,
-            help_action=HelpDialog.invoke,
-            enable_action=toggle_watcher,
-            quit_action=quit_action)
+        app_context_menu = QMenu()
+        ctxm_listen_action = app_context_menu.addAction(ICON_CONTEXT_MENU_LISTENING_DISABLE,
+                                                      translate("Stop journal monitoring"),
+                                                      toggle_listener)
+        cm_notifier_action = app_context_menu.addAction(icon_toolbar_notifier_disabled,
+                                                        translate("Disable notifications"),
+                                                        toggle_notifier)
+        app_context_menu.addAction(ICON_HELP_ABOUT,
+                                   translate('About'),
+                                   AboutDialog.invoke)
+        app_context_menu.addAction(ICON_HELP_CONTENTS,
+                                   translate('Help'),
+                                   HelpDialog.invoke)
+        app_context_menu.addSeparator()
+        app_context_menu.addAction(ICON_APPLICATION_EXIT,
+                                   translate('Quit'),
+                                   quit_action)
 
-        play_action = main_tool_bar.addAction(play_active_icon, translate("Monitoring journal"), toggle_watcher);
+        bar_listen_action = main_tool_bar.addAction(icon_toolbar_listening_enabled, translate("Running"), toggle_listener);
+        bar_listen_action.setObjectName("monitor")
+        notifier_action = main_tool_bar.addAction(icon_toolbar_notifier_enabled, translate("Notifying"),
+                                                  toggle_notifier);
         spacer = QWidget()
         spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         main_tool_bar.addSeparator()
@@ -1285,10 +1377,10 @@ class JournalTableModel(QStandardItemModel):
 class JournalEntryDelegate(QStyledItemDelegate):
 
     def createEditor(self, parent, option, index):
-            line_edit = QLineEdit(parent)
-            # Makes it behave line a normal readonly text entry (unlike making the whole table read only).
-            line_edit.setReadOnly(True)
-            return line_edit
+        line_edit = QLineEdit(parent)
+        # Makes it behave line a normal readonly text entry (unlike making the whole table read only).
+        line_edit.setReadOnly(True)
+        return line_edit
 
 
 class JournalEntryDialog(QDialog):
@@ -1309,6 +1401,7 @@ class JournalEntryDialog(QDialog):
             layout.addWidget(val_widget, row, 1, 1, 2, alignment=Qt.AlignLeft)
         self.setLayout(layout)
         self.adjustSize()
+
 
 class JournalEntryDialogPlain(QDialog):
 
@@ -1332,6 +1425,7 @@ class JournalEntryDialogPlain(QDialog):
         self.setMinimumHeight(900)
         # .show() is non-modal, .exec() is modal
         self.show()
+
 
 class JournalEntryDialog(QDialog):
 
@@ -1360,6 +1454,7 @@ class JournalEntryDialog(QDialog):
         self.setMinimumHeight(900)
         # .show() is non-modal, .exec() is modal
         self.show()
+
 
 class DialogSingletonMixin:
     """
@@ -1461,14 +1556,14 @@ class HelpDialog(QDialog, DialogSingletonMixin):
 class ContextMenu(QMenu):
 
     def __init__(self,
-                 about_action=None, help_action=None, enable_action=None, config_action=None,
+                 about_action=None, help_action=None, listen_action=None, config_action=None,
                  quit_action=None) -> None:
         super().__init__()
 
         self.play_pause_action = self.addAction(
-            self.style().standardIcon(QStyle.SP_BrowserStop),
+            ICON_CONTEXT_MENU_LISTENING_DISABLE,
             translate('Pause'),
-            enable_action)
+            listen_action)
         self.addAction(ICON_HELP_ABOUT,
                        translate('About'),
                        about_action)
@@ -1480,13 +1575,6 @@ class ContextMenu(QMenu):
                        translate('Quit'),
                        quit_action)
 
-    def set_journal_playing(self, is_playing: bool):
-        if is_playing:
-            self.play_pause_action.setText(translate("Pause"))
-            self.play_pause_action.setIcon(ICON_CONTEXT_MENU_PAUSE)
-        else:
-            self.play_pause_action.setText(translate('Continue'))
-            self.play_pause_action.setIcon(ICON_CONTEXT_MENU_RESUME)
 
 
 def exception_handler(e_type, e_value, e_traceback):
