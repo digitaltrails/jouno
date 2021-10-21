@@ -216,7 +216,7 @@ with this program. If not, see <https://www.gnu.org/licenses/>.
 # TODO Add option for how many journal rows to show - if zero hide panel.
 # TODO Add option for non-tray use.
 # TODO Consider creating a separate full log browser making use of the journal API for search and random access.
-# TODO Add a control to temporarily mute popups - but still feed the journal panel
+# TODO Add a toolbar control to temporarily mute popups - but still feed the journal panel
 # TODO Search 'resents' on toolbar
 # TODO Display more fields in 'recents' - priority as icon perhaps.
 # TODO https://specifications.freedesktop.org/icon-naming-spec/latest/
@@ -313,6 +313,30 @@ def get_icon_jouno_light():
     return icon_jouno_light
 
 
+TOOLBAR_MONITOING_DISABLED_SVG = b"""
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">
+    <style type="text/css" id="current-color-scheme">
+        .ColorScheme-Text {
+            color:#da4453;
+        }
+    </style>
+    <path d="m2 2v12h4v-12zm8 0v12h4v-12z" class="ColorScheme-Text" fill="currentColor"/>
+</svg>
+"""
+
+# #59a869;
+TOOLBAR_MONITORING_ENABLED_SVG = b"""
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">
+    <style type="text/css" id="current-color-scheme">
+        .ColorScheme-Text {
+            color:#3daee9;
+        }
+    </style>
+    <path d="m2 2v12l12-6z" class="ColorScheme-Text" fill="currentColor"/>
+</svg>
+"""
+
+
 TABLE_HEADER_STYLE = "font-weight: bold;font-size: 9pt;"
 
 ABOUT_TEXT = f"""
@@ -342,54 +366,6 @@ You should have received a copy of the GNU General Public License along
 with this program. If not, see <a href="https://www.gnu.org/licenses/">https://www.gnu.org/licenses/</a>.
 
 """
-
-PAUSE_SVG = b"""
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">
-    <style type="text/css" id="current-color-scheme">
-        .ColorScheme-Text {
-            color:#232629;
-        }
-    </style>
-    <path d="m2 2v12h4v-12zm8 0v12h4v-12z" class="ColorScheme-Text" fill="currentColor"/>
-</svg>
-"""
-
-PAUSE_ACTIVE_SVG = b"""
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">
-    <style type="text/css" id="current-color-scheme">
-        .ColorScheme-Text {
-            color:#da4453;
-        }
-    </style>
-    <path d="m2 2v12h4v-12zm8 0v12h4v-12z" class="ColorScheme-Text" fill="currentColor"/>
-</svg>
-"""
-
-PLAY_SVG = b"""
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">
-    <style type="text/css" id="current-color-scheme">
-        .ColorScheme-Text {
-            color:#232629;
-        }
-    </style>
-    <path d="m2 2v12l12-6z" class="ColorScheme-Text" fill="currentColor"/>
-</svg>
-"""
-
-# #59a869;
-PLAY_ACTIVE_SVG = b"""
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">
-    <style type="text/css" id="current-color-scheme">
-        .ColorScheme-Text {
-            color:#3daee9;
-        }
-    </style>
-    <path d="m2 2v12l12-6z" class="ColorScheme-Text" fill="currentColor"/>
-</svg>
-"""
-
-
-
 
 DEFAULT_CONFIG = '''
 [options]
@@ -1119,10 +1095,8 @@ class MainWindow(QMainWindow):
         app.setApplicationDisplayName(app_name)
         app.setApplicationVersion(JOUNO_VERSION)
 
-        play_icon = create_icon_from_svg_string(PLAY_SVG)
-        play_active_icon = create_icon_from_svg_string(PLAY_ACTIVE_SVG)
-        pause_icon = create_icon_from_svg_string(PAUSE_SVG)
-        pause_active_icon = create_icon_from_svg_string(PAUSE_ACTIVE_SVG)
+        play_active_icon = create_icon_from_svg_string(TOOLBAR_MONITORING_ENABLED_SVG)
+        pause_icon = create_icon_from_svg_string(TOOLBAR_MONITOING_DISABLED_SVG)
 
         def toggle_watcher() -> None:
             if journal_watcher_task.isRunning():
@@ -1130,15 +1104,15 @@ class MainWindow(QMainWindow):
                 tray.setIcon(ICON_TRAY_PAUSED)
                 tray.setToolTip(f"{app_name} - {translate('Paused')}")
                 app_context_menu.set_journal_playing(False)
-                play_action.setIcon(play_icon)
-                pause_action.setIcon(pause_active_icon)
+                play_action.setIcon(pause_icon)
+                play_action.setText(translate("Paused"))
             else:
                 journal_watcher_task.start()
                 tray.setIcon(get_icon_jouno_dark())
                 tray.setToolTip(app_name)
                 app_context_menu.set_journal_playing(True)
                 play_action.setIcon(play_active_icon)
-                pause_action.setIcon(pause_icon)
+                play_action.setText(translate("Monitoring journal"))
 
         def quit_action():
             journal_watcher_task.requestInterruption()
@@ -1150,16 +1124,7 @@ class MainWindow(QMainWindow):
             enable_action=toggle_watcher,
             quit_action=quit_action)
 
-        def play():
-            if not journal_watcher_task.isRunning():
-                toggle_watcher()
-
-        def pause():
-            if journal_watcher_task.isRunning():
-                toggle_watcher()
-
-        play_action = main_tool_bar.addAction(play_active_icon, translate('Monitor journal'), play);
-        pause_action = main_tool_bar.addAction(pause_icon, translate('Pause monitoring'), pause);
+        play_action = main_tool_bar.addAction(play_active_icon, translate("Monitoring journal"), toggle_watcher);
         spacer = QWidget()
         spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         main_tool_bar.addSeparator()
