@@ -1456,7 +1456,7 @@ class JournalEntryDialog(QDialog):
         for row, (k, v) in enumerate(sorted(list(journal_entry.items()))):
             text += f"| {k:25} | {str(v)} |\n"
         text_view.setMarkdown(text)
-        text_view.setStyleSheet(" { font-weight: bold; }")
+        #text_view.setStyleSheet(" { font-weight: bold; }")
         layout.addWidget(text_view)
         self.setLayout(layout)
         # TODO maybe compute a minimum from the actual screen size
