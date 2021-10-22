@@ -366,6 +366,23 @@ TOOLBAR_NOTIFIER_DISABLED_SVG = b"""
 
 """
 
+TOOLBAR_ADD_FILTER_SVG = """
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 22 22">
+  <defs id="defs3051">
+    <style type="text/css" id="current-color-scheme">
+      .ColorScheme-Text {
+        color:#232629;
+      }
+      </style>
+  </defs>
+ <path 
+     style="fill:currentColor;fill-opacity:1;stroke:none" 
+     d="M 5 3 L 4 4 L 4 5 L 4 5.3046875 L 9 12.367188 L 9 16 L 9 16.039062 L 12.990234 19 L 13 19 L 13 12.367188 L 18 5.3046875 L 18 4 L 17 3 L 5 3 z M 5 4 L 17 4 L 17 4.9882812 L 12.035156 12 L 12 12 L 12 12.048828 L 12 13 L 12 17.019531 L 10 15.535156 L 10 13 L 10 12.048828 L 10 12 L 9.9648438 12 L 5 4.9882812 L 5 4 z M 6 5 L 8 8 L 8 6 L 10 5 L 6 5 z M 16 14 L 16 16 L 14 16 L 14 17 L 16 17 L 16 19 L 17 19 L 17 17 L 19 17 L 19 16 L 17 16 L 17 14 L 16 14 z "
+     class="ColorScheme-Text"
+     />
+</svg>
+"""
+
 TABLE_HEADER_STYLE = "font-weight: bold;font-size: 9pt;"
 
 ABOUT_TEXT = f"""
@@ -1122,29 +1139,102 @@ class ConfigPanel(QWidget):
         self.raise_()
         self.activateWindow()
 
+class MainToolBarManger(QToolBar):
+
+    def __init__(self, main_window: QMainWindow, run_func, notify_func):
+        super().__init__(parent=main_window)
+        # main_tool_bar.setFixedHeight(80)
+        # main_tool_bar.setIconSize(QSize(30,30))
+        self.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        self.icon_run_enabled = create_icon_from_svg_string(TOOLBAR_RUN_ENABLED_SVG)
+        self.icon_run_disabled = create_icon_from_svg_string(TOOLBAR_RUN_DISABLED_SVG)
+        self.icon_notifier_enabled = create_icon_from_svg_string(TOOLBAR_NOTIFIER_ENABLED_SVG)
+        self.icon_notifier_disabled = create_icon_from_svg_string(TOOLBAR_NOTIFIER_DISABLED_SVG)
+        self.run_action = self.addAction(
+            self.icon_run_enabled,
+            tr("Run"), run_func);
+        self.stop_action = self.addAction(
+            create_icon_from_svg_string(TOOLBAR_STOP_SVG),
+            tr("Stop"), run_func);
+        self.addSeparator()
+        self.notifier_action = self.addAction(self.icon_notifier_enabled, "notify", notify_func);
+        spacer = QWidget()
+        spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        self.addSeparator()
+        self.addWidget(spacer)
+        self.addAction(ICON_HELP_CONTENTS, tr('Help'), HelpDialog.invoke);
+        self.addAction(ICON_HELP_ABOUT, tr('About'), AboutDialog.invoke);
+
+    def configure_run_action(self, running: bool) -> None:
+        if running:
+            self.run_action.setIcon(self.icon_run_enabled)
+            self.run_action.setIconText(tr("Running"))
+            self.stop_action.setEnabled(True)
+        else:
+            self.run_action.setIcon(self.icon_run_disabled)
+            self.run_action.setIconText(tr("Stopped"))
+            self.stop_action.setEnabled(False)
+
+    def configure_notifier_action(self, notifying: bool) -> None:
+        if notifying:
+            self.notifier_action.setIcon(self.icon_notifier_enabled)
+            self.notifier_action.setIconText(tr('Notifying  '))
+        else:
+            self.notifier_action.setIcon(self.icon_notifier_disabled)
+            self.notifier_action.setIconText(tr('Discarding'))
+
+
+class MainContextMenu(QMenu):
+
+    def __init__(self, main_window: QMainWindow, run_func, notify_func, quit_func):
+        super().__init__()
+        self.icon_notifier_enabled = create_icon_from_svg_string(TOOLBAR_NOTIFIER_ENABLED_SVG)
+        self.icon_notifier_disabled = create_icon_from_svg_string(TOOLBAR_NOTIFIER_DISABLED_SVG)
+        self.listen_action = self.addAction(ICON_CONTEXT_MENU_LISTENING_DISABLE,
+                                            tr("Stop journal monitoring"),
+                                            run_func)
+        self.notifier_action = self.addAction(self.icon_notifier_disabled,
+                                              tr("Disable notifications"),
+                                              notify_func)
+        self.addAction(ICON_HELP_ABOUT,
+                       tr('About'),
+                       AboutDialog.invoke)
+        self.addAction(ICON_HELP_CONTENTS,
+                       tr('Help'),
+                       HelpDialog.invoke)
+        self.addSeparator()
+        self.addAction(ICON_APPLICATION_EXIT,
+                       tr('Quit'),
+                       quit_func)
+
+    def configure_run_action(self, running: bool) -> None:
+        if running:
+            self.listen_action.setText(tr("Stop journal monitoring"))
+            self.listen_action.setIcon(ICON_CONTEXT_MENU_LISTENING_DISABLE)
+        else:
+            self.listen_action.setText(tr("Resume journal monitoring"))
+            self.listen_action.setIcon(ICON_CONTEXT_MENU_LISTENING_ENABLE)
+
+    def configure_notifier_action(self, notifying: bool) -> None:
+        if notifying:
+            self.notifier_action.setText(tr("Disable notifications"))
+            self.notifier_action.setIcon(self.icon_notifier_disabled)
+        else:
+            self.notifier_action.setText(tr("Enable notifications"))
+            self.notifier_action.setIcon(self.icon_notifier_enabled)
+
 
 class MainWindow(QMainWindow):
 
     def __init__(self, app):
         super().__init__()
-        tool_bar = self.addToolBar(tr("Toolbar"));
-        # main_tool_bar.setFixedHeight(80)
-        # main_tool_bar.setIconSize(QSize(30,30))
-        tool_bar.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
 
-        #tool_bar.setStyleSheet("QToolButton {width: 120px;}")
-        #tool_bar.setStyleSheet("QToolButton::checked {border: 0px solid white;background: white;}")
         journal_watcher_task = JournalWatcherTask()
 
         app_name = tr('Jouno - journal notifications')
         app.setWindowIcon(create_icon_from_svg_string(JOUNO_ICON_LIGHT_SVG))
         app.setApplicationDisplayName(app_name)
         app.setApplicationVersion(JOUNO_VERSION)
-
-        icon_bar_run_enabled = create_icon_from_svg_string(TOOLBAR_RUN_ENABLED_SVG)
-        icon_bar_run_disabled = create_icon_from_svg_string(TOOLBAR_RUN_DISABLED_SVG)
-        icon_bar_notifier_enabled = create_icon_from_svg_string(TOOLBAR_NOTIFIER_ENABLED_SVG)
-        icon_bar_notifier_disabled = create_icon_from_svg_string(TOOLBAR_NOTIFIER_DISABLED_SVG)
 
         def enable_listener(enable: bool) -> None:
             if enable:
@@ -1153,22 +1243,16 @@ class MainWindow(QMainWindow):
                     time.sleep(0.2)
                 tray.setIcon(create_icon_from_svg_string(JOUNO_ICON_SVG))
                 tray.setToolTip(app_name)
-                bar_run_action.setIcon(icon_bar_run_enabled)
-                bar_run_action.setIconText(tr("Running"))
-                bar_stop_action.setEnabled(True)
-                cm_listen_action.setText(tr("Stop journal monitoring"))
-                cm_listen_action.setIcon(ICON_CONTEXT_MENU_LISTENING_DISABLE)
+                tool_bar.configure_run_action(enable)
+                app_context_menu.configure_run_action(enable)
             else:
                 journal_watcher_task.requestInterruption()
                 while journal_watcher_task.isRunning():
                     time.sleep(0.2)
                 tray.setIcon(ICON_TRAY_LISTENING_DISABLED)
                 tray.setToolTip(f"{app_name} - {tr('Stopped')}")
-                bar_run_action.setIcon(icon_bar_run_disabled)
-                bar_run_action.setIconText(tr("Stopped"))
-                bar_stop_action.setEnabled(False)
-                cm_listen_action.setText(tr("Resume journal monitoring"))
-                cm_listen_action.setIcon(ICON_CONTEXT_MENU_LISTENING_ENABLE)
+                tool_bar.configure_run_action(enable)
+                app_context_menu.configure_run_action(enable)
 
         def toggle_listener() -> None:
             enable_listener(not journal_watcher_task.isRunning())
@@ -1176,58 +1260,24 @@ class MainWindow(QMainWindow):
         def enable_notifier(enable: bool) -> None:
             if enable:
                 journal_watcher_task.enable_notifications(True)
-                notifier_action.setIcon(icon_bar_notifier_enabled)
-                notifier_action.setIconText(tr('Notifying  '))
-                cm_notifier_action.setText(tr("Disable notifications"))
-                cm_notifier_action.setIcon(icon_bar_notifier_disabled)
+                tool_bar.configure_notifier_action(enable)
+                app_context_menu.configure_notifier_action(enable)
             else:
                 journal_watcher_task.enable_notifications(False)
-                notifier_action.setIcon(icon_bar_notifier_disabled)
-                notifier_action.setIconText(tr('Discarding'))
-                cm_notifier_action.setText(tr("Enable notifications"))
-                cm_notifier_action.setIcon(icon_bar_notifier_enabled)
+                tool_bar.configure_notifier_action(enable)
+                app_context_menu.configure_notifier_action(enable)
 
         def toggle_notifier():
             enable_notifier(not journal_watcher_task.is_notifying())
 
-        def quit_action():
+        def quit_app():
             journal_watcher_task.requestInterruption()
             app.quit()
 
-        app_context_menu = QMenu()
-        cm_listen_action = app_context_menu.addAction(ICON_CONTEXT_MENU_LISTENING_DISABLE,
-                                                      tr("Stop journal monitoring"),
-                                                      toggle_listener)
-        cm_notifier_action = app_context_menu.addAction(icon_bar_notifier_disabled,
-                                                        tr("Disable notifications"),
-                                                        toggle_notifier)
-        app_context_menu.addAction(ICON_HELP_ABOUT,
-                                   tr('About'),
-                                   AboutDialog.invoke)
-        app_context_menu.addAction(ICON_HELP_CONTENTS,
-                                   tr('Help'),
-                                   HelpDialog.invoke)
-        app_context_menu.addSeparator()
-        app_context_menu.addAction(ICON_APPLICATION_EXIT,
-                                   tr('Quit'),
-                                   quit_action)
+        tool_bar = MainToolBarManger(self, toggle_listener, toggle_notifier)
+        self.addToolBar(tool_bar)
+        app_context_menu = MainContextMenu(self, toggle_listener, toggle_notifier, quit_app)
 
-        # main_tool_bar.addWidget(x)
-        # main_tool_bar.addSeparator()
-        bar_run_action = tool_bar.addAction(
-            icon_bar_run_enabled,
-            tr("Run"), toggle_listener);
-        bar_stop_action = tool_bar.addAction(
-            create_icon_from_svg_string(TOOLBAR_STOP_SVG),
-            tr("Stop"), toggle_listener);
-        tool_bar.addSeparator()
-        notifier_action = tool_bar.addAction(icon_bar_notifier_enabled, "notify", toggle_notifier);
-        spacer = QWidget()
-        spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        tool_bar.addSeparator()
-        tool_bar.addWidget(spacer)
-        tool_bar.addAction(ICON_HELP_CONTENTS, tr('Help'), HelpDialog.invoke);
-        tool_bar.addAction(ICON_HELP_ABOUT, tr('About'), AboutDialog.invoke);
         self.setCentralWidget(CentralPanel(journal_watcher_task))
 
         tray = QSystemTrayIcon()
