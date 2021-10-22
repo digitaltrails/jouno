@@ -240,11 +240,11 @@ import dbus
 from PyQt5.QtCore import QCoreApplication, QProcess, Qt, pyqtSignal, QThread, QModelIndex, QItemSelectionModel
 from PyQt5.QtGui import QPixmap, QIcon, QImage, QPainter, QCursor, QStandardItemModel, QStandardItem, QIntValidator, \
     QFontDatabase
-from PyQt5.QtSvg import QSvgRenderer
+from PyQt5.QtSvg import QSvgRenderer, QSvgWidget
 from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QMessageBox, QLineEdit, QLabel, \
     QPushButton, QSystemTrayIcon, QMenu, QTextEdit, QDialog, QTabWidget, \
     QCheckBox, QGridLayout, QTableView, \
-    QAbstractItemView, QHeaderView, QSplitter, QMainWindow, QSizePolicy, QStyledItemDelegate
+    QAbstractItemView, QHeaderView, QSplitter, QMainWindow, QSizePolicy, QStyledItemDelegate, QToolBar
 from systemd import journal
 
 JOUNO_VERSION = '0.9.0'
@@ -270,10 +270,27 @@ def create_image_from_svg_string(svg_str: bytes) -> QImage:
     return image
 
 
-def create_icon_from_svg_string(svg_str: bytes) -> QIcon:
+def create_pixmap_from_svg_string(svg_str: bytes) -> QPixmap:
     """There is no QIcon option for loading SVG from a string, only from a SVG file, so roll our own."""
     image = create_image_from_svg_string(svg_str)
-    return QIcon(QPixmap.fromImage(image))
+    return QPixmap.fromImage(image)
+
+
+def create_icon_from_svg_string(default_svg: bytes = None,
+                                on_svg: bytes = None, off_svg: bytes = None,
+                                disabled_svg: bytes = None) -> QIcon:
+    """There is no QIcon option for loading SVG from a string, only from a SVG file, so roll our own."""
+    if default_svg is not None:
+        icon = QIcon(create_pixmap_from_svg_string(default_svg))
+    else:
+        icon = QIcon()
+    if on_svg is not None:
+        icon.addPixmap(create_pixmap_from_svg_string(on_svg), state=QIcon.On)
+    if off_svg is not None:
+        icon.addPixmap(create_pixmap_from_svg_string(off_svg), state=QIcon.Off)
+    if disabled_svg:
+        icon = QIcon(create_pixmap_from_svg_string(on_svg), mode=QIcon.Disabled)
+    return icon
 
 
 JOUNO_ICON_SVG = b"""
@@ -290,46 +307,29 @@ JOUNO_ICON_SVG = b"""
 </svg>
 """
 
-icon_jouno_dark: QIcon = None
+JOUNO_ICON_LIGHT_SVG = JOUNO_ICON_SVG.replace(b'#232629', b'#bbbbbb')
 
+TOOLBAR_RUN_DISABLED_SVG = b"""
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 22 22">
+    <style type="text/css" id="current-color-scheme">
+        .ColorScheme-Text {
+            color:#232629;
+        }
+    </style>
+    <path d="m3 3v16l16-8z" class="ColorScheme-Text" fill="currentColor"/>
+</svg>
+"""
 
-def get_icon_jouno_dark() -> QIcon:
-    global icon_jouno_dark
-    if icon_jouno_dark is None:
-        icon_jouno_dark = create_icon_from_svg_string(JOUNO_ICON_SVG)
-    return icon_jouno_dark
+TOOLBAR_RUN_ENABLED_SVG = TOOLBAR_RUN_DISABLED_SVG.replace(b"#232629;", b"#3daee9;")
 
-
-icon_jouno_light: QIcon = None
-
-
-def get_icon_jouno_light():
-    global icon_jouno_light
-    if icon_jouno_light is None:
-        icon_jouno_light = create_icon_from_svg_string(JOUNO_ICON_SVG.replace(b'#232629', b'#bbbbbb'))
-    return icon_jouno_light
-
-
-TOOLBAR_JNL_LISTENING_DISABLED_SVG = b"""
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">
+TOOLBAR_STOP_SVG = b"""
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 22 22">
     <style type="text/css" id="current-color-scheme">
         .ColorScheme-Text {
             color:#da4453;
         }
     </style>
-    <path d="m2 2v12h4v-12zm8 0v12h4v-12z" class="ColorScheme-Text" fill="currentColor"/>
-</svg>
-"""
-
-# #59a869;
-TOOLBAR_JNL_LISTENING_ENABLED_SVG = b"""
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">
-    <style type="text/css" id="current-color-scheme">
-        .ColorScheme-Text {
-            color:#3daee9;
-        }
-    </style>
-    <path d="m2 2v12l12-6z" class="ColorScheme-Text" fill="currentColor"/>
+    <path d="m3 3h16v16h-16z" class="ColorScheme-Text" fill="currentColor"/>
 </svg>
 """
 
@@ -338,7 +338,7 @@ TOOLBAR_NOTIFIER_ENABLED_SVG = b"""
   <defs id="defs3051">
     <style type="text/css" id="current-color-scheme">
       .ColorScheme-Text {
-        color:#232629;
+        color:#379fd3;
       }
       </style>
   </defs>
@@ -708,7 +708,7 @@ class JournalWatcher:
                                       timeout=self.notification_timeout_millis)
 
 
-def translate(source_text: str):
+def tr(source_text: str):
     """For future internationalization - recommended way to do this at this time."""
     return QCoreApplication.translate('jouno', source_text)
 
@@ -724,7 +724,7 @@ class OptionsTab(QWidget):
         layout = QGridLayout(self)
         row_number = 0
         for option_id, value in config_section.items():
-            label_widget = QLabel(translate(option_id))
+            label_widget = QLabel(tr(option_id))
             if option_id.endswith("_enabled"):
                 input_widget = QCheckBox()
                 input_widget.setChecked(value == 'yes')
@@ -796,7 +796,7 @@ class FilterTableModel(QStandardItemModel):
         super().__init__(number_of_rows, 2)
         # use spaces to force a wider column - seems to be no other EASY way to do this.
         self.setHorizontalHeaderLabels(
-            [translate("Rule-ID (enabled/disabled)"), translate("Pattern")])
+            [tr("Rule-ID (enabled/disabled)"), tr("Pattern")])
 
 
 class FilterValidationException(Exception):
@@ -808,18 +808,18 @@ class FilterTableView(QTableView):
     def __init__(self, config_section: Mapping[str, str], tooltip=""):
         super().__init__()
         self.enable_tooltip = \
-            translate("Enable: rules can be selective enabled/disabled.")
+            tr("Enable: rules can be selective enabled/disabled.")
         self.rule_id_tooltip_1 = \
-            translate("Rule ID: a letter followed by letters, digits, underscores and hyphens")
+            tr("Rule ID: a letter followed by letters, digits, underscores and hyphens")
         self.rule_id_tooltip_2 = \
-            translate("A rule ID with a _regexp suffix denotes its pattern to be a regular expression.")
+            tr("A rule ID with a _regexp suffix denotes its pattern to be a regular expression.")
         self.pattern_tooltip = \
-            translate("Pattern: Text or regexp to partially match in the journal entry's message field.")
-        tooltip += "\n\n" + translate("Columns:") + "\n" + \
-                   translate(f"    {self.enable_tooltip}\n") + \
-                   translate(f"    {self.rule_id_tooltip_1}\n") + \
-                   translate(f"          {self.rule_id_tooltip_2}\n") + \
-                   translate(f"    {self.pattern_tooltip}\n")
+            tr("Pattern: Text or regexp to partially match in the journal entry's message field.")
+        tooltip += "\n\n" + tr("Columns:") + "\n" + \
+                   tr(f"    {self.enable_tooltip}\n") + \
+                   tr(f"    {self.rule_id_tooltip_1}\n") + \
+                   tr(f"          {self.rule_id_tooltip_2}\n") + \
+                   tr(f"    {self.pattern_tooltip}\n")
         self.setToolTip(tooltip)
         self.setModel(FilterTableModel(len(config_section)))
         self.copy_from_config(config_section)
@@ -860,7 +860,7 @@ class FilterTableView(QTableView):
         enable_item.setCheckable(True)
         enable_item.setCheckState(Qt.Checked)
         enable_item.setEditable(True)
-        enable_item.setToolTip(translate(self.rule_id_tooltip_1 + "\n" + self.rule_id_tooltip_2))
+        enable_item.setToolTip(tr(self.rule_id_tooltip_1 + "\n" + self.rule_id_tooltip_2))
         return enable_item
 
     def is_valid(self) -> bool:
@@ -941,9 +941,9 @@ class FilterTableView(QTableView):
         selected_row_indices = self.selectionModel().selectedRows()
         if len(selected_row_indices) == 0:
             message = QMessageBox(self)
-            message.setWindowTitle(translate('Delete'))
+            message.setWindowTitle(tr('Delete'))
             message.setText(
-                translate("Cannot delete, no rows selected.\nClick in the left margin to select some rows."))
+                tr("Cannot delete, no rows selected.\nClick in the left margin to select some rows."))
             message.setIcon(QMessageBox.Critical)
             message.setStandardButtons(QMessageBox.Ok)
             message.exec()
@@ -998,19 +998,19 @@ class ConfigPanel(QWidget):
 
         match_panel = FilterPanel(
             config['match'],
-            tooltip=translate("Only issue notifications for journal-entry messages that match one of these rules."),
+            tooltip=tr("Only issue notifications for journal-entry messages that match one of these rules."),
             main_widget=main_widget)
 
         ignore_panel = FilterPanel(
             config['ignore'],
-            tooltip=translate("Ignore journal-entry messages that match any of these rules."),
+            tooltip=tr("Ignore journal-entry messages that match any of these rules."),
             main_widget=main_widget)
 
         button_box = QWidget()
         button_box_layout = QGridLayout()
         button_box.setLayout(button_box_layout)
-        apply_button = QPushButton(translate("Apply"))
-        revert_button = QPushButton(translate("Revert"))
+        apply_button = QPushButton(tr("Apply"))
+        revert_button = QPushButton(tr("Revert"))
 
         def add_action():
             tabs.currentWidget().add_rule()
@@ -1018,11 +1018,11 @@ class ConfigPanel(QWidget):
         def del_action():
             tabs.currentWidget().delete_rules()
 
-        add_button = QPushButton(translate("Add rules"))
+        add_button = QPushButton(tr("Add rules"))
         add_button.setToolTip("Add a new row above the selected row or at the end if no row is selected.\n"
                               "Click in the left margin to select a row.")
         add_button.clicked.connect(add_action)
-        del_button = QPushButton(translate("Delete rules"))
+        del_button = QPushButton(tr("Delete rules"))
         del_button.setToolTip("Remove selected rows. Click in the left margin to select some rows.")
         del_button.clicked.connect(del_action)
 
@@ -1043,8 +1043,8 @@ class ConfigPanel(QWidget):
                     match_panel.clear_selection()
                     ignore_panel.clear_selection()
                     message = QMessageBox(self)
-                    message.setWindowTitle(translate('Applied'))
-                    message.setText(translate('Changes are now active.'))
+                    message.setWindowTitle(tr('Applied'))
+                    message.setText(tr('Changes are now active.'))
                     message.setIcon(QMessageBox.Information)
                     message.setStandardButtons(QMessageBox.Ok)
                     # message.setDetailedText()
@@ -1054,7 +1054,7 @@ class ConfigPanel(QWidget):
                 title, summary, text = e.args
                 message = QMessageBox(self)
                 message.setWindowTitle(title)
-                message.setText(f"{translate('Cannot apply changes.')}\n{summary}\n{text}")
+                message.setText(f"{tr('Cannot apply changes.')}\n{summary}\n{text}")
                 message.setIcon(QMessageBox.Critical)
                 message.setStandardButtons(QMessageBox.Ok)
                 # message.setDetailedText()
@@ -1072,14 +1072,14 @@ class ConfigPanel(QWidget):
             after = pickle.dumps(tmp)
             if before == after:
                 revert_message = QMessageBox(self)
-                revert_message.setText(translate('There are no unapplied changes, there is nothing to revert.'))
+                revert_message.setText(tr('There are no unapplied changes, there is nothing to revert.'))
                 revert_message.setIcon(QMessageBox.Warning)
                 revert_message.setStandardButtons(QMessageBox.Ok)
                 revert_message.exec()
                 return
             else:
                 revert_message = QMessageBox(self)
-                revert_message.setText(translate('There are unapplied changes, revert and loose all changes?'))
+                revert_message.setText(tr('There are unapplied changes, revert and loose all changes?'))
                 revert_message.setIcon(QMessageBox.Question)
                 revert_message.setStandardButtons(QMessageBox.Ok | QMessageBox.Cancel)
                 if revert_message.exec() == QMessageBox.Cancel:
@@ -1093,9 +1093,9 @@ class ConfigPanel(QWidget):
 
         revert_button.clicked.connect(revert_action)
 
-        tabs.addTab(ignore_panel, translate("Ignore Filters"))
-        tabs.addTab(match_panel, translate("Match Filters"))
-        tabs.addTab(options_panel, translate("Options"))
+        tabs.addTab(ignore_panel, tr("Ignore Filters"))
+        tabs.addTab(match_panel, tr("Match Filters"))
+        tabs.addTab(options_panel, tr("Options"))
         tabs.setCurrentIndex(0)
 
         layout.addWidget(title(QLabel("Configuration")))
@@ -1127,96 +1127,111 @@ class MainWindow(QMainWindow):
 
     def __init__(self, app):
         super().__init__()
-
-        main_tool_bar = self.addToolBar(translate("Toolbar"));
+        tool_bar = self.addToolBar(tr("Toolbar"));
         # main_tool_bar.setFixedHeight(80)
         # main_tool_bar.setIconSize(QSize(30,30))
-        main_tool_bar.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
-        main_tool_bar.setStyleSheet("QToolButton {width: 120px;}")
+        tool_bar.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+
+        #tool_bar.setStyleSheet("QToolButton {width: 120px;}")
+        #tool_bar.setStyleSheet("QToolButton::checked {border: 0px solid white;background: white;}")
         journal_watcher_task = JournalWatcherTask()
 
-        app_name = translate('Jouno - journal notifications')
-        app.setWindowIcon(get_icon_jouno_light())
+        app_name = tr('Jouno - journal notifications')
+        app.setWindowIcon(create_icon_from_svg_string(JOUNO_ICON_LIGHT_SVG))
         app.setApplicationDisplayName(app_name)
         app.setApplicationVersion(JOUNO_VERSION)
 
-        icon_toolbar_listening_enabled = create_icon_from_svg_string(TOOLBAR_JNL_LISTENING_ENABLED_SVG)
-        icon_toolbar_listening_disabled = create_icon_from_svg_string(TOOLBAR_JNL_LISTENING_DISABLED_SVG)
-        icon_toolbar_notifier_enabled = create_icon_from_svg_string(TOOLBAR_NOTIFIER_ENABLED_SVG)
-        icon_toolbar_notifier_disabled = create_icon_from_svg_string(TOOLBAR_NOTIFIER_DISABLED_SVG)
+        icon_bar_run_enabled = create_icon_from_svg_string(TOOLBAR_RUN_ENABLED_SVG)
+        icon_bar_run_disabled = create_icon_from_svg_string(TOOLBAR_RUN_DISABLED_SVG)
+        icon_bar_notifier_enabled = create_icon_from_svg_string(TOOLBAR_NOTIFIER_ENABLED_SVG)
+        icon_bar_notifier_disabled = create_icon_from_svg_string(TOOLBAR_NOTIFIER_DISABLED_SVG)
 
-        def toggle_listener() -> None:
-            if journal_watcher_task.isRunning():
-                journal_watcher_task.requestInterruption()
-                while journal_watcher_task.isRunning():
-                    time.sleep(0.5)
-                tray.setIcon(ICON_TRAY_LISTENING_DISABLED)
-                tray.setToolTip(f"{app_name} - {translate('Paused')}")
-                bar_listen_action.setIcon(icon_toolbar_listening_disabled)
-                bar_listen_action.setText(translate("Paused"))
-                ctxm_listen_action.setText(translate("Resume journal monitoring"))
-                ctxm_listen_action.setIcon(ICON_CONTEXT_MENU_LISTENING_ENABLE)
-            else:
+        def enable_listener(enable: bool) -> None:
+            if enable:
                 journal_watcher_task.start()
                 while not journal_watcher_task.isRunning():
-                    time.sleep(0.5)
-                tray.setIcon(get_icon_jouno_dark())
+                    time.sleep(0.2)
+                tray.setIcon(create_icon_from_svg_string(JOUNO_ICON_SVG))
                 tray.setToolTip(app_name)
-                bar_listen_action.setIcon(icon_toolbar_listening_enabled)
-                bar_listen_action.setText(translate("Running"))
-                ctxm_listen_action.setText(translate("Stop journal monitoring"))
-                ctxm_listen_action.setIcon(ICON_CONTEXT_MENU_LISTENING_DISABLE)
+                bar_run_action.setIcon(icon_bar_run_enabled)
+                bar_run_action.setIconText(tr("Running"))
+                bar_stop_action.setEnabled(True)
+                cm_listen_action.setText(tr("Stop journal monitoring"))
+                cm_listen_action.setIcon(ICON_CONTEXT_MENU_LISTENING_DISABLE)
+            else:
+                journal_watcher_task.requestInterruption()
+                while journal_watcher_task.isRunning():
+                    time.sleep(0.2)
+                tray.setIcon(ICON_TRAY_LISTENING_DISABLED)
+                tray.setToolTip(f"{app_name} - {tr('Stopped')}")
+                bar_run_action.setIcon(icon_bar_run_disabled)
+                bar_run_action.setIconText(tr("Stopped"))
+                bar_stop_action.setEnabled(False)
+                cm_listen_action.setText(tr("Resume journal monitoring"))
+                cm_listen_action.setIcon(ICON_CONTEXT_MENU_LISTENING_ENABLE)
 
-        def toggle_notifier():
-            if not journal_watcher_task.is_notifying():
+        def toggle_listener() -> None:
+            enable_listener(not journal_watcher_task.isRunning())
+
+        def enable_notifier(enable: bool) -> None:
+            if enable:
                 journal_watcher_task.enable_notifications(True)
-                notifier_action.setIcon(icon_toolbar_notifier_enabled)
-                notifier_action.setText(translate('Notifying'))
-                cm_notifier_action.setText(translate("Disable notifications"))
-                cm_notifier_action.setIcon(icon_toolbar_notifier_disabled)
+                notifier_action.setIcon(icon_bar_notifier_enabled)
+                notifier_action.setIconText(tr('Notifying  '))
+                cm_notifier_action.setText(tr("Disable notifications"))
+                cm_notifier_action.setIcon(icon_bar_notifier_disabled)
             else:
                 journal_watcher_task.enable_notifications(False)
-                notifier_action.setIcon(icon_toolbar_notifier_disabled)
-                notifier_action.setText(translate('Discarding'))
-                cm_notifier_action.setText(translate("Enable notifications"))
-                cm_notifier_action.setIcon(icon_toolbar_notifier_enabled)
+                notifier_action.setIcon(icon_bar_notifier_disabled)
+                notifier_action.setIconText(tr('Discarding'))
+                cm_notifier_action.setText(tr("Enable notifications"))
+                cm_notifier_action.setIcon(icon_bar_notifier_enabled)
+
+        def toggle_notifier():
+            enable_notifier(not journal_watcher_task.is_notifying())
 
         def quit_action():
             journal_watcher_task.requestInterruption()
             app.quit()
 
         app_context_menu = QMenu()
-        ctxm_listen_action = app_context_menu.addAction(ICON_CONTEXT_MENU_LISTENING_DISABLE,
-                                                      translate("Stop journal monitoring"),
+        cm_listen_action = app_context_menu.addAction(ICON_CONTEXT_MENU_LISTENING_DISABLE,
+                                                      tr("Stop journal monitoring"),
                                                       toggle_listener)
-        cm_notifier_action = app_context_menu.addAction(icon_toolbar_notifier_disabled,
-                                                        translate("Disable notifications"),
+        cm_notifier_action = app_context_menu.addAction(icon_bar_notifier_disabled,
+                                                        tr("Disable notifications"),
                                                         toggle_notifier)
         app_context_menu.addAction(ICON_HELP_ABOUT,
-                                   translate('About'),
+                                   tr('About'),
                                    AboutDialog.invoke)
         app_context_menu.addAction(ICON_HELP_CONTENTS,
-                                   translate('Help'),
+                                   tr('Help'),
                                    HelpDialog.invoke)
         app_context_menu.addSeparator()
         app_context_menu.addAction(ICON_APPLICATION_EXIT,
-                                   translate('Quit'),
+                                   tr('Quit'),
                                    quit_action)
 
-        bar_listen_action = main_tool_bar.addAction(icon_toolbar_listening_enabled, translate("Running"), toggle_listener);
-        bar_listen_action.setObjectName("monitor")
-        notifier_action = main_tool_bar.addAction(icon_toolbar_notifier_enabled, translate("Notifying"),
-                                                  toggle_notifier);
+        # main_tool_bar.addWidget(x)
+        # main_tool_bar.addSeparator()
+        bar_run_action = tool_bar.addAction(
+            icon_bar_run_enabled,
+            tr("Run"), toggle_listener);
+        bar_stop_action = tool_bar.addAction(
+            create_icon_from_svg_string(TOOLBAR_STOP_SVG),
+            tr("Stop"), toggle_listener);
+        tool_bar.addSeparator()
+        notifier_action = tool_bar.addAction(icon_bar_notifier_enabled, "notify", toggle_notifier);
         spacer = QWidget()
         spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        main_tool_bar.addSeparator()
-        main_tool_bar.addWidget(spacer)
-        main_tool_bar.addAction(ICON_HELP_CONTENTS, translate('Help'), HelpDialog.invoke);
-        main_tool_bar.addAction(ICON_HELP_ABOUT, translate('About'), AboutDialog.invoke);
+        tool_bar.addSeparator()
+        tool_bar.addWidget(spacer)
+        tool_bar.addAction(ICON_HELP_CONTENTS, tr('Help'), HelpDialog.invoke);
+        tool_bar.addAction(ICON_HELP_ABOUT, tr('About'), AboutDialog.invoke);
         self.setCentralWidget(CentralPanel(journal_watcher_task))
 
         tray = QSystemTrayIcon()
-        tray.setIcon(get_icon_jouno_dark())
+        tray.setIcon(create_icon_from_svg_string(JOUNO_ICON_SVG))
         tray.setContextMenu(app_context_menu)
 
         def show_window():
@@ -1238,7 +1253,8 @@ class MainWindow(QMainWindow):
 
         tray.activated.connect(show_window)
         tray.setVisible(True)
-        journal_watcher_task.start()
+        enable_listener(True)
+        enable_notifier(True)
         rc = app.exec_()
         if rc == 999:  # EXIT_CODE_FOR_RESTART:
             QProcess.startDetached(app.arguments()[0], app.arguments()[1:])
@@ -1249,7 +1265,7 @@ class CentralPanel(QWidget):
     def __init__(self, journal_watcher_task: JournalWatcherTask):
         super().__init__()
         # self.setContextMenuPolicy(Qt.CustomContextMenu)
-        self.setWindowTitle(translate('Control Panel'))
+        self.setWindowTitle(tr('Control Panel'))
         self.setMinimumWidth(1200)
         self.setMinimumHeight(1000)
         splitter = QSplitter()
@@ -1271,18 +1287,22 @@ class JournalPanel(QWidget):
 
         # TODO add a test rules button that pops up a testing dialog with an input field.
         layout = QVBoxLayout(self)
-        layout.addWidget(title(QLabel(translate("Recently notified"))))
+        self.title = title(QLabel(tr("Recently notified")))
+        layout.addWidget(self.title)
         layout.addWidget(self.table_view)
 
         self.setLayout(layout)
+
+    def set_title(self, value: str):
+        self.title.setText(str)
 
 
 class JournalTableView(QTableView):
 
     def __init__(self, journal_watcher_task: JournalWatcherTask):
         super().__init__()
-        self.setToolTip(translate("Double click to view the complete journal entry.") + "\n" +
-                        translate("Control-C to copy a selected field's text."))
+        self.setToolTip(tr("Double click to view the complete journal entry.") + "\n" +
+                        tr("Control-C to copy a selected field's text."))
         self.setModel(JournalTableModel(number_of_rows=0))
         self.setDragDropOverwriteMode(False)
         self.resizeColumnsToContents()
@@ -1319,7 +1339,7 @@ class JournalTableModel(QStandardItemModel):
         self.icon_cache = {}
         self.journal_entries = []
         self.setHorizontalHeaderLabels(
-            [translate("Time"), translate("Host"), translate("Source"), translate("PID"), translate("Message")])
+            [tr("Time"), tr("Host"), tr("Source"), tr("PID"), tr("Message")])
 
     def get_journal_entry(self, row: int):
         return self.journal_entries[row]
@@ -1399,12 +1419,12 @@ class JournalEntryDialogPlain(QDialog):
         super().__init__(parent)
         # grid of QLineEdit's is easier than a table - the read-only editor allows context menu with a copy option.
         # Tables are a pain in most API's - seems to be no exception with Qt.
-        self.setWindowTitle(translate(f"Journal Entry {journal_entry['__REALTIME_TIMESTAMP']}"))
+        self.setWindowTitle(tr(f"Journal Entry {journal_entry['__REALTIME_TIMESTAMP']}"))
         layout = QVBoxLayout()
         text_view = QTextEdit()
         text_view.setFont(QFontDatabase.systemFont(QFontDatabase.FixedFont))
         text_view.setReadOnly(True)
-        text = translate(f"Journal Entry {journal_entry['__REALTIME_TIMESTAMP']}\n\n")
+        text = tr(f"Journal Entry {journal_entry['__REALTIME_TIMESTAMP']}\n\n")
         for row, (k, v) in enumerate(sorted(list(journal_entry.items()))):
             text += f"{k:25}: {str(v)}\n"
         text_view.setText(text)
@@ -1423,14 +1443,14 @@ class JournalEntryDialog(QDialog):
         super().__init__(parent)
         # grid of QLineEdit's is easier than a table - the read-only editor allows context menu with a copy option.
         # Tables are a pain in most API's - seems to be no exception with Qt.
-        self.setWindowTitle(translate(f"Journal Entry {journal_entry['__REALTIME_TIMESTAMP']}"))
+        self.setWindowTitle(tr(f"Journal Entry {journal_entry['__REALTIME_TIMESTAMP']}"))
         layout = QVBoxLayout()
         # TODO toolbar with copy to plain text
         text_view = QTextEdit()
 
         # text_view.setFont(QFontDatabase.systemFont(QFontDatabase.FixedFont))
         text_view.setReadOnly(True)
-        text = translate(f"Journal Entry {journal_entry['__REALTIME_TIMESTAMP']}\n\n")
+        text = tr(f"Journal Entry {journal_entry['__REALTIME_TIMESTAMP']}\n\n")
         text += "| Journal Entry Field | Value |\n"
         text += "| --- | --- |\n"
         for row, (k, v) in enumerate(sorted(list(journal_entry.items()))):
@@ -1510,10 +1530,10 @@ class AboutDialog(QMessageBox, DialogSingletonMixin):
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle(translate('About'))
+        self.setWindowTitle(tr('About'))
         self.setTextFormat(Qt.AutoText)
-        self.setText(translate('About jouno'))
-        self.setInformativeText(translate(ABOUT_TEXT))
+        self.setText(tr('About jouno'))
+        self.setInformativeText(tr(ABOUT_TEXT))
         self.setIcon(QMessageBox.Information)
         self.exec()
 
@@ -1529,7 +1549,7 @@ class HelpDialog(QDialog, DialogSingletonMixin):
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle(translate('Help'))
+        self.setWindowTitle(tr('Help'))
         layout = QVBoxLayout()
         markdown_view = QTextEdit()
         markdown_view.setReadOnly(True)
@@ -1552,29 +1572,28 @@ class ContextMenu(QMenu):
 
         self.play_pause_action = self.addAction(
             ICON_CONTEXT_MENU_LISTENING_DISABLE,
-            translate('Pause'),
+            tr('Pause'),
             listen_action)
         self.addAction(ICON_HELP_ABOUT,
-                       translate('About'),
+                       tr('About'),
                        about_action)
         self.addAction(ICON_HELP_CONTENTS,
-                       translate('Help'),
+                       tr('Help'),
                        help_action)
         self.addSeparator()
         self.addAction(ICON_APPLICATION_EXIT,
-                       translate('Quit'),
+                       tr('Quit'),
                        quit_action)
-
 
 
 def exception_handler(e_type, e_value, e_traceback):
     """Overarching error handler in case something unexpected happens."""
     print("ERROR:\n", ''.join(traceback.format_exception(e_type, e_value, e_traceback)))
     alert = QMessageBox()
-    alert.setText(translate('Error: {}').format(''.join(traceback.format_exception_only(e_type, e_value))))
-    alert.setInformativeText(translate('Unexpected error'))
+    alert.setText(tr('Error: {}').format(''.join(traceback.format_exception_only(e_type, e_value))))
+    alert.setInformativeText(tr('Unexpected error'))
     alert.setDetailedText(
-        translate('Details: {}').format(''.join(traceback.format_exception(e_type, e_value, e_traceback))))
+        tr('Details: {}').format(''.join(traceback.format_exception(e_type, e_value, e_traceback))))
     alert.setIcon(QMessageBox.Critical)
     alert.exec()
     QApplication.quit()
@@ -1641,7 +1660,7 @@ def install_as_desktop_application(uninstall: bool = False):
         print(f"WARNING: skipping installation of {icon_path.as_posix()}, it is already present.")
     else:
         print(f'INFO: creating {icon_path.as_posix()}')
-        get_icon_jouno_dark().save(icon_path.as_posix())
+        create_icon_from_svg_string(JOUNO_ICON_SVG).save(icon_path.as_posix())
 
     print('INFO: installation complete. Your desktop->applications->system should now contain jouno')
 
