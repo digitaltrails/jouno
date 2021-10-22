@@ -1660,7 +1660,7 @@ def install_as_desktop_application(uninstall: bool = False):
         print(f"WARNING: skipping installation of {icon_path.as_posix()}, it is already present.")
     else:
         print(f'INFO: creating {icon_path.as_posix()}')
-        create_icon_from_svg_string(JOUNO_ICON_SVG).save(icon_path.as_posix())
+        create_pixmap_from_svg_string(JOUNO_ICON_SVG).save(icon_path.as_posix())
 
     print('INFO: installation complete. Your desktop->applications->system should now contain jouno')
 
@@ -1694,8 +1694,8 @@ def parse_args():
 def main():
     signal.signal(signal.SIGINT, signal.SIG_DFL)
     sys.excepthook = exception_handler
-    args = parse_args()
     app = QApplication(sys.argv)
+    args = parse_args()
     MainWindow(app)
 
 
