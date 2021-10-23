@@ -987,6 +987,20 @@ class FilterTableView(QTableView):
                 self.selectRow(model.rowCount() - 1)
 
 
+class ConfigWatcherTask(QThread):
+    signal_config_change = pyqtSignal(dict)
+
+    def __init__(self, config: Config) -> None:
+        self.config = config
+
+    def run(self) -> None:
+        while True:
+            if self.config.refresh():
+                debug("ConfigWatcherTask - Config Changed")
+                self.signal_config_change.emit()
+            time.sleep(5.0)
+
+
 class JournalWatcherTask(QThread):
     signal_new_entry = pyqtSignal(dict)
 
@@ -1014,7 +1028,7 @@ def title(widget: QLabel) -> QLabel:
 
 class ConfigPanel(QWidget):
 
-    def __init__(self, tab_change: Callable, parent: QWidget):
+    def __init__(self, tab_change: Callable, parent: QWidget, config_change_func: Callable):
         super().__init__(parent=parent)
 
         layout = QVBoxLayout()
@@ -1100,11 +1114,15 @@ class ConfigPanel(QWidget):
                 if revert_message.exec() == QMessageBox.Cancel:
                     return
             info("reverting unsaved edits")
+            reload_from_config()
+
+        def reload_from_config():
             options_panel.copy_from_config(config['options'])
             match_panel.copy_from_config(config['match'])
             ignore_panel.copy_from_config(config['ignore'])
             match_panel.clear_selection()
             ignore_panel.clear_selection()
+            config_change_func()
 
         revert_button.clicked.connect(revert_action)
 
@@ -1119,19 +1137,9 @@ class ConfigPanel(QWidget):
 
         tabs.currentChanged.connect(tab_change)
 
-        options_panel.copy_from_config(config['options'])
-        match_panel.copy_from_config(config['match'])
-        ignore_panel.copy_from_config(config['ignore'])
-        # self.make_visible()
-
-    def make_visible(self):
-        """
-        If the dialog exists(), call this to make it visible by raising it.
-        Internal, used by the class method show_existing_dialog()
-        """
-        self.show()
-        self.raise_()
-        self.activateWindow()
+        reload_from_config()
+        config_watcher = ConfigWatcherTask(config)
+        config_watcher.signal_config_change.connect(reload_from_config)
 
     def add_rule(self, rule_id, pattern) -> None:
         if isinstance(self.tabs.currentWidget(), FilterPanel):
@@ -1155,26 +1163,31 @@ class MainToolBar(QToolBar):
                  parent: QWidget):
         super().__init__(parent=parent)
         # main_tool_bar.setFixedHeight(80)
-        # main_tool_bar.setIconSize(QSize(30,30))
+        self.setIconSize(QSize(32, 32))
         self.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
         self.icon_run_enabled = create_icon_from_svg_string(TOOLBAR_RUN_ENABLED_SVG)
         self.icon_run_disabled = create_icon_from_svg_string(TOOLBAR_RUN_DISABLED_SVG)
         self.icon_notifier_enabled = create_icon_from_svg_string(TOOLBAR_NOTIFIER_ENABLED_SVG)
         self.icon_notifier_disabled = create_icon_from_svg_string(TOOLBAR_NOTIFIER_DISABLED_SVG)
         self.run_action = self.addAction(self.icon_run_enabled, tr("Run"), run_func)
+        self.run_action.setObjectName("run_button")
         self.run_action.setToolTip(tr("Start/stop monitoring the journal feed."))
+        self.widgetForAction(self.run_action).setStyleSheet("QToolButton { width: 110px; }")
         self.stop_action = self.addAction(create_icon_from_svg_string(TOOLBAR_STOP_SVG), tr("Stop"), run_func)
         self.stop_action.setToolTip(tr("Stop monitoring the journal feed."))
         self.addSeparator()
         self.notifier_action = self.addAction(self.icon_notifier_enabled, "notify", notify_func)
         self.notifier_action.setToolTip(tr("Enable/disable desktop notifications."))
+        self.widgetForAction(self.notifier_action).setStyleSheet("QToolButton { width: 110px; }")
         self.addSeparator()
         self.add_filter_action = self.addAction(create_icon_from_svg_string(TOOLBAR_ADD_FILTER_SVG), "add", add_func)
+        self.add_filter_action.setObjectName("add_button")
         self.add_filter_action.setIconText(tr("New filter"))
         self.add_filter_action.setToolTip(
             tr("Add a new filter above the selected filter or at the end if no filter is selected.") + "\n" +
             tr("Select a filter tab and optionally click in its left margin to select an insertion point."))
-        self.del_filter_action = self.addAction(create_icon_from_svg_string(TOOLBAR_DEL_FILTER_SVG), "add", del_func)
+        self.del_filter_action = self.addAction(create_icon_from_svg_string(TOOLBAR_DEL_FILTER_SVG), "del", del_func)
+        self.del_filter_action.setObjectName("del_button")
         self.del_filter_action.setIconText(tr("Delete filter"))
         self.del_filter_action.setToolTip(
             tr("Delete selected filter.") + "\n" +
@@ -1204,14 +1217,35 @@ class MainToolBar(QToolBar):
     def configure_notifier_action(self, notifying: bool) -> None:
         if notifying:
             self.notifier_action.setIcon(self.icon_notifier_enabled)
-            self.notifier_action.setIconText(tr('Notifying  '))
+            self.notifier_action.setIconText(tr("Notifying"))
         else:
             self.notifier_action.setIcon(self.icon_notifier_disabled)
-            self.notifier_action.setIconText(tr('Discarding'))
+            self.notifier_action.setIconText(tr("Mute       "))
 
     def configure_filter_actions(self, enable: bool) -> None:
         self.add_filter_action.setEnabled(enable)
         self.del_filter_action.setEnabled(enable)
+
+
+# def pad_text(text_list: List[str]):
+#     max_width = 0
+#     width_list = []
+#     output_list = []
+#     for text in text_list:
+#         tmp = QLabel(text)
+#         tmp.adjustSize()
+#         width = tmp.fontMetrics().boundingRect(tmp.text()).width()
+#         if width > max_width:
+#             max_width = width
+#         width_list.append(width)
+#     for text, width in zip(text_list, width_list):
+#         while width < max_width:
+#             text += '\u200A'
+#             tmp = QLabel(text)
+#             tmp.adjustSize()
+#             width = tmp.fontMetrics().boundingRect(tmp.text()).width()
+#         output_list.append(text)
+#     return output_list
 
 
 class MainContextMenu(QMenu):
@@ -1266,40 +1300,39 @@ class MainWindow(QMainWindow):
         app.setApplicationDisplayName(app_name)
         app.setApplicationVersion(JOUNO_VERSION)
 
-        self.setWindowTitle(tr("Running"))
+        def update_title_and_tray_indicators():
+            if journal_watcher_task.isRunning():
+                title_text = tr("Running") if journal_watcher_task.is_notifying() else tr("Muted")
+                self.setWindowTitle(title_text)
+                tray.setToolTip(f"{title_text} \u2014 {app_name}")
+                tray.setIcon(create_icon_from_svg_string(JOUNO_ICON_SVG))
+            else:
+                self.setWindowTitle(tr("Stopped"))
+                tray.setToolTip(f"{tr('Stopped')} \u2014 {app_name}")
+                tray.setIcon(ICON_TRAY_LISTENING_DISABLED)
 
         def enable_listener(enable: bool) -> None:
             if enable:
-                self.setWindowTitle(tr("Running"))
                 journal_watcher_task.start()
                 while not journal_watcher_task.isRunning():
                     time.sleep(0.2)
-                tray.setIcon(create_icon_from_svg_string(JOUNO_ICON_SVG))
-                tray.setToolTip(f"{tr('Running')} \u2014 {app_name}")
-                tool_bar.configure_run_action(enable)
-                app_context_menu.configure_run_action(enable)
             else:
-                self.setWindowTitle(tr("Stopped"))
                 journal_watcher_task.requestInterruption()
                 while journal_watcher_task.isRunning():
                     time.sleep(0.2)
-                tray.setIcon(ICON_TRAY_LISTENING_DISABLED)
-                tray.setToolTip(f"{tr('Stopped')} \u2014 {app_name}")
-                tool_bar.configure_run_action(enable)
-                app_context_menu.configure_run_action(enable)
+
+            tool_bar.configure_run_action(enable)
+            app_context_menu.configure_run_action(enable)
+            update_title_and_tray_indicators()
 
         def toggle_listener() -> None:
             enable_listener(not journal_watcher_task.isRunning())
 
         def enable_notifier(enable: bool) -> None:
-            if enable:
-                journal_watcher_task.enable_notifications(True)
-                tool_bar.configure_notifier_action(enable)
-                app_context_menu.configure_notifier_action(enable)
-            else:
-                journal_watcher_task.enable_notifications(False)
-                tool_bar.configure_notifier_action(enable)
-                app_context_menu.configure_notifier_action(enable)
+            journal_watcher_task.enable_notifications(enable)
+            tool_bar.configure_notifier_action(enable)
+            app_context_menu.configure_notifier_action(enable)
+            update_title_and_tray_indicators()
 
         def toggle_notifier():
             enable_notifier(not journal_watcher_task.is_notifying())
