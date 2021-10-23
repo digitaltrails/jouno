@@ -1427,7 +1427,9 @@ class JournalPanel(QWidget):
         if text.strip() != '':
             for row_num in range(model.rowCount()):
                 journal_entry = model.get_journal_entry(row_num)
-                if text in str(journal_entry):
+                # Assume case insensitive if all text is in lower case.
+                entry_text = str(journal_entry).lower() if text.islower() else str(journal_entry)
+                if text in entry_text:
                     self.table_view.selectRow(row_num)
                     self.table_view.scrollTo(model.index(row_num,0))
 
