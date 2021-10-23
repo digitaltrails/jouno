@@ -1261,26 +1261,30 @@ class MainWindow(QMainWindow):
 
         journal_watcher_task = JournalWatcherTask()
 
-        app_name = tr('Jouno - journal notifications')
+        app_name = tr('Jouno')
         app.setWindowIcon(create_icon_from_svg_string(JOUNO_ICON_LIGHT_SVG))
         app.setApplicationDisplayName(app_name)
         app.setApplicationVersion(JOUNO_VERSION)
 
+        self.setWindowTitle(tr("Running"))
+
         def enable_listener(enable: bool) -> None:
             if enable:
+                self.setWindowTitle(tr("Running"))
                 journal_watcher_task.start()
                 while not journal_watcher_task.isRunning():
                     time.sleep(0.2)
                 tray.setIcon(create_icon_from_svg_string(JOUNO_ICON_SVG))
-                tray.setToolTip(app_name)
+                tray.setToolTip(f"{tr('Running')} \u2014 {app_name}")
                 tool_bar.configure_run_action(enable)
                 app_context_menu.configure_run_action(enable)
             else:
+                self.setWindowTitle(tr("Stopped"))
                 journal_watcher_task.requestInterruption()
                 while journal_watcher_task.isRunning():
                     time.sleep(0.2)
                 tray.setIcon(ICON_TRAY_LISTENING_DISABLED)
-                tray.setToolTip(f"{app_name} - {tr('Stopped')}")
+                tray.setToolTip(f"{tr('Stopped')} \u2014 {app_name}")
                 tool_bar.configure_run_action(enable)
                 app_context_menu.configure_run_action(enable)
 
