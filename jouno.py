@@ -217,7 +217,8 @@ with this program. If not, see <https://www.gnu.org/licenses/>.
 # TODO Consider creating a separate full log browser making use of the journal API for search and random access.
 # TODO Search 'recent' on toolbar
 # TODO Display more fields in 'recent' - priority as icon perhaps.
-# TODO https://specifications.freedesktop.org/icon-naming-spec/latest/
+# DONE https://specifications.freedesktop.org/icon-naming-spec/latest/
+# TODO Position the GUI to the left so as not to be covered by alerts.
 
 import argparse
 import configparser
