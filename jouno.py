@@ -220,6 +220,7 @@ with this program. If not, see <https://www.gnu.org/licenses/>.
 # DONE https://specifications.freedesktop.org/icon-naming-spec/latest/
 # TODO Position the GUI to the left so as not to be covered by alerts.
 # TODO Smaller Apply/Revert button widths.
+# TODO Fix tray hover title
 
 import argparse
 import configparser
@@ -1172,12 +1173,12 @@ class MainToolBar(QToolBar):
         self.add_filter_action.setIconText(tr("New filter"))
         self.add_filter_action.setToolTip(
             tr("Add a new filter above the selected filter or at the end if no filter is selected.") + "\n" +
-            tr("Click in the left margin to select a filter."))
+            tr("Select a filter tab and optionally click in its left margin to select an insertion point."))
         self.del_filter_action = self.addAction(create_icon_from_svg_string(TOOLBAR_DEL_FILTER_SVG), "add", del_func)
         self.del_filter_action.setIconText(tr("Delete filter"))
         self.del_filter_action.setToolTip(
-            tr("Delete selected filter") + "\n" +
-            tr("Click in the left margin to select a filter."))
+            tr("Delete selected filter.") + "\n" +
+            tr("Select a filter tab and click in its left margin to select a filter to delete."))
         self.addSeparator()
         search_input = QLineEdit()
         search_input.addAction(ICON_SEARCH_JOURNAL, QLineEdit.LeadingPosition)
