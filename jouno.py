@@ -212,7 +212,6 @@ with this program. If not, see <https://www.gnu.org/licenses/>.
 
 """
 
-# TODO Consider removing the Add Remove Rule in favour of shift-insert or shift-delete or similar?
 # TODO Add option for how many journal rows to show - if zero hide panel.
 # TODO Add option for non-tray use.
 # TODO Consider creating a separate full log browser making use of the journal API for search and random access.
@@ -1132,17 +1131,16 @@ class ConfigPanel(QWidget):
         self.raise_()
         self.activateWindow()
 
-    def add_rule(self, rule_id, pattern) -> bool:
+    def add_rule(self, rule_id, pattern) -> None:
         if isinstance(self.tabs.currentWidget(), FilterPanel):
             self.tabs.currentWidget().add_rule(rule_id, pattern)
-            return True
-        return False
+        raise TypeError("Was expecting FilterPanel")
 
-    def delete_rules(self):
+    def delete_rules(self) -> None:
         if isinstance(self.tabs.currentWidget(), FilterPanel):
             self.tabs.currentWidget().delete_rules()
-            return True
-        return False
+        raise TypeError("Was expecting FilterPanel")
+
 
 
 class MainToolBar(QToolBar):
@@ -1376,14 +1374,10 @@ class MainCentralPanel(QWidget):
             # ts = journal_entry['__REALTIME_TIMESTAMP']
             # rule_id = f"r{ts:%Y%m%d-%H%M%S-%f}"
             message = journal_entry['MESSAGE']
-        if not self.config_panel.add_rule('<new_id>', message):
-            # TODO error
-            pass
+        self.config_panel.add_rule('<new_id>', message)
 
     def delete_filters(self):
-        if not self.config_panel.delete_rules():
-            # TODO error
-            pass
+        self.config_panel.delete_rules()
 
 
 class JournalPanel(QWidget):
