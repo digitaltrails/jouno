@@ -1509,7 +1509,7 @@ class JournalEntryDialogPlain(QDialog):
 
     def __init__(self, parent, journal_entry):
         super().__init__(parent)
-        
+
         self.setWindowTitle(tr(f"Journal Entry {journal_entry['__REALTIME_TIMESTAMP']}"))
         layout = QVBoxLayout()
 
