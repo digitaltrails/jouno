@@ -236,10 +236,10 @@ from pathlib import Path
 from typing import Mapping, Any, List, Type, Callable
 
 import dbus
-from PyQt5.QtCore import QCoreApplication, QProcess, Qt, pyqtSignal, QThread, QModelIndex, QItemSelectionModel
+from PyQt5.QtCore import QCoreApplication, QProcess, Qt, pyqtSignal, QThread, QModelIndex, QItemSelectionModel, QSize
 from PyQt5.QtGui import QPixmap, QIcon, QImage, QPainter, QCursor, QStandardItemModel, QStandardItem, QIntValidator, \
-    QFontDatabase
-from PyQt5.QtSvg import QSvgRenderer, QSvgWidget
+    QFontDatabase, QClipboard, QGuiApplication
+from PyQt5.QtSvg import QSvgRenderer
 from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QMessageBox, QLineEdit, QLabel, \
     QPushButton, QSystemTrayIcon, QMenu, QTextEdit, QDialog, QTabWidget, \
     QCheckBox, QGridLayout, QTableView, \
@@ -254,8 +254,7 @@ ICON_APPLICATION_EXIT = QIcon.fromTheme("application-exit")
 ICON_CONTEXT_MENU_LISTENING_ENABLE = QIcon.fromTheme("view-refresh")
 ICON_CONTEXT_MENU_LISTENING_DISABLE = QIcon.fromTheme("process-stop")
 ICON_TRAY_LISTENING_DISABLED = ICON_CONTEXT_MENU_LISTENING_DISABLE
-ICON_TOOLBAR_NOTIFIER_ENABLED = QIcon.fromTheme("dialog-information")
-ICON_TOOLBAR_NOTIFIER_DISABLED = QIcon.fromTheme("dialog-error")
+ICON_COPY_TO_CLIPBOARD = QIcon.fromTheme("edit-copy")
 
 
 def create_image_from_svg_string(svg_str: bytes) -> QImage:
@@ -1144,7 +1143,6 @@ class ConfigPanel(QWidget):
             raise TypeError("Was expecting FilterPanel")
 
 
-
 class MainToolBar(QToolBar):
 
     def __init__(self,
@@ -1158,14 +1156,13 @@ class MainToolBar(QToolBar):
         self.icon_run_disabled = create_icon_from_svg_string(TOOLBAR_RUN_DISABLED_SVG)
         self.icon_notifier_enabled = create_icon_from_svg_string(TOOLBAR_NOTIFIER_ENABLED_SVG)
         self.icon_notifier_disabled = create_icon_from_svg_string(TOOLBAR_NOTIFIER_DISABLED_SVG)
-        self.run_action = self.addAction(
-            self.icon_run_enabled,
-            tr("Run"), run_func);
-        self.stop_action = self.addAction(
-            create_icon_from_svg_string(TOOLBAR_STOP_SVG),
-            tr("Stop"), run_func);
+        self.run_action = self.addAction(self.icon_run_enabled, tr("Run"), run_func)
+        self.run_action.setToolTip(tr("Start/stop monitoring the journal feed."))
+        self.stop_action = self.addAction(create_icon_from_svg_string(TOOLBAR_STOP_SVG), tr("Stop"), run_func)
+        self.stop_action.setToolTip(tr("Stop monitoring the journal feed."))
         self.addSeparator()
         self.notifier_action = self.addAction(self.icon_notifier_enabled, "notify", notify_func)
+        self.notifier_action.setToolTip(tr("Enable/disable desktop notifications."))
         self.addSeparator()
         self.add_filter_action = self.addAction(create_icon_from_svg_string(TOOLBAR_ADD_FILTER_SVG), "add", add_func)
         self.add_filter_action.setIconText(tr("New filter"))
@@ -1435,7 +1432,7 @@ class JournalTableView(QTableView):
         self.setShowGrid(False)
 
         def view_journal_entry(index: QModelIndex):
-            entry_dialog = JournalEntryDialog(self, self.model().get_journal_entry(index.row()))
+            entry_dialog = JournalEntryDialogPlain(self, self.model().get_journal_entry(index.row()))
             entry_dialog.show()
 
         self.doubleClicked.connect(view_journal_entry)
@@ -1508,77 +1505,50 @@ class JournalEntryDelegate(QStyledItemDelegate):
         return line_edit
 
 
-class JournalEntryDialog(QDialog):
-
-    def __init__(self, parent, journal_entry):
-        super().__init__(parent)
-        # grid of QLineEdit's is easier than a table - the read-only editor allows context menu with a copy option.
-        # Tables are a pain in most API's - seems to be no exception with Qt.
-        layout = QGridLayout(self)
-        for row, (k, v) in enumerate(sorted(list(journal_entry.items()))):
-            key_widget = QLineEdit(k)
-            key_widget.setReadOnly(True)
-            key_widget.setMinimumWidth(350)
-            val_widget = QLineEdit(str(v))
-            val_widget.setReadOnly(True)
-            val_widget.setMinimumWidth(700)
-            layout.addWidget(key_widget, row, 0, 1, 1, alignment=Qt.AlignLeft)
-            layout.addWidget(val_widget, row, 1, 1, 2, alignment=Qt.AlignLeft)
-        self.setLayout(layout)
-        self.adjustSize()
-
-
 class JournalEntryDialogPlain(QDialog):
 
     def __init__(self, parent, journal_entry):
         super().__init__(parent)
-        # grid of QLineEdit's is easier than a table - the read-only editor allows context menu with a copy option.
-        # Tables are a pain in most API's - seems to be no exception with Qt.
+        
         self.setWindowTitle(tr(f"Journal Entry {journal_entry['__REALTIME_TIMESTAMP']}"))
         layout = QVBoxLayout()
+
         text_view = QTextEdit()
         text_view.setFont(QFontDatabase.systemFont(QFontDatabase.FixedFont))
         text_view.setReadOnly(True)
+        text_view.setLineWrapMode(QTextEdit.LineWrapMode.NoWrap)
         text = tr(f"Journal Entry {journal_entry['__REALTIME_TIMESTAMP']}\n\n")
         for row, (k, v) in enumerate(sorted(list(journal_entry.items()))):
             text += f"{k:25}: {str(v)}\n"
         text_view.setText(text)
+
         layout.addWidget(text_view)
+
         self.setLayout(layout)
-        # TODO maybe compute a minimum from the actual screen size
-        self.setMinimumWidth(1100)
-        self.setMinimumHeight(900)
+        self.setMinimumWidth(1000)
+        self.setMinimumHeight(800)
+        self.adjustSize()
+
         # .show() is non-modal, .exec() is modal
         self.show()
 
+        def copy_to_clipboard():
+            nonlocal floating_feedback_flip
+            QGuiApplication.clipboard().setText(text_view.toPlainText())
+            floating_copy_button.clearFocus()
+            floating_copy_button.setIconSize(QSize(50,50) if floating_feedback_flip else QSize(48, 48))
+            floating_feedback_flip= not floating_feedback_flip
+            floating_copy_button.repaint()
 
-class JournalEntryDialog(QDialog):
-
-    def __init__(self, parent, journal_entry):
-        super().__init__(parent)
-        # grid of QLineEdit's is easier than a table - the read-only editor allows context menu with a copy option.
-        # Tables are a pain in most API's - seems to be no exception with Qt.
-        self.setWindowTitle(tr(f"Journal Entry {journal_entry['__REALTIME_TIMESTAMP']}"))
-        layout = QVBoxLayout()
-        # TODO toolbar with copy to plain text
-        text_view = QTextEdit()
-
-        # text_view.setFont(QFontDatabase.systemFont(QFontDatabase.FixedFont))
-        text_view.setReadOnly(True)
-        text = tr(f"Journal Entry {journal_entry['__REALTIME_TIMESTAMP']}\n\n")
-        text += "| Journal Entry Field | Value |\n"
-        text += "| --- | --- |\n"
-        for row, (k, v) in enumerate(sorted(list(journal_entry.items()))):
-            text += f"| {k:25} | {str(v)} |\n"
-        text_view.setMarkdown(text)
-        # text_view.setStyleSheet(" { font-weight: bold; }")
-        layout.addWidget(text_view)
-        self.setLayout(layout)
-        # TODO maybe compute a minimum from the actual screen size
-        self.setMinimumWidth(1100)
-        self.setMinimumHeight(900)
-        # .show() is non-modal, .exec() is modal
-        self.show()
+        floating_feedback_flip = True
+        floating_copy_button = QPushButton(self)
+        floating_copy_button.setStyleSheet("QPushButton { background-color: transparent; border: 0px }");
+        floating_copy_button.setIcon(ICON_COPY_TO_CLIPBOARD)
+        floating_copy_button.setGeometry(self.width() - 75, 25, 40, 40);
+        floating_copy_button.setIconSize(QSize(48,48))
+        floating_copy_button.setToolTip(tr("Copy to clipboard"))
+        floating_copy_button.show();
+        floating_copy_button.clicked.connect(copy_to_clipboard)
 
 
 class DialogSingletonMixin:
