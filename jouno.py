@@ -215,10 +215,11 @@ with this program. If not, see <https://www.gnu.org/licenses/>.
 # TODO Add option for how many journal rows to show - if zero hide panel.
 # TODO Add option for non-tray use.
 # TODO Consider creating a separate full log browser making use of the journal API for search and random access.
-# TODO Search 'recent' on toolbar
+# DONE Search 'recent' on toolbar
 # TODO Display more fields in 'recent' - priority as icon perhaps.
 # DONE https://specifications.freedesktop.org/icon-naming-spec/latest/
 # TODO Position the GUI to the left so as not to be covered by alerts.
+# TODO Smaller Apply/Revert button widths.
 
 import argparse
 import configparser
@@ -239,7 +240,7 @@ from typing import Mapping, Any, List, Type, Callable
 import dbus
 from PyQt5.QtCore import QCoreApplication, QProcess, Qt, pyqtSignal, QThread, QModelIndex, QItemSelectionModel, QSize
 from PyQt5.QtGui import QPixmap, QIcon, QImage, QPainter, QCursor, QStandardItemModel, QStandardItem, QIntValidator, \
-    QFontDatabase, QClipboard, QGuiApplication
+    QFontDatabase, QGuiApplication
 from PyQt5.QtSvg import QSvgRenderer
 from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QMessageBox, QLineEdit, QLabel, \
     QPushButton, QSystemTrayIcon, QMenu, QTextEdit, QDialog, QTabWidget, \
@@ -256,7 +257,7 @@ ICON_CONTEXT_MENU_LISTENING_ENABLE = QIcon.fromTheme("view-refresh")
 ICON_CONTEXT_MENU_LISTENING_DISABLE = QIcon.fromTheme("process-stop")
 ICON_TRAY_LISTENING_DISABLED = ICON_CONTEXT_MENU_LISTENING_DISABLE
 ICON_COPY_TO_CLIPBOARD = QIcon.fromTheme("edit-copy")
-
+ICON_SEARCH_JOURNAL = QIcon.fromTheme("system-search")
 
 def create_image_from_svg_string(svg_str: bytes) -> QImage:
     """There is no QIcon option for loading QImage from a string, only from a SVG file, so roll our own."""
@@ -1147,7 +1148,9 @@ class ConfigPanel(QWidget):
 class MainToolBar(QToolBar):
 
     def __init__(self,
-                 run_func: Callable, notify_func: Callable, add_func: Callable, del_func: Callable,
+                 run_func: Callable, notify_func: Callable,
+                 add_func: Callable, del_func: Callable,
+                 search_func: Callable,
                  parent: QWidget):
         super().__init__(parent=parent)
         # main_tool_bar.setFixedHeight(80)
@@ -1175,9 +1178,14 @@ class MainToolBar(QToolBar):
         self.del_filter_action.setToolTip(
             tr("Delete selected filter") + "\n" +
             tr("Click in the left margin to select a filter."))
+        self.addSeparator()
+        search_input = QLineEdit()
+        search_input.addAction(ICON_SEARCH_JOURNAL, QLineEdit.LeadingPosition)
+        search_input.setToolTip(tr("Incrementally search and select journal entries.\nSearches all fields."))
+        self.addWidget(search_input)
+        search_input.textChanged.connect(search_func)
         spacer = QWidget()
         spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        self.addSeparator()
         self.addWidget(spacer)
         self.addAction(ICON_HELP_CONTENTS, tr('Help'), HelpDialog.invoke)
         self.addAction(ICON_HELP_ABOUT, tr('About'), AboutDialog.invoke)
@@ -1305,6 +1313,7 @@ class MainWindow(QMainWindow):
         tool_bar = MainToolBar(
             run_func=toggle_listener, notify_func=toggle_notifier,
             add_func=self.main_panel.add_filter, del_func=self.main_panel.delete_filters,
+            search_func=self.main_panel.search_select_journal,
             parent=self)
         self.addToolBar(tool_bar)
 
@@ -1379,6 +1388,9 @@ class MainCentralPanel(QWidget):
     def delete_filters(self):
         self.config_panel.delete_rules()
 
+    def search_select_journal(self, text:str):
+        self.journal_panel.search_select_journal(text)
+
 
 class JournalPanel(QWidget):
 
@@ -1409,6 +1421,16 @@ class JournalPanel(QWidget):
             return None
         return self.table_view.model().get_journal_entry(self.table_view.model().rowCount() - 1)
 
+    def search_select_journal(self, text:str):
+        self.table_view.clearSelection()
+        model = self.table_view.model()
+        if text.strip() != '':
+            for row_num in range(model.rowCount()):
+                journal_entry = model.get_journal_entry(row_num)
+                if text in str(journal_entry):
+                    self.table_view.selectRow(row_num)
+                    self.table_view.scrollTo(model.index(row_num,0))
+
 
 class JournalTableView(QTableView):
 
@@ -1420,6 +1442,7 @@ class JournalTableView(QTableView):
         self.setDragDropOverwriteMode(False)
         self.resizeColumnsToContents()
         self.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.setSelectionMode(QAbstractItemView.MultiSelection)
         self.setColumnWidth(0, 8 * 14)
         self.setColumnWidth(1, 10 * 14)
         self.setColumnWidth(2, 10 * 14)
@@ -1543,12 +1566,12 @@ class JournalEntryDialogPlain(QDialog):
 
         floating_feedback_flip = True
         floating_copy_button = QPushButton(self)
-        floating_copy_button.setStyleSheet("QPushButton { background-color: transparent; border: 0px }");
+        floating_copy_button.setStyleSheet("QPushButton { background-color: transparent; border: 0px }")
         floating_copy_button.setIcon(ICON_COPY_TO_CLIPBOARD)
         floating_copy_button.setGeometry(self.width() - 75, 25, 40, 40);
         floating_copy_button.setIconSize(QSize(48,48))
         floating_copy_button.setToolTip(tr("Copy to clipboard"))
-        floating_copy_button.show();
+        floating_copy_button.show()
         floating_copy_button.clicked.connect(copy_to_clipboard)
 
 
