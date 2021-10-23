@@ -234,7 +234,7 @@ import time
 import traceback
 from enum import Enum
 from pathlib import Path
-from typing import Mapping, Any, List, Type
+from typing import Mapping, Any, List, Type, Callable
 
 import dbus
 from PyQt5.QtCore import QCoreApplication, QProcess, Qt, pyqtSignal, QThread, QModelIndex, QItemSelectionModel
@@ -366,7 +366,7 @@ TOOLBAR_NOTIFIER_DISABLED_SVG = b"""
 
 """
 
-TOOLBAR_ADD_FILTER_SVG = """
+TOOLBAR_ADD_FILTER_SVG = b"""
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 22 22">
   <defs id="defs3051">
     <style type="text/css" id="current-color-scheme">
@@ -380,6 +380,18 @@ TOOLBAR_ADD_FILTER_SVG = """
      d="M 5 3 L 4 4 L 4 5 L 4 5.3046875 L 9 12.367188 L 9 16 L 9 16.039062 L 12.990234 19 L 13 19 L 13 12.367188 L 18 5.3046875 L 18 4 L 17 3 L 5 3 z M 5 4 L 17 4 L 17 4.9882812 L 12.035156 12 L 12 12 L 12 12.048828 L 12 13 L 12 17.019531 L 10 15.535156 L 10 13 L 10 12.048828 L 10 12 L 9.9648438 12 L 5 4.9882812 L 5 4 z M 6 5 L 8 8 L 8 6 L 10 5 L 6 5 z M 16 14 L 16 16 L 14 16 L 14 17 L 16 17 L 16 19 L 17 19 L 17 17 L 19 17 L 19 16 L 17 16 L 17 14 L 16 14 z "
      class="ColorScheme-Text"
      />
+</svg>
+"""
+
+TOOLBAR_DEL_FILTER_SVG = b"""
+<svg id="svg8" version="1.1" viewBox="0 0 22 22" xmlns="http://www.w3.org/2000/svg">
+    <defs id="defs3051">
+        <style id="current-color-scheme" type="text/css">.ColorScheme-Text {
+        color:#232629;
+      }</style>
+    </defs>
+    <path id="path4" class="ColorScheme-Text" d="m5 3-1 1v1.3046875l5 7.0625005v3.671872l3 2.226563v-1.246092l-2-1.484375v-3.535156h-0.035156l-4.964844-7.0117188v-0.9882812h12v0.9882812l-4.964844 7.0117188h1.22461l4.740234-6.6953125v-1.3046875l-1-1zm1 2 2 3v-2l2-1z" fill="currentColor"/>
+    <path id="path6" d="M 13.990234,13 13,13.990234 15.009766,16 13,18.009766 13.990234,19 16,16.990234 18.009766,19 19,18.009766 16.990234,16 19,13.990234 18.009766,13 16,15.009766 Z" fill="#da4453"/>
 </svg>
 """
 
@@ -735,8 +747,8 @@ def tr(source_text: str):
 
 class OptionsTab(QWidget):
 
-    def __init__(self, config_section: Mapping[str, str], main_widget: QWidget = None):
-        super().__init__()
+    def __init__(self, config_section: Mapping[str, str], parent: QWidget = None):
+        super().__init__(parent=parent)
         self.option_map: Mapping[str, QWidget] = {}
         layout = QGridLayout(self)
         row_number = 0
@@ -777,8 +789,8 @@ class OptionsTab(QWidget):
 
 class FilterPanel(QWidget):
 
-    def __init__(self, config_section: Mapping[str, str], tooltip='', main_widget=None):
-        super().__init__()
+    def __init__(self, config_section: Mapping[str, str], tooltip: str = 'tip', parent: QWidget = None):
+        super().__init__(parent=parent)
         print("table", str(config_section.keys()))
 
         self.table_view = FilterTableView(config_section, tooltip)
@@ -800,8 +812,8 @@ class FilterPanel(QWidget):
     def clear_selection(self):
         self.table_view.clearSelection()
 
-    def add_rule(self):
-        self.table_view.add_new_rule()
+    def add_rule(self, rule_id: str = '', pattern: str = ''):
+        self.table_view.add_new_rule(rule_id, pattern)
 
     def delete_rules(self):
         self.table_view.delete_selected_rules()
@@ -872,7 +884,7 @@ class FilterTableView(QTableView):
         row_y_positions.sort()
         return [row_num for _, row_num in row_y_positions]
 
-    def create_rule_item(self, rule_id: str):
+    def create_rule_id_item(self, rule_id: str):
         enable_item = QStandardItem(rule_id)
         enable_item.setCheckable(True)
         enable_item.setCheckState(Qt.Checked)
@@ -912,7 +924,7 @@ class FilterTableView(QTableView):
             if key.endswith("_enabled"):
                 pass
             else:
-                key_item = self.create_rule_item(key)
+                key_item = self.create_rule_id_item(key)
                 key_enabled = key + "_enabled"
                 if key_enabled in config_section:
                     if config_section[key_enabled].strip().lower() != 'yes':
@@ -939,17 +951,17 @@ class FilterTableView(QTableView):
 
     select_flags = QItemSelectionModel.Clear | QItemSelectionModel.Rows | QItemSelectionModel.SelectCurrent | QItemSelectionModel.Rows
 
-    def add_new_rule(self):
+    def add_new_rule(self, rule_id: str = '', pattern: str = ''):
         model = self.model()
         selected_row_indices = self.selectionModel().selectedRows()
         if len(selected_row_indices) > 0:
             index = sorted(selected_row_indices)[0]
-            model.insertRow(index.row(), [self.create_rule_item(''), QStandardItem('')])
+            model.insertRow(index.row(), [self.create_rule_id_item(rule_id), QStandardItem(pattern)])
             self.scrollTo(index)
             self.clearSelection()
             self.selectRow(index.row())
         else:
-            model.appendRow([self.create_rule_item(''), QStandardItem('')])
+            model.appendRow([self.create_rule_id_item(rule_id), QStandardItem(pattern)])
             self.scrollToBottom()
             self.selectRow(model.rowCount() - 1)
 
@@ -1001,27 +1013,28 @@ def title(widget: QLabel) -> QLabel:
 
 class ConfigPanel(QWidget):
 
-    def __init__(self, main_widget: QWidget = None):
-        super().__init__(main_widget)
+    def __init__(self, tab_change: Callable, parent: QWidget):
+        super().__init__(parent=parent)
 
         layout = QVBoxLayout()
         self.setLayout(layout)
         tabs = QTabWidget()
+        self.tabs = tabs
 
         config = Config()
         config.refresh()
 
-        options_panel = OptionsTab(config['options'])
+        options_panel = OptionsTab(config['options'], parent=self)
 
         match_panel = FilterPanel(
             config['match'],
             tooltip=tr("Only issue notifications for journal-entry messages that match one of these rules."),
-            main_widget=main_widget)
+            parent=parent)
 
         ignore_panel = FilterPanel(
             config['ignore'],
             tooltip=tr("Ignore journal-entry messages that match any of these rules."),
-            main_widget=main_widget)
+            parent=parent)
 
         button_box = QWidget()
         button_box_layout = QGridLayout()
@@ -1029,25 +1042,9 @@ class ConfigPanel(QWidget):
         apply_button = QPushButton(tr("Apply"))
         revert_button = QPushButton(tr("Revert"))
 
-        def add_action():
-            tabs.currentWidget().add_rule()
-
-        def del_action():
-            tabs.currentWidget().delete_rules()
-
-        add_button = QPushButton(tr("Add rules"))
-        add_button.setToolTip("Add a new row above the selected row or at the end if no row is selected.\n"
-                              "Click in the left margin to select a row.")
-        add_button.clicked.connect(add_action)
-        del_button = QPushButton(tr("Delete rules"))
-        del_button.setToolTip("Remove selected rows. Click in the left margin to select some rows.")
-        del_button.clicked.connect(del_action)
-
         button_box_layout.addWidget(apply_button, 0, 0)
         button_box_layout.addWidget(revert_button, 0, 1)
         button_box_layout.setColumnMinimumWidth(3, 200)
-        button_box_layout.addWidget(add_button, 0, 4)
-        button_box_layout.addWidget(del_button, 0, 5)
 
         def save_action():
             debug("Apply")
@@ -1068,9 +1065,9 @@ class ConfigPanel(QWidget):
                     message.exec()
                     debug(f'ok')
             except FilterValidationException as e:
-                title, summary, text = e.args
+                e_title, summary, text = e.args
                 message = QMessageBox(self)
-                message.setWindowTitle(title)
+                message.setWindowTitle(e_title)
                 message.setText(f"{tr('Cannot apply changes.')}\n{summary}\n{text}")
                 message.setIcon(QMessageBox.Critical)
                 message.setStandardButtons(QMessageBox.Ok)
@@ -1119,10 +1116,6 @@ class ConfigPanel(QWidget):
         layout.addWidget(tabs)
         layout.addWidget(button_box)
 
-        def tab_change(tab_number):
-            add_button.setEnabled(tab_number != 2)
-            del_button.setEnabled(tab_number != 2)
-
         tabs.currentChanged.connect(tab_change)
 
         options_panel.copy_from_config(config['options'])
@@ -1139,10 +1132,25 @@ class ConfigPanel(QWidget):
         self.raise_()
         self.activateWindow()
 
-class MainToolBarManger(QToolBar):
+    def add_rule(self, rule_id, pattern) -> bool:
+        if isinstance(self.tabs.currentWidget(), FilterPanel):
+            self.tabs.currentWidget().add_rule(rule_id, pattern)
+            return True
+        return False
 
-    def __init__(self, main_window: QMainWindow, run_func, notify_func):
-        super().__init__(parent=main_window)
+    def delete_rules(self):
+        if isinstance(self.tabs.currentWidget(), FilterPanel):
+            self.tabs.currentWidget().delete_rules()
+            return True
+        return False
+
+
+class MainToolBar(QToolBar):
+
+    def __init__(self,
+                 run_func: Callable, notify_func: Callable, add_func: Callable, del_func: Callable,
+                 parent: QWidget):
+        super().__init__(parent=parent)
         # main_tool_bar.setFixedHeight(80)
         # main_tool_bar.setIconSize(QSize(30,30))
         self.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
@@ -1157,13 +1165,24 @@ class MainToolBarManger(QToolBar):
             create_icon_from_svg_string(TOOLBAR_STOP_SVG),
             tr("Stop"), run_func);
         self.addSeparator()
-        self.notifier_action = self.addAction(self.icon_notifier_enabled, "notify", notify_func);
+        self.notifier_action = self.addAction(self.icon_notifier_enabled, "notify", notify_func)
+        self.addSeparator()
+        self.add_filter_action = self.addAction(create_icon_from_svg_string(TOOLBAR_ADD_FILTER_SVG), "add", add_func)
+        self.add_filter_action.setIconText(tr("New filter"))
+        self.add_filter_action.setToolTip(
+            tr("Add a new filter above the selected filter or at the end if no filter is selected.") + "\n" +
+            tr("Click in the left margin to select a filter."))
+        self.del_filter_action = self.addAction(create_icon_from_svg_string(TOOLBAR_DEL_FILTER_SVG), "add", del_func)
+        self.del_filter_action.setIconText(tr("Delete filter"))
+        self.del_filter_action.setToolTip(
+            tr("Delete selected filter") + "\n" +
+            tr("Click in the left margin to select a filter."))
         spacer = QWidget()
         spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         self.addSeparator()
         self.addWidget(spacer)
-        self.addAction(ICON_HELP_CONTENTS, tr('Help'), HelpDialog.invoke);
-        self.addAction(ICON_HELP_ABOUT, tr('About'), AboutDialog.invoke);
+        self.addAction(ICON_HELP_CONTENTS, tr('Help'), HelpDialog.invoke)
+        self.addAction(ICON_HELP_ABOUT, tr('About'), AboutDialog.invoke)
 
     def configure_run_action(self, running: bool) -> None:
         if running:
@@ -1183,11 +1202,15 @@ class MainToolBarManger(QToolBar):
             self.notifier_action.setIcon(self.icon_notifier_disabled)
             self.notifier_action.setIconText(tr('Discarding'))
 
+    def configure_filter_actions(self, enable: bool) -> None:
+        self.add_filter_action.setEnabled(enable)
+        self.del_filter_action.setEnabled(enable)
+
 
 class MainContextMenu(QMenu):
 
-    def __init__(self, main_window: QMainWindow, run_func, notify_func, quit_func):
-        super().__init__()
+    def __init__(self, run_func: Callable, notify_func: Callable, quit_func: Callable, parent: QWidget):
+        super().__init__(parent=parent)
         self.icon_notifier_enabled = create_icon_from_svg_string(TOOLBAR_NOTIFIER_ENABLED_SVG)
         self.icon_notifier_disabled = create_icon_from_svg_string(TOOLBAR_NOTIFIER_DISABLED_SVG)
         self.listen_action = self.addAction(ICON_CONTEXT_MENU_LISTENING_DISABLE,
@@ -1226,7 +1249,7 @@ class MainContextMenu(QMenu):
 
 class MainWindow(QMainWindow):
 
-    def __init__(self, app):
+    def __init__(self, app: QApplication):
         super().__init__()
 
         journal_watcher_task = JournalWatcherTask()
@@ -1274,11 +1297,21 @@ class MainWindow(QMainWindow):
             journal_watcher_task.requestInterruption()
             app.quit()
 
-        tool_bar = MainToolBarManger(self, toggle_listener, toggle_notifier)
-        self.addToolBar(tool_bar)
-        app_context_menu = MainContextMenu(self, toggle_listener, toggle_notifier, quit_app)
+        def tab_change(tab_number):
+            tool_bar.configure_filter_actions(tab_number == 0 or tab_number == 1)
 
-        self.setCentralWidget(CentralPanel(journal_watcher_task))
+        self.main_panel = MainCentralPanel(
+            journal_watcher_task=journal_watcher_task, tab_change=tab_change, parent=self)
+        self.setCentralWidget(self.main_panel)
+
+        tool_bar = MainToolBar(
+            run_func=toggle_listener, notify_func=toggle_notifier,
+            add_func=self.main_panel.add_filter, del_func=self.main_panel.delete_filters,
+            parent=self)
+        self.addToolBar(tool_bar)
+
+        app_context_menu = MainContextMenu(
+            run_func=toggle_listener, notify_func=toggle_notifier, quit_func=quit_app, parent=self)
 
         tray = QSystemTrayIcon()
         tray.setIcon(create_icon_from_svg_string(JOUNO_ICON_SVG))
@@ -1309,11 +1342,14 @@ class MainWindow(QMainWindow):
         if rc == 999:  # EXIT_CODE_FOR_RESTART:
             QProcess.startDetached(app.arguments()[0], app.arguments()[1:])
 
+    def add_filter(self):
+        self.main_panel.add_rule()
 
-class CentralPanel(QWidget):
 
-    def __init__(self, journal_watcher_task: JournalWatcherTask):
-        super().__init__()
+class MainCentralPanel(QWidget):
+
+    def __init__(self, journal_watcher_task: JournalWatcherTask, tab_change: Callable, parent: QWidget):
+        super().__init__(parent=parent)
         # self.setContextMenuPolicy(Qt.CustomContextMenu)
         self.setWindowTitle(tr('Control Panel'))
         self.setMinimumWidth(1200)
@@ -1322,16 +1358,38 @@ class CentralPanel(QWidget):
         splitter.setOrientation(Qt.Vertical)
         layout = QVBoxLayout()
         splitter.setStyleSheet("QSplitter::handle{background: #333333;}")
-        splitter.addWidget(JournalPanel(journal_watcher_task))
-        splitter.addWidget(ConfigPanel())
+
+        self.journal_panel = JournalPanel(journal_watcher_task=journal_watcher_task, parent=self)
+        splitter.addWidget(self.journal_panel)
+
+        self.config_panel = ConfigPanel(tab_change=tab_change, parent=self)
+        splitter.addWidget(self.config_panel)
+
         layout.addWidget(splitter)
         self.setLayout(layout)
+
+    def add_filter(self):
+        journal_entry = self.journal_panel.get_selected_journal_entry()
+        if journal_entry is None:
+            message = ''
+        else:
+            # ts = journal_entry['__REALTIME_TIMESTAMP']
+            # rule_id = f"r{ts:%Y%m%d-%H%M%S-%f}"
+            message = journal_entry['MESSAGE']
+        if not self.config_panel.add_rule('<new_id>', message):
+            # TODO error
+            pass
+
+    def delete_filters(self):
+        if not self.config_panel.delete_rules():
+            # TODO error
+            pass
 
 
 class JournalPanel(QWidget):
 
-    def __init__(self, journal_watcher_task: JournalWatcherTask, main_widget: QWidget = None):
-        super().__init__()
+    def __init__(self, journal_watcher_task: JournalWatcherTask, parent: QWidget):
+        super().__init__(parent=parent)
 
         self.table_view = JournalTableView(journal_watcher_task)
 
@@ -1345,6 +1403,17 @@ class JournalPanel(QWidget):
 
     def set_title(self, value: str):
         self.title.setText(str)
+
+    def get_selected_journal_entry(self):
+        indexes = self.table_view.selectedIndexes()
+        if indexes is None or len(indexes) == 0:
+            return None
+        return self.table_view.model().get_journal_entry(indexes[-1].row())
+
+    def get_last_journal_entry(self):
+        if self.table_view.model().rowCount() == 0:
+            return None
+        return self.table_view.model().get_journal_entry(self.table_view.model().rowCount() - 1)
 
 
 class JournalTableView(QTableView):
@@ -1506,7 +1575,7 @@ class JournalEntryDialog(QDialog):
         for row, (k, v) in enumerate(sorted(list(journal_entry.items()))):
             text += f"| {k:25} | {str(v)} |\n"
         text_view.setMarkdown(text)
-        #text_view.setStyleSheet(" { font-weight: bold; }")
+        # text_view.setStyleSheet(" { font-weight: bold; }")
         layout.addWidget(text_view)
         self.setLayout(layout)
         # TODO maybe compute a minimum from the actual screen size
