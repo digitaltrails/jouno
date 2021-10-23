@@ -1134,12 +1134,14 @@ class ConfigPanel(QWidget):
     def add_rule(self, rule_id, pattern) -> None:
         if isinstance(self.tabs.currentWidget(), FilterPanel):
             self.tabs.currentWidget().add_rule(rule_id, pattern)
-        raise TypeError("Was expecting FilterPanel")
+        else:
+            raise TypeError("Was expecting FilterPanel")
 
     def delete_rules(self) -> None:
         if isinstance(self.tabs.currentWidget(), FilterPanel):
             self.tabs.currentWidget().delete_rules()
-        raise TypeError("Was expecting FilterPanel")
+        else:
+            raise TypeError("Was expecting FilterPanel")
 
 
 
