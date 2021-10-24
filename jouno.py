@@ -241,12 +241,13 @@ from typing import Mapping, Any, List, Type, Callable
 import dbus
 from PyQt5.QtCore import QCoreApplication, QProcess, Qt, pyqtSignal, QThread, QModelIndex, QItemSelectionModel, QSize
 from PyQt5.QtGui import QPixmap, QIcon, QImage, QPainter, QCursor, QStandardItemModel, QStandardItem, QIntValidator, \
-    QFontDatabase, QGuiApplication
+    QFontDatabase, QGuiApplication, QCloseEvent
 from PyQt5.QtSvg import QSvgRenderer
 from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QMessageBox, QLineEdit, QLabel, \
     QPushButton, QSystemTrayIcon, QMenu, QTextEdit, QDialog, QTabWidget, \
     QCheckBox, QGridLayout, QTableView, \
-    QAbstractItemView, QHeaderView, QSplitter, QMainWindow, QSizePolicy, QStyledItemDelegate, QToolBar
+    QAbstractItemView, QHeaderView, QMainWindow, QSizePolicy, QStyledItemDelegate, QToolBar, QDockWidget, \
+    QHBoxLayout
 from systemd import journal
 
 JOUNO_VERSION = '0.9.0'
@@ -259,6 +260,8 @@ ICON_CONTEXT_MENU_LISTENING_DISABLE = QIcon.fromTheme("process-stop")
 ICON_TRAY_LISTENING_DISABLED = ICON_CONTEXT_MENU_LISTENING_DISABLE
 ICON_COPY_TO_CLIPBOARD = QIcon.fromTheme("edit-copy")
 ICON_SEARCH_JOURNAL = QIcon.fromTheme("system-search")
+ICON_UNDOCK = QIcon.fromTheme("window-new")
+ICON_DOCK = QIcon.fromTheme("window-close")
 
 def create_image_from_svg_string(svg_str: bytes) -> QImage:
     """There is no QIcon option for loading QImage from a string, only from a SVG file, so roll our own."""
@@ -991,6 +994,7 @@ class ConfigWatcherTask(QThread):
     signal_config_change = pyqtSignal(dict)
 
     def __init__(self, config: Config) -> None:
+        super().__init__()
         self.config = config
 
     def run(self) -> None:
@@ -1022,13 +1026,13 @@ class JournalWatcherTask(QThread):
 
 
 def title(widget: QLabel) -> QLabel:
-    widget.setStyleSheet("font-weight: normal;font-size: 13pt;")
+    widget.setStyleSheet("font-weight: normal;font-size: 12pt;")
     return widget
 
 
 class ConfigPanel(QWidget):
 
-    def __init__(self, tab_change: Callable, parent: QWidget, config_change_func: Callable):
+    def __init__(self, tab_change: Callable, config_change_func: Callable, parent: QWidget):
         super().__init__(parent=parent)
 
         layout = QVBoxLayout()
@@ -1141,13 +1145,13 @@ class ConfigPanel(QWidget):
         config_watcher = ConfigWatcherTask(config)
         config_watcher.signal_config_change.connect(reload_from_config)
 
-    def add_rule(self, rule_id, pattern) -> None:
+    def add_filter(self, rule_id, pattern) -> None:
         if isinstance(self.tabs.currentWidget(), FilterPanel):
             self.tabs.currentWidget().add_rule(rule_id, pattern)
         else:
             raise TypeError("Was expecting FilterPanel")
 
-    def delete_rules(self) -> None:
+    def delete_filter(self) -> None:
         if isinstance(self.tabs.currentWidget(), FilterPanel):
             self.tabs.currentWidget().delete_rules()
         else:
@@ -1299,8 +1303,10 @@ class MainWindow(QMainWindow):
         app.setWindowIcon(create_icon_from_svg_string(JOUNO_ICON_LIGHT_SVG))
         app.setApplicationDisplayName(app_name)
         app.setApplicationVersion(JOUNO_VERSION)
+        self.setMinimumWidth(1200)
+        self.setMinimumHeight(1000)
 
-        def update_title_and_tray_indicators():
+        def update_title_and_tray_indicators() -> None:
             if journal_watcher_task.isRunning():
                 title_text = tr("Running") if journal_watcher_task.is_notifying() else tr("Muted")
                 self.setWindowTitle(title_text)
@@ -1334,24 +1340,39 @@ class MainWindow(QMainWindow):
             app_context_menu.configure_notifier_action(enable)
             update_title_and_tray_indicators()
 
-        def toggle_notifier():
+        def toggle_notifier() -> None:
             enable_notifier(not journal_watcher_task.is_notifying())
 
-        def quit_app():
+        def quit_app() -> None:
             journal_watcher_task.requestInterruption()
             app.quit()
 
-        def tab_change(tab_number):
+        def tab_change(tab_number) -> None:
             tool_bar.configure_filter_actions(tab_number == 0 or tab_number == 1)
 
-        self.main_panel = MainCentralPanel(
-            journal_watcher_task=journal_watcher_task, tab_change=tab_change, parent=self)
-        self.setCentralWidget(self.main_panel)
+        def config_change() -> None:
+            pass
+
+        def add_filter() -> None:
+            journal_entry = journal_panel.get_selected_journal_entry()
+            config_panel.add_filter('<new_id>', '' if journal_entry is None else journal_entry['MESSAGE'])
+
+        def delete_filter() -> None:
+            config_panel.delete_filter()
+
+        def search_select_journal(text: str) -> None:
+            journal_panel.search_select_journal(text)
+
+        journal_panel = JournalPanel(journal_watcher_task=journal_watcher_task, parent=self)
+        config_panel = ConfigPanel(tab_change=tab_change, config_change_func=config_change, parent=self)
+
+        self.setCentralWidget(config_panel)
+        self.addDockWidget(Qt.DockWidgetArea.TopDockWidgetArea, journal_panel)
 
         tool_bar = MainToolBar(
             run_func=toggle_listener, notify_func=toggle_notifier,
-            add_func=self.main_panel.add_filter, del_func=self.main_panel.delete_filters,
-            search_func=self.main_panel.search_select_journal,
+            add_func=add_filter, del_func=delete_filter,
+            search_func=search_select_journal,
             parent=self)
         self.addToolBar(tool_bar)
 
@@ -1383,70 +1404,94 @@ class MainWindow(QMainWindow):
         tray.setVisible(True)
         enable_listener(True)
         enable_notifier(True)
+
         rc = app.exec_()
         if rc == 999:  # EXIT_CODE_FOR_RESTART:
             QProcess.startDetached(app.arguments()[0], app.arguments()[1:])
 
-    def add_filter(self):
-        self.main_panel.add_rule()
 
+class JounalMainWindow(QMainWindow):
+    """
+    I wanted an undockable component, but one with normal window decorations.
+    So I've taken over the undocking process and reparent the floating window onto
+    this alternate main window.
+    """
+    def __init__(self, journal_widget: QDockWidget, top_main_window:QMainWindow):
+        super().__init__(parent=top_main_window)
+        self.journal_widget = journal_widget
+        self.top_main_window = top_main_window
+        self.setMinimumWidth(1100)
+        self.setMinimumHeight(800)
 
-class MainCentralPanel(QWidget):
-
-    def __init__(self, journal_watcher_task: JournalWatcherTask, tab_change: Callable, parent: QWidget):
-        super().__init__(parent=parent)
-        # self.setContextMenuPolicy(Qt.CustomContextMenu)
-        self.setWindowTitle(tr('Control Panel'))
-        self.setMinimumWidth(1200)
-        self.setMinimumHeight(1000)
-        splitter = QSplitter()
-        splitter.setOrientation(Qt.Vertical)
-        layout = QVBoxLayout()
-        splitter.setStyleSheet("QSplitter::handle{background: #333333;}")
-
-        self.journal_panel = JournalPanel(journal_watcher_task=journal_watcher_task, parent=self)
-        splitter.addWidget(self.journal_panel)
-
-        self.config_panel = ConfigPanel(tab_change=tab_change, parent=self)
-        splitter.addWidget(self.config_panel)
-
-        layout.addWidget(splitter)
-        self.setLayout(layout)
-
-    def add_filter(self):
-        journal_entry = self.journal_panel.get_selected_journal_entry()
-        if journal_entry is None:
-            message = ''
+    def switch(self):
+        if self.isVisible():
+            self.journal_widget.setFloating(True)
+            self.hide()
+            self.journal_widget.dock_button.setIcon(ICON_UNDOCK)
+            self.top_main_window.addDockWidget(Qt.DockWidgetArea.TopDockWidgetArea, self.journal_widget)
+            self.journal_widget.setFloating(False)
+            self.top_main_window.setFocus()
         else:
-            # ts = journal_entry['__REALTIME_TIMESTAMP']
-            # rule_id = f"r{ts:%Y%m%d-%H%M%S-%f}"
-            message = journal_entry['MESSAGE']
-        self.config_panel.add_rule('<new_id>', message)
+            self.journal_widget.setFloating(True)
+            self.journal_widget.dock_button.setIcon(ICON_DOCK)
+            self.addDockWidget(Qt.DockWidgetArea.TopDockWidgetArea, self.journal_widget)
+            g = self.top_main_window.geometry()
+            self.setGeometry(
+                g.x() + 10, g.y() + 10, self.journal_widget.width() + 10, self.journal_widget.height() + 10)
+            self.show()
+            self.setFocus()
 
-    def delete_filters(self):
-        self.config_panel.delete_rules()
-
-    def search_select_journal(self, text:str):
-        self.journal_panel.search_select_journal(text)
+    def closeEvent(self, close_event: QCloseEvent) -> None:
+        self.switch()
+        close_event.ignore()
 
 
-class JournalPanel(QWidget):
+class JournalPanel(QDockWidget):
 
-    def __init__(self, journal_watcher_task: JournalWatcherTask, parent: QWidget):
-        super().__init__(parent=parent)
+    def __init__(self, journal_watcher_task: JournalWatcherTask, parent: QMainWindow):
+        super().__init__(parent=parent, flags=Qt.WindowFlags(Qt.WindowStaysOnTopHint))
+
+        self.setFloating(False)
+        self.setFeatures(QDockWidget.DockWidgetFloatable | QDockWidget.DockWidgetMovable)
+        self.tmp_main_window = JounalMainWindow(journal_widget=self, top_main_window=parent)
 
         self.table_view = JournalTableView(journal_watcher_task)
 
         # TODO add a test rules button that pops up a testing dialog with an input field.
+        container = QWidget(self)
         layout = QVBoxLayout(self)
-        self.title = title(QLabel(tr("Recently notified")))
-        layout.addWidget(self.title)
+        container.setLayout(layout)
+        title_container = QWidget(self)
+        title_layout = QHBoxLayout()
+        title_container.setLayout(title_layout)
+        title_label = title(QLabel(tr("Recently notified")))
+        title_layout.addWidget(title_label)
+        spacer = QWidget()
+        spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        title_layout.addWidget(spacer)
+        self.dock_button = QPushButton(ICON_UNDOCK, '', self)
+        self.dock_button.setStyleSheet("QPushButton { background-color: transparent; border: 0px }")
+        title_layout.addWidget(self.dock_button)
+        layout.addWidget(title_container)
+        self.setWidget(container)
+
+        self.dock_button.pressed.connect(self.tmp_main_window.switch)
+
+        self.setWindowTitle(tr("Recently notified"))
+        self.setStyleSheet("QDockWidget { font-size: 12pt;}")
+        self.setTitleBarWidget(QWidget())
+        self.setMinimumHeight(parent.minimumHeight() * 3//8)
         layout.addWidget(self.table_view)
 
-        self.setLayout(layout)
+        def top_level_changed(top_level: bool):
+            pass
+            # if top_level:
+            #     debug('ping')
+            #     self.other = QMainWindow()
+            #     self.other.show()
+            #     self.other.addDockWidget(Qt.DockWidgetArea.TopDockWidgetArea, self)
 
-    def set_title(self, value: str):
-        self.title.setText(str)
+        self.topLevelChanged.connect(top_level_changed)
 
     def get_selected_journal_entry(self):
         indexes = self.table_view.selectedIndexes()
