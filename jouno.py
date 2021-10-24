@@ -1180,7 +1180,6 @@ class MainToolBar(QToolBar):
     def __init__(self,
                  run_func: Callable, notify_func: Callable,
                  add_func: Callable, del_func: Callable,
-                 search_func: Callable,
                  parent: QWidget):
         super().__init__(parent=parent)
         # main_tool_bar.setFixedHeight(80)
@@ -1213,12 +1212,7 @@ class MainToolBar(QToolBar):
         self.del_filter_action.setToolTip(
             tr("Delete selected filter.") + "\n" +
             tr("Select a filter tab and click in its left margin to select a filter to delete."))
-        self.addSeparator()
-        search_input = QLineEdit()
-        search_input.addAction(ICON_SEARCH_JOURNAL, QLineEdit.LeadingPosition)
-        search_input.setToolTip(tr("Incrementally search and select journal entries.\nSearches all fields."))
-        self.addWidget(search_input)
-        search_input.textChanged.connect(search_func)
+
         spacer = QWidget()
         spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         self.addWidget(spacer)
@@ -1379,8 +1373,6 @@ class MainWindow(QMainWindow):
         def delete_filter() -> None:
             config_panel.delete_filter()
 
-        def search_select_journal(text: str) -> None:
-            journal_panel.search_select_journal(text)
 
         config_panel = ConfigPanel(tab_change=tab_change, config_change_func=config_change, parent=self)
 
@@ -1398,7 +1390,6 @@ class MainWindow(QMainWindow):
         tool_bar = MainToolBar(
             run_func=toggle_listener, notify_func=toggle_notifier,
             add_func=add_filter, del_func=delete_filter,
-            search_func=search_select_journal,
             parent=self)
         self.addToolBar(tool_bar)
 
@@ -1495,9 +1486,27 @@ class JournalPanel(QDockWidget):
         title_container.setLayout(title_layout)
         title_label = title(QLabel(tr("Recently notified")))
         title_layout.addWidget(title_label)
+
         spacer = QWidget()
         spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         title_layout.addWidget(spacer)
+
+        def search_entries(text: str) -> None:
+            self.search_select_journal(text)
+            search_input.setFocus()
+
+        search_input = QLineEdit()
+        search_input.setFixedWidth(350)
+        search_input.addAction(ICON_SEARCH_JOURNAL, QLineEdit.LeadingPosition)
+        search_input.setToolTip(tr("Incrementally search and select journal entries.\nSearches all fields."))
+        title_layout.addWidget(search_input)
+        search_input.textChanged.connect(search_entries)
+
+        spacer = QWidget()
+        spacer.setFixedWidth(10)
+        spacer.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Preferred)
+        title_layout.addWidget(spacer)
+
         self.dock_button = QPushButton(ICON_UNDOCK, '', self)
         self.dock_button.setStyleSheet("QPushButton { background-color: transparent; border: 0px }")
         self.dock_button.setToolTip(tr("Dock/undock the Recently Notified panel"))
@@ -1539,7 +1548,8 @@ class JournalPanel(QDockWidget):
                 entry_text = str(journal_entry).lower() if text.islower() else str(journal_entry)
                 if text in entry_text:
                     self.table_view.selectRow(row_num)
-                    self.table_view.scrollTo(model.index(row_num,0))
+                    self.table_view.scrollTo(model.index(row_num, 5))
+                    self.table_view.clearFocus()
 
     def set_max_journal_entries(self, max_entries: int) -> None:
         self.table_view.model().set_max_journal_entries(max_entries)
