@@ -1495,6 +1495,7 @@ class JournalPanel(QDockWidget):
         title_layout.addWidget(spacer)
         self.dock_button = QPushButton(ICON_UNDOCK, '', self)
         self.dock_button.setStyleSheet("QPushButton { background-color: transparent; border: 0px }")
+        self.dock_button.setToolTip(tr("Dock/undock the Recently Notified panel"))
         title_layout.addWidget(self.dock_button)
         layout.addWidget(title_container)
         self.setWidget(container)
