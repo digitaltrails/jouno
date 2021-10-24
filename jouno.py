@@ -1559,7 +1559,8 @@ class JournalTableView(QTableView):
         self.horizontalHeader().setDefaultAlignment(Qt.AlignLeft)
         self.horizontalHeader().setStyleSheet(TABLE_HEADER_STYLE)
         self.setItemDelegate(JournalEntryDelegate(self.model()))
-        self.setEditTriggers(QAbstractItemView.SelectedClicked)
+        # Cannot use xor!
+        self.setEditTriggers(QAbstractItemView.AnyKeyPressed | QAbstractItemView.SelectedClicked | QAbstractItemView.CurrentChanged)
         # self.setGridStyle(Qt.NoPen)
         self.setShowGrid(False)
 
