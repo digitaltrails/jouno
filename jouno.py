@@ -623,7 +623,7 @@ class JournalWatcher:
             for key, prefix in {'_CMDLINE': '', '_EXE': '', '_COMM': '', 'SYSLOG_IDENTIFIER': '',
                                 '_KERNEL_SUBSYSTEM': 'kernel ',
                                 }.items():
-                print(key, journal_entry[key] if key in journal_entry else False)
+                debug("determine_app_name", key, journal_entry[key] if key in journal_entry else False)
                 if key in journal_entry:
                     value = str(journal_entry[key])
                     if app_name_info.find(value) < 0:
@@ -1369,6 +1369,8 @@ class MainWindow(QMainWindow):
 
         def config_change() -> None:
             journal_panel.set_max_journal_entries(config_panel.get_config().getint('options', 'journal_history_max'))
+            global debug_enabled
+            debug_enabled = config_panel.get_config().getboolean('options', 'debug_enabled')
 
         def add_filter() -> None:
             journal_entry = journal_panel.get_selected_journal_entry()
@@ -1381,6 +1383,9 @@ class MainWindow(QMainWindow):
             journal_panel.search_select_journal(text)
 
         config_panel = ConfigPanel(tab_change=tab_change, config_change_func=config_change, parent=self)
+
+        global debug_enabled
+        debug_enabled = config_panel.get_config().getboolean('options', 'debug_enabled')
 
         journal_panel = JournalPanel(
             journal_watcher_task=journal_watcher_task,
@@ -1703,14 +1708,14 @@ class DialogSingletonMixin:
         if class_name in DialogSingletonMixin._dialogs_map:
             raise TypeError(f"ERROR: More than one instance of {class_name} cannot exist.")
         if DialogSingletonMixin.debug:
-            print(f'DEBUG: SingletonDialog created for {class_name}')
+            debug(f'SingletonDialog created for {class_name}')
         DialogSingletonMixin._dialogs_map[class_name] = self
 
     def closeEvent(self, event) -> None:
         """Subclasses that implement their own closeEvent must call this closeEvent to deregister the singleton"""
         class_name = self.__class__.__name__
         if DialogSingletonMixin.debug:
-            print(f'DEBUG: SingletonDialog remove {class_name}')
+            debug(f'SingletonDialog remove {class_name}')
         del DialogSingletonMixin._dialogs_map[class_name]
         event.accept()
 
@@ -1728,7 +1733,7 @@ class DialogSingletonMixin:
         """If the dialog exists(), call this to make it visible by raising it."""
         class_name = cls.__name__
         if DialogSingletonMixin.debug:
-            print(f'DEBUG: SingletonDialog show existing {class_name}')
+            debug(f'SingletonDialog show existing {class_name}')
         instance = DialogSingletonMixin._dialogs_map[class_name]
         instance.make_visible()
 
@@ -1737,7 +1742,7 @@ class DialogSingletonMixin:
         """Returns true if the dialog has already been created."""
         class_name = cls.__name__
         if DialogSingletonMixin.debug:
-            print(f'DEBUG: SingletonDialog exists {class_name} {class_name in DialogSingletonMixin._dialogs_map}')
+            debug(f'SingletonDialog exists {class_name} {class_name in DialogSingletonMixin._dialogs_map}')
         return class_name in DialogSingletonMixin._dialogs_map
 
 
