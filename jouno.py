@@ -221,6 +221,7 @@ with this program. If not, see <https://www.gnu.org/licenses/>.
 # TODO Position the GUI to the left so as not to be covered by alerts.
 # TODO Smaller Apply/Revert button widths.
 # TODO figure out why QIntValidator is only working approximately.
+# DONE Unify treatment of icon loading.
 # DONE Fix tray hover title
 
 import argparse
@@ -235,6 +236,7 @@ import sys
 import textwrap
 import time
 import traceback
+from ctypes import Union
 from enum import Enum
 from pathlib import Path
 from typing import Mapping, Any, List, Type, Callable
@@ -253,52 +255,24 @@ from systemd import journal
 
 JOUNO_VERSION = '0.9.5'
 
-ICON_HELP_ABOUT = QIcon.fromTheme("help-about")
-ICON_HELP_CONTENTS = QIcon.fromTheme("help-contents")
-ICON_APPLICATION_EXIT = QIcon.fromTheme("application-exit")
-ICON_CONTEXT_MENU_LISTENING_ENABLE = QIcon.fromTheme("view-refresh")
-ICON_CONTEXT_MENU_LISTENING_DISABLE = QIcon.fromTheme("process-stop")
+# The icons can either be:
+#   1) str: named icons from the freedesktop theme which should all be available on most Linux desktops.
+#      https://specifications.freedesktop.org/icon-naming-spec/icon-naming-spec-latest.html
+#   1) bytes: SVG strings for any icons that are custom to this application.
+# The load_icon() function dynamically figures out which so we can
+# switch from one source to another without editing the code proper
+# TODO: consider moving the icon definitions to a file read at startup.
+ICON_HELP_ABOUT = "help-about"
+ICON_HELP_CONTENTS = "help-contents"
+ICON_APPLICATION_EXIT = "application-exit"
+ICON_CONTEXT_MENU_LISTENING_ENABLE = "view-refresh"
+ICON_CONTEXT_MENU_LISTENING_DISABLE = "process-stop"
 ICON_TRAY_LISTENING_DISABLED = ICON_CONTEXT_MENU_LISTENING_DISABLE
-ICON_COPY_TO_CLIPBOARD = QIcon.fromTheme("edit-copy")
-ICON_SEARCH_JOURNAL = QIcon.fromTheme("system-search")
-ICON_UNDOCK = QIcon.fromTheme("window-new")
-ICON_DOCK = QIcon.fromTheme("window-close")
-
-def create_image_from_svg_string(svg_str: bytes) -> QImage:
-    """There is no QIcon option for loading QImage from a string, only from a SVG file, so roll our own."""
-    renderer = QSvgRenderer(svg_str)
-    image = QImage(64, 64, QImage.Format_ARGB32)
-    image.fill(0x0)
-    painter = QPainter(image)
-    renderer.render(painter)
-    painter.end()
-    return image
-
-
-def create_pixmap_from_svg_string(svg_str: bytes) -> QPixmap:
-    """There is no QIcon option for loading SVG from a string, only from a SVG file, so roll our own."""
-    image = create_image_from_svg_string(svg_str)
-    return QPixmap.fromImage(image)
-
-
-def create_icon_from_svg_string(default_svg: bytes = None,
-                                on_svg: bytes = None, off_svg: bytes = None,
-                                disabled_svg: bytes = None) -> QIcon:
-    """There is no QIcon option for loading SVG from a string, only from a SVG file, so roll our own."""
-    if default_svg is not None:
-        icon = QIcon(create_pixmap_from_svg_string(default_svg))
-    else:
-        icon = QIcon()
-    if on_svg is not None:
-        icon.addPixmap(create_pixmap_from_svg_string(on_svg), state=QIcon.On)
-    if off_svg is not None:
-        icon.addPixmap(create_pixmap_from_svg_string(off_svg), state=QIcon.Off)
-    if disabled_svg:
-        icon = QIcon(create_pixmap_from_svg_string(on_svg), mode=QIcon.Disabled)
-    return icon
-
-
-JOUNO_ICON_SVG = b"""
+ICON_COPY_TO_CLIPBOARD = "edit-copy"
+ICON_SEARCH_JOURNAL = "system-search"
+ICON_UNDOCK = "window-new"
+ICON_DOCK = "window-close"
+ICON_JOUNO = b"""
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">
  <path fill="#232629" style="fill:currentColor;fill-opacity:1;stroke:none" 
       d="M 4 2 L 4 3 L 13 3 L 13 13 L 4 13 L 4 14 L 13 14 L 14 14 L 14 3 L 14 2 L 7 2 z"
@@ -311,10 +285,8 @@ JOUNO_ICON_SVG = b"""
 
 </svg>
 """
-
-JOUNO_ICON_LIGHT_SVG = JOUNO_ICON_SVG.replace(b'#232629', b'#bbbbbb')
-
-TOOLBAR_RUN_DISABLED_SVG = b"""
+ICON_JOUNO_LIGHT = ICON_JOUNO.replace(b'#232629', b'#bbbbbb')
+ICON_TOOLBAR_RUN_DISABLED = b"""
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 22 22">
     <style type="text/css" id="current-color-scheme">
         .ColorScheme-Text {
@@ -324,10 +296,8 @@ TOOLBAR_RUN_DISABLED_SVG = b"""
     <path d="m3 3v16l16-8z" class="ColorScheme-Text" fill="currentColor"/>
 </svg>
 """
-
-TOOLBAR_RUN_ENABLED_SVG = TOOLBAR_RUN_DISABLED_SVG.replace(b"#232629;", b"#3daee9;")
-
-TOOLBAR_STOP_SVG = b"""
+ICON_TOOLBAR_RUN_ENABLED = ICON_TOOLBAR_RUN_DISABLED.replace(b"#232629;", b"#3daee9;")
+ICON_TOOLBAR_STOP = b"""
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 22 22">
     <style type="text/css" id="current-color-scheme">
         .ColorScheme-Text {
@@ -337,8 +307,7 @@ TOOLBAR_STOP_SVG = b"""
     <path d="m3 3h16v16h-16z" class="ColorScheme-Text" fill="currentColor"/>
 </svg>
 """
-
-TOOLBAR_NOTIFIER_ENABLED_SVG = b"""
+ICON_TOOLBAR_NOTIFIER_ENABLED = b"""
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 22 22">
   <defs id="defs3051">
     <style type="text/css" id="current-color-scheme">
@@ -353,8 +322,7 @@ TOOLBAR_NOTIFIER_ENABLED_SVG = b"""
      />
 </svg>
 """
-
-TOOLBAR_NOTIFIER_DISABLED_SVG = b"""
+ICON_TOOLBAR_NOTIFIER_DISABLED = b"""
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 22 22">
   <defs id="defs3051">
     <style type="text/css" id="current-color-scheme">
@@ -368,10 +336,8 @@ TOOLBAR_NOTIFIER_DISABLED_SVG = b"""
      class="ColorScheme-Text"
      />
 </svg>
-
 """
-
-TOOLBAR_ADD_FILTER_SVG = b"""
+ICON_TOOLBAR_ADD_FILTER = b"""
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 22 22">
   <defs id="defs3051">
     <style type="text/css" id="current-color-scheme">
@@ -387,8 +353,7 @@ TOOLBAR_ADD_FILTER_SVG = b"""
      />
 </svg>
 """
-
-TOOLBAR_DEL_FILTER_SVG = b"""
+ICON_TOOLBAR_DEL_FILTER = b"""
 <svg id="svg8" version="1.1" viewBox="0 0 22 22" xmlns="http://www.w3.org/2000/svg">
     <defs id="defs3051">
         <style id="current-color-scheme" type="text/css">.ColorScheme-Text {
@@ -399,6 +364,7 @@ TOOLBAR_DEL_FILTER_SVG = b"""
     <path id="path6" d="M 13.990234,13 13,13.990234 15.009766,16 13,18.009766 13.990234,19 16,16.990234 18.009766,19 19,18.009766 16.990234,16 19,13.990234 18.009766,13 16,15.009766 Z" fill="#da4453"/>
 </svg>
 """
+
 
 TABLE_HEADER_STYLE = "font-weight: bold;font-size: 9pt;"
 
@@ -452,7 +418,7 @@ qt_kde_binding_loop = Binding loop detected for property
 
 
 # ######################## MONITOR SUB PROCESS CODE ###############################################################
-
+# TODO The monitor code has been written so it can be extracted to a future non pyqt command line utility.
 
 class Priority(Enum):
     EMERGENCY = 0
@@ -750,6 +716,49 @@ def tr(source_text: str):
 
 
 # ######################## USER INTERFACE CODE ######################################################################
+
+
+def create_image_from_svg_bytes(svg_str: bytes) -> QImage:
+    """There is no QIcon option for loading QImage from a string, only from a SVG file, so roll our own."""
+    renderer = QSvgRenderer(svg_str)
+    image = QImage(64, 64, QImage.Format_ARGB32)
+    image.fill(0x0)
+    painter = QPainter(image)
+    renderer.render(painter)
+    painter.end()
+    return image
+
+
+def create_pixmap_from_svg_bytes(svg_str: bytes) -> QPixmap:
+    """There is no QIcon option for loading SVG from a string, only from a SVG file, so roll our own."""
+    image = create_image_from_svg_bytes(svg_str)
+    return QPixmap.fromImage(image)
+
+
+def create_icon_from_svg_bytes(default_svg: bytes = None,
+                               on_svg: bytes = None, off_svg: bytes = None,
+                               disabled_svg: bytes = None) -> QIcon:
+    """There is no QIcon option for loading SVG from a string, only from a SVG file, so roll our own."""
+    if default_svg is not None:
+        icon = QIcon(create_pixmap_from_svg_bytes(default_svg))
+    else:
+        icon = QIcon()
+    if on_svg is not None:
+        icon.addPixmap(create_pixmap_from_svg_bytes(on_svg), state=QIcon.On)
+    if off_svg is not None:
+        icon.addPixmap(create_pixmap_from_svg_bytes(off_svg), state=QIcon.Off)
+    if disabled_svg:
+        icon = QIcon(create_pixmap_from_svg_bytes(on_svg), mode=QIcon.Disabled)
+    return icon
+
+
+def get_icon(source):
+    # Consider caching icon loading - but icons are mutable so perhaps that's asking for trouble.
+    if isinstance(source, str):
+        return QIcon.fromTheme(source)
+    if isinstance(source, bytes):
+        return create_icon_from_svg_bytes(source)
+    raise ValueError(f"get_icon parameter has unsupported type {type(source)} = {str(source)}")
 
 
 class OptionsTab(QWidget):
@@ -1185,28 +1194,28 @@ class MainToolBar(QToolBar):
         # main_tool_bar.setFixedHeight(80)
         self.setIconSize(QSize(32, 32))
         self.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
-        self.icon_run_enabled = create_icon_from_svg_string(TOOLBAR_RUN_ENABLED_SVG)
-        self.icon_run_disabled = create_icon_from_svg_string(TOOLBAR_RUN_DISABLED_SVG)
-        self.icon_notifier_enabled = create_icon_from_svg_string(TOOLBAR_NOTIFIER_ENABLED_SVG)
-        self.icon_notifier_disabled = create_icon_from_svg_string(TOOLBAR_NOTIFIER_DISABLED_SVG)
+        self.icon_run_enabled = get_icon(ICON_TOOLBAR_RUN_ENABLED)
+        self.icon_run_disabled = get_icon(ICON_TOOLBAR_RUN_DISABLED)
+        self.icon_notifier_enabled = get_icon(ICON_TOOLBAR_NOTIFIER_ENABLED)
+        self.icon_notifier_disabled = get_icon(ICON_TOOLBAR_NOTIFIER_DISABLED)
         self.run_action = self.addAction(self.icon_run_enabled, tr("Run"), run_func)
         self.run_action.setObjectName("run_button")
         self.run_action.setToolTip(tr("Start/stop monitoring the journal feed."))
         self.widgetForAction(self.run_action).setStyleSheet("QToolButton { width: 110px; }")
-        self.stop_action = self.addAction(create_icon_from_svg_string(TOOLBAR_STOP_SVG), tr("Stop"), run_func)
+        self.stop_action = self.addAction(get_icon(ICON_TOOLBAR_STOP), tr("Stop"), run_func)
         self.stop_action.setToolTip(tr("Stop monitoring the journal feed."))
         self.addSeparator()
         self.notifier_action = self.addAction(self.icon_notifier_enabled, "notify", notify_func)
         self.notifier_action.setToolTip(tr("Enable/disable desktop notifications."))
         self.widgetForAction(self.notifier_action).setStyleSheet("QToolButton { width: 110px; }")
         self.addSeparator()
-        self.add_filter_action = self.addAction(create_icon_from_svg_string(TOOLBAR_ADD_FILTER_SVG), "add", add_func)
+        self.add_filter_action = self.addAction(get_icon(ICON_TOOLBAR_ADD_FILTER), "add", add_func)
         self.add_filter_action.setObjectName("add_button")
         self.add_filter_action.setIconText(tr("New filter"))
         self.add_filter_action.setToolTip(
             tr("Add a new filter above the selected filter or at the end if no filter is selected.") + "\n" +
             tr("Select a filter tab and optionally click in its left margin to select an insertion point."))
-        self.del_filter_action = self.addAction(create_icon_from_svg_string(TOOLBAR_DEL_FILTER_SVG), "del", del_func)
+        self.del_filter_action = self.addAction(get_icon(ICON_TOOLBAR_DEL_FILTER), "del", del_func)
         self.del_filter_action.setObjectName("del_button")
         self.del_filter_action.setIconText(tr("Delete filter"))
         self.del_filter_action.setToolTip(
@@ -1216,8 +1225,8 @@ class MainToolBar(QToolBar):
         spacer = QWidget()
         spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         self.addWidget(spacer)
-        self.addAction(ICON_HELP_CONTENTS, tr('Help'), HelpDialog.invoke)
-        self.addAction(ICON_HELP_ABOUT, tr('About'), AboutDialog.invoke)
+        self.addAction(get_icon(ICON_HELP_CONTENTS), tr('Help'), HelpDialog.invoke)
+        self.addAction(get_icon(ICON_HELP_ABOUT), tr('About'), AboutDialog.invoke)
 
     def configure_run_action(self, running: bool) -> None:
         if running:
@@ -1267,32 +1276,32 @@ class MainContextMenu(QMenu):
 
     def __init__(self, run_func: Callable, notify_func: Callable, quit_func: Callable, parent: QWidget):
         super().__init__(parent=parent)
-        self.icon_notifier_enabled = create_icon_from_svg_string(TOOLBAR_NOTIFIER_ENABLED_SVG)
-        self.icon_notifier_disabled = create_icon_from_svg_string(TOOLBAR_NOTIFIER_DISABLED_SVG)
-        self.listen_action = self.addAction(ICON_CONTEXT_MENU_LISTENING_DISABLE,
+        self.icon_notifier_enabled = get_icon(ICON_TOOLBAR_NOTIFIER_ENABLED)
+        self.icon_notifier_disabled = get_icon(ICON_TOOLBAR_NOTIFIER_DISABLED)
+        self.listen_action = self.addAction(get_icon(ICON_CONTEXT_MENU_LISTENING_DISABLE),
                                             tr("Stop journal monitoring"),
                                             run_func)
         self.notifier_action = self.addAction(self.icon_notifier_disabled,
                                               tr("Disable notifications"),
                                               notify_func)
-        self.addAction(ICON_HELP_ABOUT,
+        self.addAction(get_icon(ICON_HELP_ABOUT),
                        tr('About'),
                        AboutDialog.invoke)
-        self.addAction(ICON_HELP_CONTENTS,
+        self.addAction(get_icon(ICON_HELP_CONTENTS),
                        tr('Help'),
                        HelpDialog.invoke)
         self.addSeparator()
-        self.addAction(ICON_APPLICATION_EXIT,
+        self.addAction(get_icon(ICON_APPLICATION_EXIT),
                        tr('Quit'),
                        quit_func)
 
     def configure_run_action(self, running: bool) -> None:
         if running:
             self.listen_action.setText(tr("Stop journal monitoring"))
-            self.listen_action.setIcon(ICON_CONTEXT_MENU_LISTENING_DISABLE)
+            self.listen_action.setIcon(get_icon(ICON_CONTEXT_MENU_LISTENING_DISABLE))
         else:
             self.listen_action.setText(tr("Resume journal monitoring"))
-            self.listen_action.setIcon(ICON_CONTEXT_MENU_LISTENING_ENABLE)
+            self.listen_action.setIcon(get_icon(ICON_CONTEXT_MENU_LISTENING_ENABLE))
 
     def configure_notifier_action(self, notifying: bool) -> None:
         if notifying:
@@ -1311,7 +1320,7 @@ class MainWindow(QMainWindow):
         journal_watcher_task = JournalWatcherTask()
 
         app_name = tr('Jouno')
-        app.setWindowIcon(create_icon_from_svg_string(JOUNO_ICON_LIGHT_SVG))
+        app.setWindowIcon(get_icon(ICON_JOUNO_LIGHT))
         app.setApplicationDisplayName(app_name)
         app.setApplicationVersion(JOUNO_VERSION)
         self.setMinimumWidth(1200)
@@ -1322,11 +1331,11 @@ class MainWindow(QMainWindow):
                 title_text = tr("Running") if journal_watcher_task.is_notifying() else tr("Muted")
                 self.setWindowTitle(title_text)
                 tray.setToolTip(f"{title_text} \u2014 {app_name}")
-                tray.setIcon(create_icon_from_svg_string(JOUNO_ICON_SVG))
+                tray.setIcon(get_icon(ICON_JOUNO))
             else:
                 self.setWindowTitle(tr("Stopped"))
                 tray.setToolTip(f"{tr('Stopped')} \u2014 {app_name}")
-                tray.setIcon(ICON_TRAY_LISTENING_DISABLED)
+                tray.setIcon(get_icon(ICON_TRAY_LISTENING_DISABLED))
 
         def enable_listener(enable: bool) -> None:
             if enable:
@@ -1397,7 +1406,7 @@ class MainWindow(QMainWindow):
             run_func=toggle_listener, notify_func=toggle_notifier, quit_func=quit_app, parent=self)
 
         tray = QSystemTrayIcon()
-        tray.setIcon(create_icon_from_svg_string(JOUNO_ICON_SVG))
+        tray.setIcon(get_icon(ICON_JOUNO))
         tray.setContextMenu(app_context_menu)
 
         def show_window():
@@ -1447,13 +1456,13 @@ class JounalMainWindow(QMainWindow):
         if self.isVisible():
             self.journal_widget.setFloating(True)
             self.hide()
-            self.journal_widget.dock_button.setIcon(ICON_UNDOCK)
+            self.journal_widget.dock_button.setIcon(get_icon(ICON_UNDOCK))
             self.top_main_window.addDockWidget(Qt.DockWidgetArea.TopDockWidgetArea, self.journal_widget)
             self.journal_widget.setFloating(False)
             self.top_main_window.setFocus()
         else:
             self.journal_widget.setFloating(True)
-            self.journal_widget.dock_button.setIcon(ICON_DOCK)
+            self.journal_widget.dock_button.setIcon(get_icon(ICON_DOCK))
             self.addDockWidget(Qt.DockWidgetArea.TopDockWidgetArea, self.journal_widget)
             g = self.top_main_window.geometry()
             self.setGeometry(
@@ -1497,7 +1506,7 @@ class JournalPanel(QDockWidget):
 
         search_input = QLineEdit()
         search_input.setFixedWidth(350)
-        search_input.addAction(ICON_SEARCH_JOURNAL, QLineEdit.LeadingPosition)
+        search_input.addAction(get_icon(ICON_SEARCH_JOURNAL), QLineEdit.LeadingPosition)
         search_input.setToolTip(tr("Incrementally search and select journal entries.\nSearches all fields."))
         title_layout.addWidget(search_input)
         search_input.textChanged.connect(search_entries)
@@ -1507,7 +1516,7 @@ class JournalPanel(QDockWidget):
         spacer.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Preferred)
         title_layout.addWidget(spacer)
 
-        self.dock_button = QPushButton(ICON_UNDOCK, '', self)
+        self.dock_button = QPushButton(get_icon(ICON_UNDOCK), '', self)
         self.dock_button.setStyleSheet("QPushButton { background-color: transparent; border: 0px }")
         self.dock_button.setToolTip(tr("Dock/undock the Recently Notified panel"))
         title_layout.addWidget(self.dock_button)
@@ -1695,7 +1704,7 @@ class JournalEntryDialogPlain(QDialog):
         floating_feedback_flip = True
         floating_copy_button = QPushButton(self)
         floating_copy_button.setStyleSheet("QPushButton { background-color: transparent; border: 0px }")
-        floating_copy_button.setIcon(ICON_COPY_TO_CLIPBOARD)
+        floating_copy_button.setIcon(get_icon(ICON_COPY_TO_CLIPBOARD))
         floating_copy_button.setGeometry(self.width() - 75, 25, 40, 40);
         floating_copy_button.setIconSize(QSize(48,48))
         floating_copy_button.setToolTip(tr("Copy to clipboard"))
@@ -1811,14 +1820,14 @@ class ContextMenu(QMenu):
             ICON_CONTEXT_MENU_LISTENING_DISABLE,
             tr('Pause'),
             listen_action)
-        self.addAction(ICON_HELP_ABOUT,
+        self.addAction(get_icon(ICON_HELP_ABOUT),
                        tr('About'),
                        about_action)
-        self.addAction(ICON_HELP_CONTENTS,
+        self.addAction(get_icon(ICON_HELP_CONTENTS),
                        tr('Help'),
                        help_action)
         self.addSeparator()
-        self.addAction(ICON_APPLICATION_EXIT,
+        self.addAction(get_icon(ICON_APPLICATION_EXIT),
                        tr('Quit'),
                        quit_action)
 
@@ -1897,7 +1906,7 @@ def install_as_desktop_application(uninstall: bool = False):
         print(f"WARNING: skipping installation of {icon_path.as_posix()}, it is already present.")
     else:
         print(f'INFO: creating {icon_path.as_posix()}')
-        create_pixmap_from_svg_string(JOUNO_ICON_SVG).save(icon_path.as_posix())
+        create_pixmap_from_svg_bytes(ICON_JOUNO).save(icon_path.as_posix())
 
     print('INFO: installation complete. Your desktop->applications->system should now contain jouno')
 
