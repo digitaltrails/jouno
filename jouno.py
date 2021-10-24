@@ -212,15 +212,16 @@ with this program. If not, see <https://www.gnu.org/licenses/>.
 
 """
 
-# TODO Add option for how many journal rows to show - if zero hide panel.
-# TODO Add option for non-tray use.
+# DONE Add option for how many journal rows to show - if zero hide panel.
+# DONE Add option for non-tray use.
 # TODO Consider creating a separate full log browser making use of the journal API for search and random access.
 # DONE Search 'recent' on toolbar
 # TODO Display more fields in 'recent' - priority as icon perhaps.
 # DONE https://specifications.freedesktop.org/icon-naming-spec/latest/
 # TODO Position the GUI to the left so as not to be covered by alerts.
 # TODO Smaller Apply/Revert button widths.
-# TODO Fix tray hover title
+# TODO figure out why QIntValidator is only working approximately.
+# DONE Fix tray hover title
 
 import argparse
 import configparser
@@ -250,7 +251,7 @@ from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QMessageBox, QLi
     QHBoxLayout
 from systemd import journal
 
-JOUNO_VERSION = '0.9.0'
+JOUNO_VERSION = '0.9.5'
 
 ICON_HELP_ABOUT = QIcon.fromTheme("help-about")
 ICON_HELP_CONTENTS = QIcon.fromTheme("help-contents")
@@ -435,6 +436,8 @@ poll_seconds = 2
 burst_seconds = 5
 burst_truncate_messages = 3
 notification_seconds = 60
+journal_history_max = 100
+system_tray_enabled = yes
 debug_enabled = yes
 
 [ignore] 
@@ -545,7 +548,7 @@ class Config(configparser.ConfigParser):
             self.modified_time = modified_time
             info(f"Reading {self.path}")
             config_text = self.path.read_text()
-            for section in ['options', 'match', 'ignore']:
+            for section in ['match', 'ignore']:
                 self.remove_section(section)
             self.read_string(config_text)
             for section in ['options', 'match', 'ignore']:
@@ -763,7 +766,13 @@ class OptionsTab(QWidget):
                 input_widget.setChecked(value == 'yes')
             else:
                 input_widget = QLineEdit()
-                input_widget.setValidator(QIntValidator(0, 60))
+                if '_seconds' in option_id:
+                    max_value = 120
+                elif '_history' in option_id:
+                    max_value = 1000
+                else:
+                    max_value = 20
+                input_widget.setValidator(QIntValidator(0, max_value))
                 input_widget.setMaximumWidth(100)
                 input_widget.setText(value)
             layout.addWidget(label_widget, row_number, 0)
@@ -991,7 +1000,7 @@ class FilterTableView(QTableView):
 
 
 class ConfigWatcherTask(QThread):
-    signal_config_change = pyqtSignal(dict)
+    signal_config_change = pyqtSignal()
 
     def __init__(self, config: Config) -> None:
         super().__init__()
@@ -1040,18 +1049,18 @@ class ConfigPanel(QWidget):
         tabs = QTabWidget()
         self.tabs = tabs
 
-        config = Config()
-        config.refresh()
+        self.config = Config()
+        self.config.refresh()
 
-        options_panel = OptionsTab(config['options'], parent=self)
+        options_panel = OptionsTab(self.config['options'], parent=self)
 
         match_panel = FilterPanel(
-            config['match'],
+            self.config['match'],
             tooltip=tr("Only issue notifications for journal-entry messages that match one of these rules."),
             parent=parent)
 
         ignore_panel = FilterPanel(
-            config['ignore'],
+            self.config['ignore'],
             tooltip=tr("Ignore journal-entry messages that match any of these rules."),
             parent=parent)
 
@@ -1069,10 +1078,10 @@ class ConfigPanel(QWidget):
             debug("Apply")
             try:
                 if match_panel.is_valid() and ignore_panel.is_valid():
-                    options_panel.copy_to_config(config['options'])
-                    match_panel.copy_to_config(config['match'])
-                    ignore_panel.copy_to_config(config['ignore'])
-                    config.save()
+                    options_panel.copy_to_config(self.config['options'])
+                    match_panel.copy_to_config(self.config['match'])
+                    ignore_panel.copy_to_config(self.config['ignore'])
+                    self.config.save()
                     match_panel.clear_selection()
                     ignore_panel.clear_selection()
                     message = QMessageBox(self)
@@ -1097,7 +1106,7 @@ class ConfigPanel(QWidget):
 
         def revert_action():
             debug("revert")
-            before = pickle.dumps(config)
+            before = pickle.dumps(self.config)
             tmp = pickle.loads(before)
             options_panel.copy_to_config(tmp['options'])
             match_panel.copy_to_config(tmp['match'])
@@ -1121,12 +1130,12 @@ class ConfigPanel(QWidget):
             reload_from_config()
 
         def reload_from_config():
-            options_panel.copy_from_config(config['options'])
-            match_panel.copy_from_config(config['match'])
-            ignore_panel.copy_from_config(config['ignore'])
+            debug("GUI reloading config")
+            options_panel.copy_from_config(self.config['options'])
+            match_panel.copy_from_config(self.config['match'])
+            ignore_panel.copy_from_config(self.config['ignore'])
             match_panel.clear_selection()
             ignore_panel.clear_selection()
-            config_change_func()
 
         revert_button.clicked.connect(revert_action)
 
@@ -1142,8 +1151,14 @@ class ConfigPanel(QWidget):
         tabs.currentChanged.connect(tab_change)
 
         reload_from_config()
-        config_watcher = ConfigWatcherTask(config)
-        config_watcher.signal_config_change.connect(reload_from_config)
+        self.config_watcher = ConfigWatcherTask(self.config)
+
+        def config_change():
+            reload_from_config()
+            config_change_func()
+
+        self.config_watcher.signal_config_change.connect(config_change)
+        self.config_watcher.start()
 
     def add_filter(self, rule_id, pattern) -> None:
         if isinstance(self.tabs.currentWidget(), FilterPanel):
@@ -1157,6 +1172,8 @@ class ConfigPanel(QWidget):
         else:
             raise TypeError("Was expecting FilterPanel")
 
+    def get_config(self) -> Config:
+        return self.config
 
 class MainToolBar(QToolBar):
 
@@ -1351,7 +1368,7 @@ class MainWindow(QMainWindow):
             tool_bar.configure_filter_actions(tab_number == 0 or tab_number == 1)
 
         def config_change() -> None:
-            pass
+            journal_panel.set_max_journal_entries(config_panel.get_config().getint('options', 'journal_history_max'))
 
         def add_filter() -> None:
             journal_entry = journal_panel.get_selected_journal_entry()
@@ -1363,8 +1380,12 @@ class MainWindow(QMainWindow):
         def search_select_journal(text: str) -> None:
             journal_panel.search_select_journal(text)
 
-        journal_panel = JournalPanel(journal_watcher_task=journal_watcher_task, parent=self)
         config_panel = ConfigPanel(tab_change=tab_change, config_change_func=config_change, parent=self)
+
+        journal_panel = JournalPanel(
+            journal_watcher_task=journal_watcher_task,
+            max_journal_entries=config_panel.get_config().getint('options', 'journal_history_max'),
+            parent=self)
 
         self.setCentralWidget(config_panel)
         self.addDockWidget(Qt.DockWidgetArea.TopDockWidgetArea, journal_panel)
@@ -1400,8 +1421,11 @@ class MainWindow(QMainWindow):
                 self.raise_()
                 self.activateWindow()
 
-        tray.activated.connect(show_window)
-        tray.setVisible(True)
+        if config_panel.get_config().getboolean('options', 'system_tray_enabled'):
+            tray.activated.connect(show_window)
+            tray.setVisible(True)
+        else:
+            self.show()
         enable_listener(True)
         enable_notifier(True)
 
@@ -1448,14 +1472,14 @@ class JounalMainWindow(QMainWindow):
 
 class JournalPanel(QDockWidget):
 
-    def __init__(self, journal_watcher_task: JournalWatcherTask, parent: QMainWindow):
+    def __init__(self, journal_watcher_task: JournalWatcherTask, max_journal_entries: int, parent: QMainWindow):
         super().__init__(parent=parent, flags=Qt.WindowFlags(Qt.WindowStaysOnTopHint))
 
         self.setFloating(False)
         self.setFeatures(QDockWidget.DockWidgetFloatable | QDockWidget.DockWidgetMovable)
         self.tmp_main_window = JounalMainWindow(journal_widget=self, top_main_window=parent)
 
-        self.table_view = JournalTableView(journal_watcher_task)
+        self.table_view = JournalTableView(journal_watcher_task, max_journal_entries=max_journal_entries)
 
         # TODO add a test rules button that pops up a testing dialog with an input field.
         container = QWidget(self)
@@ -1485,11 +1509,6 @@ class JournalPanel(QDockWidget):
 
         def top_level_changed(top_level: bool):
             pass
-            # if top_level:
-            #     debug('ping')
-            #     self.other = QMainWindow()
-            #     self.other.show()
-            #     self.other.addDockWidget(Qt.DockWidgetArea.TopDockWidgetArea, self)
 
         self.topLevelChanged.connect(top_level_changed)
 
@@ -1516,14 +1535,17 @@ class JournalPanel(QDockWidget):
                     self.table_view.selectRow(row_num)
                     self.table_view.scrollTo(model.index(row_num,0))
 
+    def set_max_journal_entries(self, max_entries: int) -> None:
+        self.table_view.model().set_max_journal_entries(max_entries)
 
 class JournalTableView(QTableView):
 
-    def __init__(self, journal_watcher_task: JournalWatcherTask):
+    def __init__(self, journal_watcher_task: JournalWatcherTask, max_journal_entries: int):
         super().__init__()
         self.setToolTip(tr("Double click to view the complete journal entry.") + "\n" +
                         tr("Control-C to copy a selected field's text."))
-        self.setModel(JournalTableModel(number_of_rows=0))
+        self.setModel(JournalTableModel(max_journal_entries=max_journal_entries))
+        self.max_entries = 100
         self.setDragDropOverwriteMode(False)
         self.resizeColumnsToContents()
         self.setSelectionBehavior(QAbstractItemView.SelectRows)
@@ -1555,8 +1577,9 @@ class JournalTableView(QTableView):
 
 class JournalTableModel(QStandardItemModel):
 
-    def __init__(self, number_of_rows: int):
-        super().__init__(number_of_rows, 5)
+    def __init__(self, max_journal_entries: int):
+        super().__init__(0, 5)
+        self.max_journal_entries = max_journal_entries
         self.icon_cache = {}
         self.journal_entries = []
         self.setHorizontalHeaderLabels(
@@ -1566,7 +1589,7 @@ class JournalTableModel(QStandardItemModel):
         return self.journal_entries[row]
 
     def new_journal_entry(self, journal_entry):
-        while self.rowCount() > 100:
+        while self.rowCount() >= self.max_journal_entries:
             self.removeRow(0)
             self.journal_entries.pop(0)
 
@@ -1603,6 +1626,9 @@ class JournalTableModel(QStandardItemModel):
                 selectable(align_right(QStandardItem(str(journal_entry['_PID'] if '_PID' in journal_entry else '')))),
                 setIcon(selectable(QStandardItem(journal_entry['MESSAGE'])))
             ])
+
+    def set_max_journal_entries(self, max_entries: int) -> None:
+        self.max_journal_entries = max_entries
 
 
 class JournalEntryDelegate(QStyledItemDelegate):
