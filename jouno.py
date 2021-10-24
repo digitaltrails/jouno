@@ -238,6 +238,7 @@ import time
 import traceback
 from ctypes import Union
 from enum import Enum
+from functools import partial
 from pathlib import Path
 from typing import Mapping, Any, List, Type, Callable
 
@@ -272,6 +273,8 @@ ICON_COPY_TO_CLIPBOARD = "edit-copy"
 ICON_SEARCH_JOURNAL = "system-search"
 ICON_UNDOCK = "window-new"
 ICON_DOCK = "window-close"
+ICON_GO_NEXT = "go-down"
+ICON_GO_PREVIOUS = "go-up"
 ICON_JOUNO = b"""
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">
  <path fill="#232629" style="fill:currentColor;fill-opacity:1;stroke:none" 
@@ -761,6 +764,20 @@ def get_icon(source):
     raise ValueError(f"get_icon parameter has unsupported type {type(source)} = {str(source)}")
 
 
+def big_label(widget: QLabel) -> QLabel:
+    widget.setStyleSheet("font-weight: normal;font-size: 12pt;")
+    return widget
+
+
+def transparent_button(button: QPushButton) -> QPushButton:
+    button.setStyleSheet("""
+        QPushButton { background-color: transparent; border: 0px; width:32px; height:32px; }
+        QPushButton:hover { border: 1px solid blue; }
+        """)
+    button.setIconSize(QSize(24, 24))
+    return button
+
+
 class OptionsTab(QWidget):
 
     def __init__(self, config_section: Mapping[str, str], parent: QWidget = None):
@@ -1043,11 +1060,6 @@ class JournalWatcherTask(QThread):
         self.signal_new_entry.emit(journal_entry)
 
 
-def title(widget: QLabel) -> QLabel:
-    widget.setStyleSheet("font-weight: normal;font-size: 12pt;")
-    return widget
-
-
 class ConfigPanel(QWidget):
 
     def __init__(self, tab_change: Callable, config_change_func: Callable, parent: QWidget):
@@ -1153,7 +1165,7 @@ class ConfigPanel(QWidget):
         tabs.addTab(options_panel, tr("Options"))
         tabs.setCurrentIndex(0)
 
-        layout.addWidget(title(QLabel("Configuration")))
+        layout.addWidget(big_label(QLabel("Configuration")))
         layout.addWidget(tabs)
         layout.addWidget(button_box)
 
@@ -1493,7 +1505,7 @@ class JournalPanel(QDockWidget):
         title_container = QWidget(self)
         title_layout = QHBoxLayout()
         title_container.setLayout(title_layout)
-        title_label = title(QLabel(tr("Recently notified")))
+        title_label = big_label(QLabel(tr("Recently notified")))
         title_layout.addWidget(title_label)
 
         spacer = QWidget()
@@ -1501,6 +1513,7 @@ class JournalPanel(QDockWidget):
         title_layout.addWidget(spacer)
 
         def search_entries(text: str) -> None:
+            self.scrolled_to_selected = None
             self.search_select_journal(text)
             search_input.setFocus()
 
@@ -1508,16 +1521,24 @@ class JournalPanel(QDockWidget):
         search_input.setFixedWidth(350)
         search_input.addAction(get_icon(ICON_SEARCH_JOURNAL), QLineEdit.LeadingPosition)
         search_input.setToolTip(tr("Incrementally search and select journal entries.\nSearches all fields."))
-        title_layout.addWidget(search_input)
         search_input.textChanged.connect(search_entries)
+        title_layout.addWidget(search_input)
+        self.scrolled_to_selected = None
+
+        go_next_button = transparent_button(QPushButton(get_icon(ICON_GO_NEXT), '', self))
+        go_next_button.clicked.connect(partial(self.scroll_selected, 1))
+        title_layout.addWidget(go_next_button)
+
+        go_previous_button = transparent_button(QPushButton(get_icon(ICON_GO_PREVIOUS), '', self))
+        go_previous_button.clicked.connect(partial(self.scroll_selected, -1))
+        title_layout.addWidget(go_previous_button)
 
         spacer = QWidget()
         spacer.setFixedWidth(10)
         spacer.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Preferred)
         title_layout.addWidget(spacer)
 
-        self.dock_button = QPushButton(get_icon(ICON_UNDOCK), '', self)
-        self.dock_button.setStyleSheet("QPushButton { background-color: transparent; border: 0px }")
+        self.dock_button = transparent_button(QPushButton(get_icon(ICON_UNDOCK), '', self))
         self.dock_button.setToolTip(tr("Dock/undock the Recently Notified panel"))
         title_layout.addWidget(self.dock_button)
         layout.addWidget(title_container)
@@ -1557,8 +1578,21 @@ class JournalPanel(QDockWidget):
                 entry_text = str(journal_entry).lower() if text.islower() else str(journal_entry)
                 if text in entry_text:
                     self.table_view.selectRow(row_num)
-                    self.table_view.scrollTo(model.index(row_num, 5))
-                    self.table_view.clearFocus()
+                    self.table_view.scrollTo(model.index(row_num, 0))
+                    #self.table_view.clearFocus()
+
+    def scroll_selected(self, direction: int):
+        all_indexes = self.table_view.selectedIndexes()
+        if len(all_indexes) == 0:
+            return
+        # Reduce the list of all selected row,col items to a list of one item for each row.
+        row_start_selections = list({index.row(): index for index in all_indexes}.values())
+        if self.scrolled_to_selected is None or self.scrolled_to_selected not in row_start_selections:
+            self.scrolled_to_selected = row_start_selections[0]
+        else:
+            new_pos = (row_start_selections.index(self.scrolled_to_selected) + direction) % len(row_start_selections)
+            self.scrolled_to_selected = row_start_selections[new_pos]
+        self.table_view.scrollTo(self.scrolled_to_selected, QAbstractItemView.PositionAtCenter)
 
     def set_max_journal_entries(self, max_entries: int) -> None:
         self.table_view.model().set_max_journal_entries(max_entries)
@@ -1702,14 +1736,15 @@ class JournalEntryDialogPlain(QDialog):
             floating_copy_button.repaint()
 
         floating_feedback_flip = True
-        floating_copy_button = QPushButton(self)
-        floating_copy_button.setStyleSheet("QPushButton { background-color: transparent; border: 0px }")
-        floating_copy_button.setIcon(get_icon(ICON_COPY_TO_CLIPBOARD))
+        floating_copy_button = transparent_button(QPushButton(get_icon(ICON_COPY_TO_CLIPBOARD), '', self))
         floating_copy_button.setGeometry(self.width() - 75, 25, 40, 40);
         floating_copy_button.setIconSize(QSize(48,48))
         floating_copy_button.setToolTip(tr("Copy to clipboard"))
         floating_copy_button.show()
         floating_copy_button.clicked.connect(copy_to_clipboard)
+
+
+
 
 
 class DialogSingletonMixin:
