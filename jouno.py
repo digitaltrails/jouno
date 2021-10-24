@@ -1483,7 +1483,7 @@ class JournalPanel(QDockWidget):
 
         # TODO add a test rules button that pops up a testing dialog with an input field.
         container = QWidget(self)
-        layout = QVBoxLayout(self)
+        layout = QVBoxLayout()
         container.setLayout(layout)
         title_container = QWidget(self)
         title_layout = QHBoxLayout()
