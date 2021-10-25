@@ -426,16 +426,24 @@ NOTIFICATION_ICONS = {
     Priority.DEBUG: 'dialog-information',
 }
 
-debug_enabled = True
+debugging = True
 
 
 def debug(*arg):
-    if debug_enabled:
+    if debugging:
         print('DEBUG:', *arg)
 
 
 def info(*arg):
     print('INFO:', *arg)
+
+
+def warning(*arg):
+    print('WARNING:', *arg)
+
+
+def error(*arg):
+    print('ERROR:', *arg)
 
 
 xml_escape_table = str.maketrans({
@@ -546,8 +554,9 @@ class JournalWatcher:
         if 'notification_seconds' in self.config['options']:
             self.notification_timeout_millis = 1_000 * self.config.getint('options', 'notification_seconds')
         if 'debug' in self.config['options']:
-            global debug_enabled
-            debug_enabled = self.config.getboolean('options', 'debug')
+            global debugging
+            debugging = self.config.getboolean('options', 'debug')
+            info("Debugging output is disabled.") if not debugging else None
         self.ignore_regexp: Mapping[str, re] = {}
         self.match_regexp: Mapping[str, re] = {}
         self.compile_patterns(self.config['match'], self.match_regexp)
@@ -560,7 +569,7 @@ class JournalWatcher:
             else:
                 rule_enabled_key = rule_id + "_enabled"
                 if rule_enabled_key not in rules_map or rules_map[rule_enabled_key].lower() == 'yes':
-                    debug(f"including {rule_id}")
+                    get_icon
                     if rule_id.endswith('_regexp'):
                         patterns_map[rule_id] = re.compile(rule_text)
                     else:
@@ -573,7 +582,7 @@ class JournalWatcher:
             for key, prefix in {'_CMDLINE': '', '_EXE': '', '_COMM': '', 'SYSLOG_IDENTIFIER': '',
                                 '_KERNEL_SUBSYSTEM': 'kernel ',
                                 }.items():
-                debug("determine_app_name", key, journal_entry[key] if key in journal_entry else False)
+                debug("determine_app_name", key, journal_entry[key] if key in journal_entry else False) if debugging else None
                 if key in journal_entry:
                     value = str(journal_entry[key])
                     if app_name_info.find(value) < 0:
@@ -600,7 +609,7 @@ class JournalWatcher:
                         text += sep + prefix + value
                         sep = ' '
             summary = f"\u25F4{realtime:%H:%M:%S}: {text} (\u21e8{transport})"
-        debug(f"realtime='{realtime}' summary='{summary}'")
+        debug(f"realtime='{realtime}' summary='{summary}'") if debugging else None
         return summary
 
     def determine_message(self, journal_entries: List[Mapping[str, Any]]) -> str:
@@ -623,7 +632,7 @@ class JournalWatcher:
             sep = '\n'
         if duplicates > 0:
             message += f'\n[{duplicates + 1} duplicate messages]'
-        debug(f'message={message}')
+        debug(f'message={message}') if debugging else None
         return message
 
     def determine_priority(self, journal_entries: List[Mapping[str, Any]]) -> Priority:
@@ -639,14 +648,14 @@ class JournalWatcher:
         # Is a list comprehension slower than a for-loop for string construction?
         # Use an easy a format that is easy to pattern match
         fields_str = ', '.join((f"'{key}={str(value)}'" for key, value in journal_entry.items()))
-        debug(fields_str)
+        debug(fields_str) if debugging else None
         for rule_id, match_re in self.match_regexp.items():
             if match_re.search(fields_str) is not None:
-                debug(f"rule=match.{rule_id}: {journal_entry['MESSAGE']}")
+                debug(f"rule=match.{rule_id}: {journal_entry['MESSAGE']}") if debugging else None
                 return True
         for rule_id, ignore_re in self.ignore_regexp.items():
             if ignore_re.search(fields_str) is not None:
-                debug(f"rule=ignore.{rule_id}: {journal_entry['MESSAGE']}")
+                debug(f"rule=ignore.{rule_id}: {journal_entry['MESSAGE']}") if debugging else None
                 return False
         # otherwise no patterns matched:
         # 1) if there are any 'match' patterns at all, we need to return False.
@@ -656,7 +665,7 @@ class JournalWatcher:
     def is_stop_requested(self) -> bool:
         return self.supervisor.isInterruptionRequested()
 
-    def watch_journal(self, entry_callback=None):
+    def watch_journal(self):
         self._stop = False
         notify = NotifyFreeDesktop()
 
@@ -683,7 +692,7 @@ class JournalWatcher:
                             return
                         burst_count += 1
                         if self.is_notable(journal_entry):
-                            debug(f"Notable: burst_count={len(notable)}: {journal_entry['MESSAGE']}")
+                            debug(f"Notable: burst_count={len(notable)}: {journal_entry['MESSAGE']}") if debugging else None
                             notable.append(journal_entry)
                             self.supervisor.new_journal_entry(journal_entry)
             if self.notifications_enabled and len(notable):
@@ -811,7 +820,7 @@ class FilterPanel(QWidget):
 
     def __init__(self, config_section: Mapping[str, str], tooltip: str = 'tip', parent: QWidget = None):
         super().__init__(parent=parent)
-        print("table", str(config_section.keys()))
+        debug("table", str(config_section.keys())) if debugging else None
 
         self.table_view = FilterTableView(config_section, tooltip)
 
@@ -897,7 +906,7 @@ class FilterTableView(QTableView):
         # until it returns -1 (note it can return other valid negative values, so just test
         # for -1.
         row_y_positions = []
-        debug(f"row count={self.model().rowCount()}")
+        debug(f"row count={self.model().rowCount()}") if debugging else None
         for row_num in range(self.model().rowCount()):
             y = self.rowViewportPosition(row_num)
             row_y_positions.append((y, row_num))
@@ -938,7 +947,6 @@ class FilterTableView(QTableView):
         if model.rowCount() > 0:
             model.removeRows(0, model.rowCount())
         row = 0
-        enable_item_map: Mapping[str, QStandardItem] = {}
         # Step one - first gather the patterns and create a row for each one
         for key, value in config_section.items():
             if key.endswith("_enabled"):
@@ -956,7 +964,7 @@ class FilterTableView(QTableView):
                 row += 1
 
     def copy_to_config(self, config_section: Mapping[str, str]):
-        debug(f'table order = {self.item_view_order()} ')
+        debug(f'table order = {self.item_view_order()} ') if debugging else None
         for key in config_section.keys():
             del config_section[key]
         model = self.model()
@@ -1016,7 +1024,7 @@ class ConfigWatcherTask(QThread):
     def run(self) -> None:
         while True:
             if self.config.refresh():
-                debug("ConfigWatcherTask - Config Changed")
+                debug("ConfigWatcherTask - Config Changed") if debugging else None
                 self.signal_config_change.emit()
             time.sleep(5.0)
 
@@ -1077,7 +1085,7 @@ class ConfigPanel(QWidget):
         button_box_layout.setColumnMinimumWidth(3, 200)
 
         def save_action():
-            debug("Apply")
+            debug("save action") if debugging else None
             try:
                 if match_panel.is_valid() and ignore_panel.is_valid():
                     options_panel.copy_to_config(self.config['options'])
@@ -1093,7 +1101,7 @@ class ConfigPanel(QWidget):
                     message.setStandardButtons(QMessageBox.Ok)
                     # message.setDetailedText()
                     message.exec()
-                    debug(f'ok')
+                    debug(f'config saved ok') if debugging else None
             except FilterValidationException as e:
                 e_title, summary, text = e.args
                 message = QMessageBox(self)
@@ -1107,7 +1115,7 @@ class ConfigPanel(QWidget):
         apply_button.clicked.connect(save_action)
 
         def revert_action():
-            debug("revert")
+            debug("revert") if debugging else None
             before = pickle.dumps(self.config)
             tmp = pickle.loads(before)
             options_panel.copy_to_config(tmp['options'])
@@ -1132,7 +1140,7 @@ class ConfigPanel(QWidget):
             reload_from_config()
 
         def reload_from_config():
-            debug("GUI reloading config")
+            debug("GUI reloading config") if debugging else None
             options_panel.copy_from_config(self.config['options'])
             match_panel.copy_from_config(self.config['match'])
             ignore_panel.copy_from_config(self.config['ignore'])
@@ -1176,6 +1184,7 @@ class ConfigPanel(QWidget):
 
     def get_config(self) -> Config:
         return self.config
+
 
 class MainToolBar(QToolBar):
 
@@ -1365,8 +1374,8 @@ class MainWindow(QMainWindow):
 
         def config_change() -> None:
             journal_panel.set_max_journal_entries(config_panel.get_config().getint('options', 'journal_history_max'))
-            global debug_enabled
-            debug_enabled = config_panel.get_config().getboolean('options', 'debug_enabled')
+            global debugging
+            debugging = config_panel.get_config().getboolean('options', 'debug_enabled')
 
         def add_filter() -> None:
             journal_entry = journal_panel.get_selected_journal_entry()
@@ -1375,11 +1384,10 @@ class MainWindow(QMainWindow):
         def delete_filter() -> None:
             config_panel.delete_filter()
 
-
         config_panel = ConfigPanel(tab_change=tab_change, config_change_func=config_change, parent=self)
 
-        global debug_enabled
-        debug_enabled = config_panel.get_config().getboolean('options', 'debug_enabled')
+        global debugging
+        debugging = config_panel.get_config().getboolean('options', 'debug_enabled')
 
         journal_panel = JournalPanel(
             journal_watcher_task=journal_watcher_task,
@@ -1440,7 +1448,7 @@ class JournalMainWindow(QMainWindow):
     So I've taken over the undocking process and reparent the floating window onto
     this alternate main window.
     """
-    def __init__(self, journal_widget: QDockWidget, top_main_window:QMainWindow):
+    def __init__(self, journal_widget: QDockWidget, top_main_window: QMainWindow):
         super().__init__(parent=top_main_window)
         self.journal_widget = journal_widget
         self.top_main_window = top_main_window
@@ -1557,7 +1565,7 @@ class JournalPanel(QDockWidget):
             return None
         return self.table_view.model().get_journal_entry(self.table_view.model().rowCount() - 1)
 
-    def search_select_journal(self, text:str):
+    def search_select_journal(self, text: str):
         self.table_view.clearSelection()
         model = self.table_view.model()
         if text.strip() != '':
@@ -1572,7 +1580,6 @@ class JournalPanel(QDockWidget):
                         self.scrolled_to_selected = model.index(row_num, 0)
         if self.scrolled_to_selected is not None:
             self.table_view.scrollTo(self.scrolled_to_selected)
-                    #self.table_view.clearFocus()
 
     def scroll_selected(self, direction: int):
         all_indexes = self.table_view.selectedIndexes()
@@ -1723,20 +1730,17 @@ class JournalEntryDialogPlain(QDialog):
             nonlocal floating_feedback_flip
             QGuiApplication.clipboard().setText(text_view.toPlainText())
             floating_copy_button.clearFocus()
-            floating_copy_button.setIconSize(QSize(50,50) if floating_feedback_flip else QSize(48, 48))
+            floating_copy_button.setIconSize(QSize(50, 50) if floating_feedback_flip else QSize(48, 48))
             floating_feedback_flip= not floating_feedback_flip
             floating_copy_button.repaint()
 
         floating_feedback_flip = True
         floating_copy_button = transparent_button(QPushButton(get_icon(ICON_COPY_TO_CLIPBOARD), '', self))
-        floating_copy_button.setGeometry(self.width() - 75, 25, 40, 40);
-        floating_copy_button.setIconSize(QSize(48,48))
+        floating_copy_button.setGeometry(self.width() - 75, 25, 40, 40)
+        floating_copy_button.setIconSize(QSize(48, 48))
         floating_copy_button.setToolTip(tr("Copy to clipboard"))
         floating_copy_button.show()
         floating_copy_button.clicked.connect(copy_to_clipboard)
-
-
-
 
 
 class DialogSingletonMixin:
@@ -1754,14 +1758,14 @@ class DialogSingletonMixin:
         if class_name in DialogSingletonMixin._dialogs_map:
             raise TypeError(f"ERROR: More than one instance of {class_name} cannot exist.")
         if DialogSingletonMixin.debug:
-            debug(f'SingletonDialog created for {class_name}')
+            debug(f'SingletonDialog created for {class_name}') if debugging else None
         DialogSingletonMixin._dialogs_map[class_name] = self
 
     def closeEvent(self, event) -> None:
         """Subclasses that implement their own closeEvent must call this closeEvent to deregister the singleton"""
         class_name = self.__class__.__name__
         if DialogSingletonMixin.debug:
-            debug(f'SingletonDialog remove {class_name}')
+            debug(f'SingletonDialog remove {class_name}') if debugging else None
         del DialogSingletonMixin._dialogs_map[class_name]
         event.accept()
 
@@ -1779,7 +1783,7 @@ class DialogSingletonMixin:
         """If the dialog exists(), call this to make it visible by raising it."""
         class_name = cls.__name__
         if DialogSingletonMixin.debug:
-            debug(f'SingletonDialog show existing {class_name}')
+            debug(f'SingletonDialog show existing {class_name}') if debugging else None
         instance = DialogSingletonMixin._dialogs_map[class_name]
         instance.make_visible()
 
@@ -1788,7 +1792,7 @@ class DialogSingletonMixin:
         """Returns true if the dialog has already been created."""
         class_name = cls.__name__
         if DialogSingletonMixin.debug:
-            debug(f'SingletonDialog exists {class_name} {class_name in DialogSingletonMixin._dialogs_map}')
+            debug(f'SingletonDialog exists {class_name} {class_name in DialogSingletonMixin._dialogs_map}') if debugging else None
         return class_name in DialogSingletonMixin._dialogs_map
 
 
@@ -1838,9 +1842,7 @@ class HelpDialog(QDialog, DialogSingletonMixin):
 
 class ContextMenu(QMenu):
 
-    def __init__(self,
-                 about_action=None, help_action=None, listen_action=None, config_action=None,
-                 quit_action=None) -> None:
+    def __init__(self, about_action=None, help_action=None, listen_action=None, quit_action=None) -> None:
         super().__init__()
 
         self.play_pause_action = self.addAction(
@@ -1861,7 +1863,7 @@ class ContextMenu(QMenu):
 
 def exception_handler(e_type, e_value, e_traceback):
     """Overarching error handler in case something unexpected happens."""
-    print("ERROR:\n", ''.join(traceback.format_exception(e_type, e_value, e_traceback)))
+    error("\n", ''.join(traceback.format_exception(e_type, e_value, e_traceback)))
     alert = QMessageBox()
     alert.setText(tr('Error: {}').format(''.join(traceback.format_exception_only(e_type, e_value))))
     alert.setInformativeText(tr('Unexpected error'))
@@ -1877,17 +1879,17 @@ def install_as_desktop_application(uninstall: bool = False):
     desktop_dir = Path.home().joinpath('.local', 'share', 'applications')
     icon_dir = Path.home().joinpath('.local', 'share', 'icons')
     if not desktop_dir.exists():
-        print(f"ERROR: No desktop directory is present:{desktop_dir.as_posix()}"
+        error(f"No desktop directory is present:{desktop_dir.as_posix()}"
               " Cannot proceed - is this a non-standard desktop?")
         return
 
     bin_dir = Path.home().joinpath('bin')
     if not bin_dir.is_dir():
-        print(f"WARNING: creating:{bin_dir.as_posix()}")
+        warning("creating:{bin_dir.as_posix()}")
         os.mkdir(bin_dir)
 
     if not icon_dir.is_dir():
-        print(f"WARNING: creating:{icon_dir.as_posix()}")
+        warning("creating:{icon_dir.as_posix()}")
         os.mkdir(icon_dir)
 
     installed_script_path = bin_dir.joinpath("jouno")
@@ -1896,27 +1898,27 @@ def install_as_desktop_application(uninstall: bool = False):
 
     if uninstall:
         os.remove(installed_script_path)
-        print(f'INFO: removed {installed_script_path.as_posix()}')
+        info(f'removed {installed_script_path.as_posix()}')
         os.remove(desktop_definition_path)
-        print(f'INFO: removed {desktop_definition_path.as_posix()}')
+        info(f'removed {desktop_definition_path.as_posix()}')
         os.remove(icon_path)
-        print(f'INFO: removed {icon_path.as_posix()}')
+        info(f'removed {icon_path.as_posix()}')
         return
 
     if installed_script_path.exists():
-        print(f"WARNING: skipping installation of {installed_script_path.as_posix()}, it is already present.")
+        warning(f"skipping installation of {installed_script_path.as_posix()}, it is already present.")
     else:
         source = open(__file__).read()
         source = source.replace("#!/usr/bin/python3", '#!' + sys.executable)
-        print(f'INFO: creating {installed_script_path.as_posix()}')
+        info(f'creating {installed_script_path.as_posix()}')
         open(installed_script_path, 'w').write(source)
-        print(f'INFO: chmod u+rwx {installed_script_path.as_posix()}')
+        info(f'chmod u+rwx {installed_script_path.as_posix()}')
         os.chmod(installed_script_path, stat.S_IRWXU)
 
     if desktop_definition_path.exists():
-        print(f"WARNING: skipping installation of {desktop_definition_path.as_posix()}, it is already present.")
+        warning(f"skipping installation of {desktop_definition_path.as_posix()}, it is already present.")
     else:
-        print(f'INFO: creating {desktop_definition_path.as_posix()}')
+        info(f'creating {desktop_definition_path.as_posix()}')
         desktop_definition = textwrap.dedent(f"""
             [Desktop Entry]
             Type=Application
@@ -1930,12 +1932,12 @@ def install_as_desktop_application(uninstall: bool = False):
         open(desktop_definition_path, 'w').write(desktop_definition)
 
     if icon_path.exists():
-        print(f"WARNING: skipping installation of {icon_path.as_posix()}, it is already present.")
+        warning(f"skipping installation of {icon_path.as_posix()}, it is already present.")
     else:
-        print(f'INFO: creating {icon_path.as_posix()}')
+        info(f'creating {icon_path.as_posix()}')
         create_pixmap_from_svg_bytes(ICON_JOUNO).save(icon_path.as_posix())
 
-    print('INFO: installation complete. Your desktop->applications->system should now contain jouno')
+    info('installation complete. Your desktop->applications->system should now contain jouno')
 
 
 def parse_args():
@@ -1968,7 +1970,7 @@ def main():
     signal.signal(signal.SIGINT, signal.SIG_DFL)
     sys.excepthook = exception_handler
     app = QApplication(sys.argv)
-    args = parse_args()
+    parse_args()
     MainWindow(app)
 
 
