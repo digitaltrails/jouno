@@ -257,6 +257,9 @@ ICON_DOCK = "window-close"
 ICON_GO_NEXT = "go-down"
 ICON_GO_PREVIOUS = "go-up"
 
+ICON_BLACK_COLOR = b"#232629"
+ICON_WHITE_COLOR = b"#f3f3f3"
+
 ICON_JOUNO = b"""
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">
  <path fill="#232629" style="fill:currentColor;fill-opacity:1;stroke:none" 
@@ -270,10 +273,7 @@ ICON_JOUNO = b"""
 
 </svg>
 """
-ICON_JOUNO_LIGHT = ICON_JOUNO.replace(b'#232629', b'#bbbbbb')
-
-ICON_BLACK_COLOR = b"#232629"
-ICON_WHITE_COLOR = b"#f3f3f3"
+ICON_JOUNO_LIGHT = ICON_JOUNO.replace(ICON_BLACK_COLOR, b'#bbbbbb')
 
 ICON_TOOLBAR_RUN_DISABLED = b"""
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 22 22">
