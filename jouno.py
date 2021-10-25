@@ -1620,6 +1620,7 @@ class JournalTableView(QTableView):
         self.setEditTriggers(QAbstractItemView.AnyKeyPressed | QAbstractItemView.SelectedClicked | QAbstractItemView.CurrentChanged)
         # self.setGridStyle(Qt.NoPen)
         self.setShowGrid(False)
+        self.setIconSize(QSize(30, 30))
 
         def view_journal_entry(index: QModelIndex):
             entry_dialog = JournalEntryDialogPlain(self, self.model().get_journal_entry(index.row()))
