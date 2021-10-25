@@ -132,8 +132,12 @@ The config files are in INI-format divided into a number of sections as outlined
         burst_truncate_messages = 3
         # Set journo messages to timeout/auto-dismiss after notification-seconds
         notification_seconds = 30
+        # The maximum number of journal items to display in the "Recently notified" table.
+        journal_history_max = 100
+        # Run out of the system tray
+        system_tray_enabled = yes
         # For debugging the application
-        debug = yes
+        debug_enabled = yes
 
         [match]
         # Each filter rule has an id and the message text to match
@@ -151,29 +155,6 @@ The config files are optional, but some filtering of the journal is likely to be
 ``jouno`` copes with cascades and won't cause infinite cascades, but filtering may be necessary
 to eliminate excessive bursts caused by the desktop when it processes the notifications generated
 by jouno.
-
-
-Responsiveness
---------------
-
-I've logged a bug against the KDE plasma notifications. Generating multiple messages with expiry timeouts
-cause plasma-notifications and the kwin-x11 to cosume a large amount of CPU and become jerky when dragging
-windows.  This doesn't seem to happen if notices do not expire (``notification_seconds = 0``).  This
-isn't a bug confined to jouno generated notifications, it can be reproduced by normal shell commands,
-for example:
-
-  for i in 1 2 3 4 5 6 7 8 9 10; do notify-send --expire-time 30 test $i;done
-
-The problem can be reduced by using sufficient match/ignore filters or by turning off notification
-expiry by setting ``notification_seconds = 0``
-
-Examples
-========
-
-    jouno
-        All default controls.
-
-
 
 Prerequisites
 =============
@@ -254,7 +235,7 @@ from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QMessageBox, QLi
     QHBoxLayout
 from systemd import journal
 
-JOUNO_VERSION = '0.9.5'
+JOUNO_VERSION = '1.0.0'
 
 # The icons can either be:
 #   1) str: named icons from the freedesktop theme which should all be available on most Linux desktops.
@@ -1432,7 +1413,7 @@ class MainWindow(QMainWindow):
                 # Also try to cope with the tray not being at the bottom right of the screen.
                 x = p.x() - wg.width() if p.x() > wg.width() else p.x()
                 y = p.y() - wg.height() if p.y() > wg.height() else p.y()
-                x -= 200
+                x -= 250
                 y -= 150
                 self.setGeometry(x, y, wg.width(), wg.height())
                 self.show()
