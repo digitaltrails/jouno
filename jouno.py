@@ -1432,6 +1432,8 @@ class MainWindow(QMainWindow):
                 # Also try to cope with the tray not being at the bottom right of the screen.
                 x = p.x() - wg.width() if p.x() > wg.width() else p.x()
                 y = p.y() - wg.height() if p.y() > wg.height() else p.y()
+                x -= 200
+                y -= 150
                 self.setGeometry(x, y, wg.width(), wg.height())
                 self.show()
                 # Attempt to force it to the top with raise and activate
@@ -1451,7 +1453,7 @@ class MainWindow(QMainWindow):
             QProcess.startDetached(app.arguments()[0], app.arguments()[1:])
 
 
-class JounalMainWindow(QMainWindow):
+class JournalMainWindow(QMainWindow):
     """
     I wanted an undockable component, but one with normal window decorations.
     So I've taken over the undocking process and reparent the floating window onto
@@ -1494,7 +1496,7 @@ class JournalPanel(QDockWidget):
 
         self.setFloating(False)
         self.setFeatures(QDockWidget.DockWidgetFloatable | QDockWidget.DockWidgetMovable)
-        self.tmp_main_window = JounalMainWindow(journal_widget=self, top_main_window=parent)
+        self.tmp_main_window = JournalMainWindow(journal_widget=self, top_main_window=parent)
 
         self.table_view = JournalTableView(journal_watcher_task, max_journal_entries=max_journal_entries)
 
@@ -1515,22 +1517,28 @@ class JournalPanel(QDockWidget):
         def search_entries(text: str) -> None:
             self.scrolled_to_selected = None
             self.search_select_journal(text)
+            go_next_button.setEnabled(self.scrolled_to_selected is not None)
+            go_previous_button.setEnabled(self.scrolled_to_selected is not None)
             search_input.setFocus()
 
         search_input = QLineEdit()
         search_input.setFixedWidth(350)
         search_input.addAction(get_icon(ICON_SEARCH_JOURNAL), QLineEdit.LeadingPosition)
-        search_input.setToolTip(tr("Incrementally search and select journal entries.\nSearches all fields."))
+        search_input.setToolTip(tr("Incrementally search journal entries.\nSearches all fields."))
         search_input.textChanged.connect(search_entries)
         title_layout.addWidget(search_input)
         self.scrolled_to_selected = None
 
         go_next_button = transparent_button(QPushButton(get_icon(ICON_GO_NEXT), '', self))
         go_next_button.clicked.connect(partial(self.scroll_selected, 1))
+        go_next_button.setEnabled(False)
+        go_next_button.setToolTip(tr("Next match."))
         title_layout.addWidget(go_next_button)
 
         go_previous_button = transparent_button(QPushButton(get_icon(ICON_GO_PREVIOUS), '', self))
         go_previous_button.clicked.connect(partial(self.scroll_selected, -1))
+        go_previous_button.setToolTip(tr("Previous match."))
+        go_previous_button.setEnabled(False)
         title_layout.addWidget(go_previous_button)
 
         spacer = QWidget()
@@ -1575,10 +1583,14 @@ class JournalPanel(QDockWidget):
             for row_num in range(model.rowCount()):
                 journal_entry = model.get_journal_entry(row_num)
                 # Assume case insensitive if all text is in lower case.
-                entry_text = str(journal_entry).lower() if text.islower() else str(journal_entry)
-                if text in entry_text:
+                # Use an easy a format that is easy to pattern match: "'key=value', 'key=value'"
+                fields_str = ', '.join((f"'{key}={str(value)}'" for key, value in journal_entry.items()))
+                if text in fields_str.lower() if text.islower() else fields_str:
                     self.table_view.selectRow(row_num)
-                    self.table_view.scrollTo(model.index(row_num, 0))
+                    if self.scrolled_to_selected is None:
+                        self.scrolled_to_selected = model.index(row_num, 0)
+        if self.scrolled_to_selected is not None:
+            self.table_view.scrollTo(self.scrolled_to_selected)
                     #self.table_view.clearFocus()
 
     def scroll_selected(self, direction: int):
@@ -1601,8 +1613,7 @@ class JournalTableView(QTableView):
 
     def __init__(self, journal_watcher_task: JournalWatcherTask, max_journal_entries: int):
         super().__init__()
-        self.setToolTip(tr("Double click to view the complete journal entry.") + "\n" +
-                        tr("Control-C to copy a selected field's text."))
+        self.setToolTip(tr("Double click the row's message icon to view the complete journal entry."))
         self.setModel(JournalTableModel(max_journal_entries=max_journal_entries))
         self.max_entries = 100
         self.setDragDropOverwriteMode(False)
