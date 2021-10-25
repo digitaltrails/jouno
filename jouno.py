@@ -26,7 +26,7 @@ Description
 
 This software is currently pre-release, It is feature complete and quite usable but may lack some polish.
 
-``jouno,`` is system-tray application for monitoring the ``systemd-journal.`` It raises selected
+``jouno`` is system-tray application for monitoring the ``systemd-journal.`` It raises selected
 entries as desktop-notifications.
 
 The application monitors the ``systemd-journal`` for new entries, filters them, and forwards them as
