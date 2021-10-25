@@ -226,13 +226,13 @@ from typing import Mapping, Any, List, Type, Callable
 import dbus
 from PyQt5.QtCore import QCoreApplication, QProcess, Qt, pyqtSignal, QThread, QModelIndex, QItemSelectionModel, QSize
 from PyQt5.QtGui import QPixmap, QIcon, QImage, QPainter, QCursor, QStandardItemModel, QStandardItem, QIntValidator, \
-    QFontDatabase, QGuiApplication, QCloseEvent
+    QFontDatabase, QGuiApplication, QCloseEvent, QPalette
 from PyQt5.QtSvg import QSvgRenderer
 from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QMessageBox, QLineEdit, QLabel, \
     QPushButton, QSystemTrayIcon, QMenu, QTextEdit, QDialog, QTabWidget, \
     QCheckBox, QGridLayout, QTableView, \
     QAbstractItemView, QHeaderView, QMainWindow, QSizePolicy, QStyledItemDelegate, QToolBar, QDockWidget, \
-    QHBoxLayout
+    QHBoxLayout, QStyleFactory
 from systemd import journal
 
 JOUNO_VERSION = '0.9.6'
@@ -256,6 +256,7 @@ ICON_UNDOCK = "window-new"
 ICON_DOCK = "window-close"
 ICON_GO_NEXT = "go-down"
 ICON_GO_PREVIOUS = "go-up"
+
 ICON_JOUNO = b"""
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">
  <path fill="#232629" style="fill:currentColor;fill-opacity:1;stroke:none" 
@@ -270,6 +271,10 @@ ICON_JOUNO = b"""
 </svg>
 """
 ICON_JOUNO_LIGHT = ICON_JOUNO.replace(b'#232629', b'#bbbbbb')
+
+ICON_BLACK_COLOR = b"#232629"
+ICON_WHITE_COLOR = b"#f3f3f3"
+
 ICON_TOOLBAR_RUN_DISABLED = b"""
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 22 22">
     <style type="text/css" id="current-color-scheme">
@@ -710,9 +715,26 @@ def tr(source_text: str):
 
 # ######################## USER INTERFACE CODE ######################################################################
 
+dark_theme_found = None
+
+
+def is_dark_theme():
+    global dark_theme_found
+    if dark_theme_found is None:
+        # Heuristic for checking for a dark theme.
+        # Is the sample text lighter than the background?
+        label = QLabel("am I in the dark?")
+        text_hsv_value = label.palette().color(QPalette.WindowText).value()
+        bg_hsv_value = label.palette().color(QPalette.Background).value()
+        debug(f"is_dark_them text={text_hsv_value} bg={bg_hsv_value} is_dark={text_hsv_value > bg_hsv_value}")
+        dark_theme_found = text_hsv_value > bg_hsv_value
+    return dark_theme_found
+
 
 def create_image_from_svg_bytes(svg_str: bytes) -> QImage:
     """There is no QIcon option for loading QImage from a string, only from a SVG file, so roll our own."""
+    if is_dark_theme():
+        svg_str = svg_str.replace(ICON_BLACK_COLOR, ICON_WHITE_COLOR)
     renderer = QSvgRenderer(svg_str)
     image = QImage(64, 64, QImage.Format_ARGB32)
     image.fill(0x0)
@@ -1196,27 +1218,35 @@ class MainToolBar(QToolBar):
         # main_tool_bar.setFixedHeight(80)
         self.setIconSize(QSize(32, 32))
         self.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+
         self.icon_run_enabled = get_icon(ICON_TOOLBAR_RUN_ENABLED)
         self.icon_run_disabled = get_icon(ICON_TOOLBAR_RUN_DISABLED)
         self.icon_notifier_enabled = get_icon(ICON_TOOLBAR_NOTIFIER_ENABLED)
         self.icon_notifier_disabled = get_icon(ICON_TOOLBAR_NOTIFIER_DISABLED)
+
         self.run_action = self.addAction(self.icon_run_enabled, tr("Run"), run_func)
         self.run_action.setObjectName("run_button")
         self.run_action.setToolTip(tr("Start/stop monitoring the journal feed."))
-        self.widgetForAction(self.run_action).setStyleSheet("QToolButton { width: 110px; }")
+        self.widgetForAction(self.run_action).setStyleSheet("QToolButton { width: 130px; }")
+
         self.stop_action = self.addAction(get_icon(ICON_TOOLBAR_STOP), tr("Stop"), run_func)
         self.stop_action.setToolTip(tr("Stop monitoring the journal feed."))
+
         self.addSeparator()
+
         self.notifier_action = self.addAction(self.icon_notifier_enabled, "notify", notify_func)
         self.notifier_action.setToolTip(tr("Enable/disable desktop notifications."))
-        self.widgetForAction(self.notifier_action).setStyleSheet("QToolButton { width: 110px; }")
+        self.widgetForAction(self.notifier_action).setStyleSheet("QToolButton { width: 130px; }")
+
         self.addSeparator()
+
         self.add_filter_action = self.addAction(get_icon(ICON_TOOLBAR_ADD_FILTER), "add", add_func)
         self.add_filter_action.setObjectName("add_button")
         self.add_filter_action.setIconText(tr("New filter"))
         self.add_filter_action.setToolTip(
             tr("Add a new filter above the selected filter or at the end if no filter is selected.") + "\n" +
             tr("Select a filter tab and optionally click in its left margin to select an insertion point."))
+
         self.del_filter_action = self.addAction(get_icon(ICON_TOOLBAR_DEL_FILTER), "del", del_func)
         self.del_filter_action.setObjectName("del_button")
         self.del_filter_action.setIconText(tr("Delete filter"))
@@ -1319,7 +1349,12 @@ class MainWindow(QMainWindow):
     def __init__(self, app: QApplication):
         super().__init__()
 
+        global debugging
+
         journal_watcher_task = JournalWatcherTask()
+        print(QStyleFactory.keys())
+        info(f"Icon theme path={QIcon.themeSearchPaths()}")
+        info(f"Icon theme '{QIcon.themeName()}' >> is_dark_theme()={is_dark_theme()}")
 
         app_name = tr('Jouno')
         app.setWindowIcon(get_icon(ICON_JOUNO_LIGHT))
@@ -1386,7 +1421,6 @@ class MainWindow(QMainWindow):
 
         config_panel = ConfigPanel(tab_change=tab_change, config_change_func=config_change, parent=self)
 
-        global debugging
         debugging = config_panel.get_config().getboolean('options', 'debug_enabled')
 
         journal_panel = JournalPanel(

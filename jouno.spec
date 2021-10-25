@@ -59,7 +59,7 @@ cat > %{name}.desktop <<'EOF'
 Type=Application
 Terminal=false
 Exec=%{_bindir}/%{name}
-Name=VDU Controls
+Name=Jouno
 GenericName=Jouno
 Comment=A Systemd-Journal to Freedesktop-Notifications forwarder.
 Icon=jouno
