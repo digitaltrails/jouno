@@ -217,14 +217,14 @@ import sys
 import textwrap
 import time
 import traceback
-from ctypes import Union
 from enum import Enum
 from functools import partial
 from pathlib import Path
 from typing import Mapping, Any, List, Type, Callable
 
 import dbus
-from PyQt5.QtCore import QCoreApplication, QProcess, Qt, pyqtSignal, QThread, QModelIndex, QItemSelectionModel, QSize
+from PyQt5.QtCore import QCoreApplication, QProcess, Qt, pyqtSignal, QThread, QModelIndex, QItemSelectionModel, QSize, \
+    QEvent
 from PyQt5.QtGui import QPixmap, QIcon, QImage, QPainter, QCursor, QStandardItemModel, QStandardItem, QIntValidator, \
     QFontDatabase, QGuiApplication, QCloseEvent, QPalette
 from PyQt5.QtSvg import QSvgRenderer
@@ -285,6 +285,7 @@ ICON_TOOLBAR_RUN_DISABLED = b"""
     <path d="m3 3v16l16-8z" class="ColorScheme-Text" fill="currentColor"/>
 </svg>
 """
+
 ICON_TOOLBAR_RUN_ENABLED = ICON_TOOLBAR_RUN_DISABLED.replace(b"#232629;", b"#3daee9;")
 ICON_TOOLBAR_STOP = b"""
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 22 22">
@@ -353,7 +354,6 @@ ICON_TOOLBAR_DEL_FILTER = b"""
     <path id="path6" d="M 13.990234,13 13,13.990234 15.009766,16 13,18.009766 13.990234,19 16,16.990234 18.009766,19 19,18.009766 16.990234,16 19,13.990234 18.009766,13 16,15.009766 Z" fill="#da4453"/>
 </svg>
 """
-
 
 TABLE_HEADER_STYLE = "font-weight: bold;font-size: 9pt;"
 
@@ -574,7 +574,6 @@ class JournalWatcher:
             else:
                 rule_enabled_key = rule_id + "_enabled"
                 if rule_enabled_key not in rules_map or rules_map[rule_enabled_key].lower() == 'yes':
-                    get_icon
                     if rule_id.endswith('_regexp'):
                         patterns_map[rule_id] = re.compile(rule_text)
                     else:
@@ -587,7 +586,7 @@ class JournalWatcher:
             for key, prefix in {'_CMDLINE': '', '_EXE': '', '_COMM': '', 'SYSLOG_IDENTIFIER': '',
                                 '_KERNEL_SUBSYSTEM': 'kernel ',
                                 }.items():
-                debug("determine_app_name", key, journal_entry[key] if key in journal_entry else False) if debugging else None
+                # debug("determine_app_name", key, journal_entry[key] if key in journal_entry else False) if debugging else None
                 if key in journal_entry:
                     value = str(journal_entry[key])
                     if app_name_info.find(value) < 0:
@@ -614,7 +613,7 @@ class JournalWatcher:
                         text += sep + prefix + value
                         sep = ' '
             summary = f"\u25F4{realtime:%H:%M:%S}: {text} (\u21e8{transport})"
-        debug(f"realtime='{realtime}' summary='{summary}'") if debugging else None
+        # debug(f"realtime='{realtime}' summary='{summary}'") if debugging else None
         return summary
 
     def determine_message(self, journal_entries: List[Mapping[str, Any]]) -> str:
@@ -637,7 +636,7 @@ class JournalWatcher:
             sep = '\n'
         if duplicates > 0:
             message += f'\n[{duplicates + 1} duplicate messages]'
-        debug(f'message={message}') if debugging else None
+        # debug(f'message={message}') if debugging else None
         return message
 
     def determine_priority(self, journal_entries: List[Mapping[str, Any]]) -> Priority:
@@ -653,14 +652,14 @@ class JournalWatcher:
         # Is a list comprehension slower than a for-loop for string construction?
         # Use an easy a format that is easy to pattern match
         fields_str = ', '.join((f"'{key}={str(value)}'" for key, value in journal_entry.items()))
-        debug(fields_str) if debugging else None
+        # debug(fields_str) if debugging else None
         for rule_id, match_re in self.match_regexp.items():
             if match_re.search(fields_str) is not None:
-                debug(f"rule=match.{rule_id}: {journal_entry['MESSAGE']}") if debugging else None
+                # debug(f"rule=match.{rule_id}: {journal_entry['MESSAGE']}") if debugging else None
                 return True
         for rule_id, ignore_re in self.ignore_regexp.items():
             if ignore_re.search(fields_str) is not None:
-                debug(f"rule=ignore.{rule_id}: {journal_entry['MESSAGE']}") if debugging else None
+                # debug(f"rule=ignore.{rule_id}: {journal_entry['MESSAGE']}") if debugging else None
                 return False
         # otherwise no patterns matched:
         # 1) if there are any 'match' patterns at all, we need to return False.
@@ -697,7 +696,7 @@ class JournalWatcher:
                             return
                         burst_count += 1
                         if self.is_notable(journal_entry):
-                            debug(f"Notable: burst_count={len(notable)}: {journal_entry['MESSAGE']}") if debugging else None
+                            # debug(f"Notable: burst_count={len(notable)}: {journal_entry['MESSAGE']}") if debugging else None
                             notable.append(journal_entry)
                             self.supervisor.new_journal_entry(journal_entry)
             if self.notifications_enabled and len(notable):
@@ -715,19 +714,14 @@ def tr(source_text: str):
 
 # ######################## USER INTERFACE CODE ######################################################################
 
-dark_theme_found = None
-
-
 def is_dark_theme():
-    global dark_theme_found
-    if dark_theme_found is None:
-        # Heuristic for checking for a dark theme.
-        # Is the sample text lighter than the background?
-        label = QLabel("am I in the dark?")
-        text_hsv_value = label.palette().color(QPalette.WindowText).value()
-        bg_hsv_value = label.palette().color(QPalette.Background).value()
-        debug(f"is_dark_them text={text_hsv_value} bg={bg_hsv_value} is_dark={text_hsv_value > bg_hsv_value}")
-        dark_theme_found = text_hsv_value > bg_hsv_value
+    # Heuristic for checking for a dark theme.
+    # Is the sample text lighter than the background?
+    label = QLabel("am I in the dark?")
+    text_hsv_value = label.palette().color(QPalette.WindowText).value()
+    bg_hsv_value = label.palette().color(QPalette.Background).value()
+    dark_theme_found = text_hsv_value > bg_hsv_value
+    #debug(f"is_dark_them text={text_hsv_value} bg={bg_hsv_value} is_dark={dark_theme_found}") if debugging else None
     return dark_theme_found
 
 
@@ -767,8 +761,9 @@ def create_icon_from_svg_bytes(default_svg: bytes = None,
     return icon
 
 
-def get_icon(source):
-    # Consider caching icon loading - but icons are mutable so perhaps that's asking for trouble.
+def get_icon(source) -> QIcon:
+    # Consider caching icon loading - but icons are mutable and subject to theme changes,
+    # so perhaps that's asking for trouble.
     if isinstance(source, str):
         return QIcon.fromTheme(source)
     if isinstance(source, bytes):
@@ -777,7 +772,10 @@ def get_icon(source):
 
 
 def big_label(widget: QLabel) -> QLabel:
-    widget.setStyleSheet("font-weight: normal;font-size: 12pt;")
+    # Setting the style breaks theme changes, use HTML instead
+    # widget.setStyleSheet("QLabel { font-weight: normal;font-size: 12pt; }")
+    widget.setTextFormat(Qt.TextFormat.AutoText)
+    widget.setText(f"<b>{widget.text()}</b>")
     return widget
 
 
@@ -914,7 +912,6 @@ class FilterTableView(QTableView):
         # self.setItemDelegateForColumn(1, ColumnItemDelegate())
         self.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
         self.horizontalHeader().setDefaultAlignment(Qt.AlignLeft)
-        self.horizontalHeader().setStyleSheet(TABLE_HEADER_STYLE)
         self.setShowGrid(False)
 
     def item_view_order(self) -> List[int]:
@@ -1213,7 +1210,7 @@ class MainToolBar(QToolBar):
     def __init__(self,
                  run_func: Callable, notify_func: Callable,
                  add_func: Callable, del_func: Callable,
-                 parent: QWidget):
+                 parent: QMainWindow):
         super().__init__(parent=parent)
         # main_tool_bar.setFixedHeight(80)
         self.setIconSize(QSize(32, 32))
@@ -1223,31 +1220,34 @@ class MainToolBar(QToolBar):
         self.icon_run_disabled = get_icon(ICON_TOOLBAR_RUN_DISABLED)
         self.icon_notifier_enabled = get_icon(ICON_TOOLBAR_NOTIFIER_ENABLED)
         self.icon_notifier_disabled = get_icon(ICON_TOOLBAR_NOTIFIER_DISABLED)
+        self.icon_run_stop = get_icon(ICON_TOOLBAR_STOP)
+        self.icon_add_filter = get_icon(ICON_TOOLBAR_ADD_FILTER)
+        self.icon_del_filter = get_icon(ICON_TOOLBAR_DEL_FILTER)
 
         self.run_action = self.addAction(self.icon_run_enabled, tr("Run"), run_func)
         self.run_action.setObjectName("run_button")
         self.run_action.setToolTip(tr("Start/stop monitoring the journal feed."))
-        self.widgetForAction(self.run_action).setStyleSheet("QToolButton { width: 130px; }")
+        #self.widgetForAction(self.run_action).setStyleSheet("QToolButton { width: 130px; }")
 
-        self.stop_action = self.addAction(get_icon(ICON_TOOLBAR_STOP), tr("Stop"), run_func)
+        self.stop_action = self.addAction(self.icon_run_stop, tr("Stop"), run_func)
         self.stop_action.setToolTip(tr("Stop monitoring the journal feed."))
 
         self.addSeparator()
 
         self.notifier_action = self.addAction(self.icon_notifier_enabled, "notify", notify_func)
         self.notifier_action.setToolTip(tr("Enable/disable desktop notifications."))
-        self.widgetForAction(self.notifier_action).setStyleSheet("QToolButton { width: 130px; }")
+        #self.widgetForAction(self.notifier_action).setStyleSheet("QToolButton { width: 130px; }")
 
         self.addSeparator()
 
-        self.add_filter_action = self.addAction(get_icon(ICON_TOOLBAR_ADD_FILTER), "add", add_func)
+        self.add_filter_action = self.addAction(self.icon_add_filter, "add", add_func)
         self.add_filter_action.setObjectName("add_button")
         self.add_filter_action.setIconText(tr("New filter"))
         self.add_filter_action.setToolTip(
             tr("Add a new filter above the selected filter or at the end if no filter is selected.") + "\n" +
             tr("Select a filter tab and optionally click in its left margin to select an insertion point."))
 
-        self.del_filter_action = self.addAction(get_icon(ICON_TOOLBAR_DEL_FILTER), "del", del_func)
+        self.del_filter_action = self.addAction(self.icon_del_filter, "del", del_func)
         self.del_filter_action.setObjectName("del_button")
         self.del_filter_action.setIconText(tr("Delete filter"))
         self.del_filter_action.setToolTip(
@@ -1259,8 +1259,32 @@ class MainToolBar(QToolBar):
         self.addWidget(spacer)
         self.addAction(get_icon(ICON_HELP_CONTENTS), tr('Help'), HelpDialog.invoke)
         self.addAction(get_icon(ICON_HELP_ABOUT), tr('About'), AboutDialog.invoke)
+        self.installEventFilter(self)
+        # parent.toolButtonStyleChanged.connect(style_changed)
+
+    def reload_icons(self):
+        self.icon_run_enabled = get_icon(ICON_TOOLBAR_RUN_ENABLED)
+        self.icon_run_disabled = get_icon(ICON_TOOLBAR_RUN_DISABLED)
+        self.icon_notifier_enabled = get_icon(ICON_TOOLBAR_NOTIFIER_ENABLED)
+        self.icon_notifier_disabled = get_icon(ICON_TOOLBAR_NOTIFIER_DISABLED)
+        self.icon_run_stop = get_icon(ICON_TOOLBAR_STOP)
+        self.icon_add_filter = get_icon(ICON_TOOLBAR_ADD_FILTER)
+        self.icon_del_filter = get_icon(ICON_TOOLBAR_DEL_FILTER)
+
+    def eventFilter(self, target: 'QObject', event: 'QEvent') -> bool:
+        super().eventFilter(target, event)
+        # PalletChange happens after the new style sheet is in use.
+        if event.type() == QEvent.PaletteChange:
+            debug(f"PaletteChange is_dark_theme()={is_dark_theme()} {str(target)}") if debugging else None
+            self.reload_icons()
+            self.stop_action.setIcon(self.icon_run_stop)
+            self.add_filter_action.setIcon(self.icon_add_filter)
+            self.del_filter_action.setIcon(self.icon_del_filter)
+        event.accept()
+        return True
 
     def configure_run_action(self, running: bool) -> None:
+        debug("Run Style is dark", is_dark_theme()) if debugging else None
         if running:
             self.run_action.setIcon(self.icon_run_enabled)
             self.run_action.setIconText(tr("Running"))
@@ -1271,37 +1295,47 @@ class MainToolBar(QToolBar):
             self.stop_action.setEnabled(False)
 
     def configure_notifier_action(self, notifying: bool) -> None:
+        padded = pad_text([tr('Notifying'), tr('Mute')])
         if notifying:
             self.notifier_action.setIcon(self.icon_notifier_enabled)
-            self.notifier_action.setIconText(tr("Notifying"))
+            #self.notifier_action.setIconText(tr("Notifying"))
+            self.notifier_action.setIconText(padded[0])
         else:
             self.notifier_action.setIcon(self.icon_notifier_disabled)
-            self.notifier_action.setIconText(tr("Mute       "))
+            # Don't do this with a style sheet - style sheets will break dark/light theme loading.
+            #self.notifier_action.setIconText(tr("Mute   \u2002"))
+            self.notifier_action.setIconText(padded[1])
 
     def configure_filter_actions(self, enable: bool) -> None:
         self.add_filter_action.setEnabled(enable)
         self.del_filter_action.setEnabled(enable)
 
 
-# def pad_text(text_list: List[str]):
-#     max_width = 0
-#     width_list = []
-#     output_list = []
-#     for text in text_list:
-#         tmp = QLabel(text)
-#         tmp.adjustSize()
-#         width = tmp.fontMetrics().boundingRect(tmp.text()).width()
-#         if width > max_width:
-#             max_width = width
-#         width_list.append(width)
-#     for text, width in zip(text_list, width_list):
-#         while width < max_width:
-#             text += '\u200A'
-#             tmp = QLabel(text)
-#             tmp.adjustSize()
-#             width = tmp.fontMetrics().boundingRect(tmp.text()).width()
-#         output_list.append(text)
-#     return output_list
+def pad_text(text_list: List[str]):
+    max_width = 0
+    width_list = []
+    output_list = []
+    for text in text_list:
+        tmp = QLabel(text)
+        tmp.adjustSize()
+        width = tmp.fontMetrics().boundingRect(tmp.text()).width()
+        if width > max_width:
+            debug(f"text='{text}' New max='{width}'")
+            max_width = width
+        width_list.append(width)
+    for text, width in zip(text_list, width_list):
+        if width < max_width:
+            space = '\u2002'
+            while True:
+                spaced = text + space
+                tmp2 = QLabel(spaced)
+                spaced_width = tmp2.fontMetrics().boundingRect(tmp2.text()).width()
+                if spaced_width > max_width:
+                    break
+                debug(f"text='{text}' w={spaced_width} max={max_width}")
+                text = spaced
+        output_list.append(text)
+    return output_list
 
 
 class MainContextMenu(QMenu):
@@ -1345,6 +1379,8 @@ class MainContextMenu(QMenu):
 
 
 class MainWindow(QMainWindow):
+
+    signal_theme_change = pyqtSignal()
 
     def __init__(self, app: QApplication):
         super().__init__()
@@ -1443,6 +1479,7 @@ class MainWindow(QMainWindow):
         tray = QSystemTrayIcon()
         tray.setIcon(get_icon(ICON_JOUNO))
         tray.setContextMenu(app_context_menu)
+        self.signal_theme_change.connect(update_title_and_tray_indicators)
 
         def show_window():
             if self.isVisible():
@@ -1475,6 +1512,15 @@ class MainWindow(QMainWindow):
         if rc == 999:  # EXIT_CODE_FOR_RESTART:
             QProcess.startDetached(app.arguments()[0], app.arguments()[1:])
 
+    def event(self, event: 'QEvent') -> bool:
+        super().event(event)
+        #debug(event.type())
+        # ApplicationPaletteChange happens after the new style sheet is in use.
+        if event.type() == QEvent.ApplicationPaletteChange:
+            debug(f"ApplicationPaletteChange is_dark_theme() {is_dark_theme()}") if debugging else None
+            self.signal_theme_change.emit()
+        return True
+
 
 class JournalMainWindow(QMainWindow):
     """
@@ -1482,6 +1528,7 @@ class JournalMainWindow(QMainWindow):
     So I've taken over the undocking process and reparent the floating window onto
     this alternate main window.
     """
+
     def __init__(self, journal_widget: QDockWidget, top_main_window: QMainWindow):
         super().__init__(parent=top_main_window)
         self.journal_widget = journal_widget
@@ -1578,9 +1625,8 @@ class JournalPanel(QDockWidget):
         self.dock_button.pressed.connect(self.tmp_main_window.switch)
 
         self.setWindowTitle(tr("Recently notified"))
-        self.setStyleSheet("QDockWidget { font-size: 12pt;}")
         self.setTitleBarWidget(QWidget())
-        self.setMinimumHeight(parent.minimumHeight() * 3//8)
+        self.setMinimumHeight(parent.minimumHeight() * 3 // 8)
         layout.addWidget(self.table_view)
 
         def top_level_changed(top_level: bool):
@@ -1631,6 +1677,7 @@ class JournalPanel(QDockWidget):
     def set_max_journal_entries(self, max_entries: int) -> None:
         self.table_view.model().set_max_journal_entries(max_entries)
 
+
 class JournalTableView(QTableView):
 
     def __init__(self, journal_watcher_task: JournalWatcherTask, max_journal_entries: int):
@@ -1648,10 +1695,10 @@ class JournalTableView(QTableView):
         self.setColumnWidth(3, 5 * 14)
         self.horizontalHeader().setSectionResizeMode(4, QHeaderView.Stretch)
         self.horizontalHeader().setDefaultAlignment(Qt.AlignLeft)
-        self.horizontalHeader().setStyleSheet(TABLE_HEADER_STYLE)
         self.setItemDelegate(JournalEntryDelegate(self.model()))
         # Cannot use xor!
-        self.setEditTriggers(QAbstractItemView.AnyKeyPressed | QAbstractItemView.SelectedClicked | QAbstractItemView.CurrentChanged)
+        self.setEditTriggers(
+            QAbstractItemView.AnyKeyPressed | QAbstractItemView.SelectedClicked | QAbstractItemView.CurrentChanged)
         # self.setGridStyle(Qt.NoPen)
         self.setShowGrid(False)
         self.setIconSize(QSize(30, 30))
@@ -1766,7 +1813,7 @@ class JournalEntryDialogPlain(QDialog):
             QGuiApplication.clipboard().setText(text_view.toPlainText())
             floating_copy_button.clearFocus()
             floating_copy_button.setIconSize(QSize(50, 50) if floating_feedback_flip else QSize(48, 48))
-            floating_feedback_flip= not floating_feedback_flip
+            floating_feedback_flip = not floating_feedback_flip
             floating_copy_button.repaint()
 
         floating_feedback_flip = True
@@ -1827,7 +1874,8 @@ class DialogSingletonMixin:
         """Returns true if the dialog has already been created."""
         class_name = cls.__name__
         if DialogSingletonMixin.debug:
-            debug(f'SingletonDialog exists {class_name} {class_name in DialogSingletonMixin._dialogs_map}') if debugging else None
+            debug(
+                f'SingletonDialog exists {class_name} {class_name in DialogSingletonMixin._dialogs_map}') if debugging else None
         return class_name in DialogSingletonMixin._dialogs_map
 
 
