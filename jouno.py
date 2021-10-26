@@ -224,7 +224,7 @@ from typing import Mapping, Any, List, Type, Callable
 
 import dbus
 from PyQt5.QtCore import QCoreApplication, QProcess, Qt, pyqtSignal, QThread, QModelIndex, QItemSelectionModel, QSize, \
-    QEvent
+    QEvent, QSettings
 from PyQt5.QtGui import QPixmap, QIcon, QImage, QPainter, QCursor, QStandardItemModel, QStandardItem, QIntValidator, \
     QFontDatabase, QGuiApplication, QCloseEvent, QPalette
 from PyQt5.QtSvg import QSvgRenderer
@@ -232,7 +232,7 @@ from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QMessageBox, QLi
     QPushButton, QSystemTrayIcon, QMenu, QTextEdit, QDialog, QTabWidget, \
     QCheckBox, QGridLayout, QTableView, \
     QAbstractItemView, QHeaderView, QMainWindow, QSizePolicy, QStyledItemDelegate, QToolBar, QDockWidget, \
-    QHBoxLayout, QStyleFactory
+    QHBoxLayout, QStyleFactory, QDesktopWidget
 from systemd import journal
 
 JOUNO_VERSION = '0.9.6'
@@ -393,7 +393,8 @@ burst_truncate_messages = 3
 notification_seconds = 60
 journal_history_max = 100
 system_tray_enabled = yes
-debug_enabled = yes
+start_with_notifications_enabled = yes
+debug_enabled = no
 
 [ignore] 
 kwin_bad_damage = XCB error: 152 (BadDamage)
@@ -721,7 +722,7 @@ def is_dark_theme():
     text_hsv_value = label.palette().color(QPalette.WindowText).value()
     bg_hsv_value = label.palette().color(QPalette.Background).value()
     dark_theme_found = text_hsv_value > bg_hsv_value
-    #debug(f"is_dark_them text={text_hsv_value} bg={bg_hsv_value} is_dark={dark_theme_found}") if debugging else None
+    # debug(f"is_dark_them text={text_hsv_value} bg={bg_hsv_value} is_dark={dark_theme_found}") if debugging else None
     return dark_theme_found
 
 
@@ -1227,7 +1228,7 @@ class MainToolBar(QToolBar):
         self.run_action = self.addAction(self.icon_run_enabled, tr("Run"), run_func)
         self.run_action.setObjectName("run_button")
         self.run_action.setToolTip(tr("Start/stop monitoring the journal feed."))
-        #self.widgetForAction(self.run_action).setStyleSheet("QToolButton { width: 130px; }")
+        # self.widgetForAction(self.run_action).setStyleSheet("QToolButton { width: 130px; }")
 
         self.stop_action = self.addAction(self.icon_run_stop, tr("Stop"), run_func)
         self.stop_action.setToolTip(tr("Stop monitoring the journal feed."))
@@ -1236,7 +1237,7 @@ class MainToolBar(QToolBar):
 
         self.notifier_action = self.addAction(self.icon_notifier_enabled, "notify", notify_func)
         self.notifier_action.setToolTip(tr("Enable/disable desktop notifications."))
-        #self.widgetForAction(self.notifier_action).setStyleSheet("QToolButton { width: 130px; }")
+        # self.widgetForAction(self.notifier_action).setStyleSheet("QToolButton { width: 130px; }")
 
         self.addSeparator()
 
@@ -1298,12 +1299,12 @@ class MainToolBar(QToolBar):
         padded = pad_text([tr('Notifying'), tr('Mute')])
         if notifying:
             self.notifier_action.setIcon(self.icon_notifier_enabled)
-            #self.notifier_action.setIconText(tr("Notifying"))
+            # self.notifier_action.setIconText(tr("Notifying"))
             self.notifier_action.setIconText(padded[0])
         else:
             self.notifier_action.setIcon(self.icon_notifier_disabled)
             # Don't do this with a style sheet - style sheets will break dark/light theme loading.
-            #self.notifier_action.setIconText(tr("Mute   \u2002"))
+            # self.notifier_action.setIconText(tr("Mute   \u2002"))
             self.notifier_action.setIconText(padded[1])
 
     def configure_filter_actions(self, enable: bool) -> None:
@@ -1379,7 +1380,6 @@ class MainContextMenu(QMenu):
 
 
 class MainWindow(QMainWindow):
-
     signal_theme_change = pyqtSignal()
 
     def __init__(self, app: QApplication):
@@ -1396,8 +1396,13 @@ class MainWindow(QMainWindow):
         app.setWindowIcon(get_icon(ICON_JOUNO_LIGHT))
         app.setApplicationDisplayName(app_name)
         app.setApplicationVersion(JOUNO_VERSION)
+
         self.setMinimumWidth(1200)
         self.setMinimumHeight(1000)
+
+        # self.resize(QSize(
+        #    QDesktopWidget().availableGeometry(self).width() * 0.5,
+        #    QDesktopWidget().availableGeometry(self).height() * 0.7))
 
         def update_title_and_tray_indicators() -> None:
             if journal_watcher_task.isRunning():
@@ -1455,11 +1460,11 @@ class MainWindow(QMainWindow):
         def delete_filter() -> None:
             config_panel.delete_filter()
 
-        config_panel = ConfigPanel(tab_change=tab_change, config_change_func=config_change, parent=self)
+        self.config_panel = config_panel = ConfigPanel(tab_change=tab_change, config_change_func=config_change, parent=self)
 
         debugging = config_panel.get_config().getboolean('options', 'debug_enabled')
 
-        journal_panel = JournalPanel(
+        self.journal_panel = journal_panel = JournalPanel(
             journal_watcher_task=journal_watcher_task,
             max_journal_entries=config_panel.get_config().getint('options', 'journal_history_max'),
             parent=self)
@@ -1480,21 +1485,15 @@ class MainWindow(QMainWindow):
         tray.setIcon(get_icon(ICON_JOUNO))
         tray.setContextMenu(app_context_menu)
         self.signal_theme_change.connect(update_title_and_tray_indicators)
+        self.settings = QSettings('nz.gen.actrix.michael', 'jouno')
+        geometry = self.settings.value('geometry', None)
+        if geometry is not None:
+            self.restoreGeometry(geometry)
 
         def show_window():
             if self.isVisible():
                 self.hide()
             else:
-                # Use the mouse pos as a guess to where the system tray is.  The Linux Qt x,y geometry returned by
-                # the tray icon is 0,0, so we can't use that.
-                p = QCursor.pos()
-                wg = self.geometry()
-                # Also try to cope with the tray not being at the bottom right of the screen.
-                x = p.x() - wg.width() if p.x() > wg.width() else p.x()
-                y = p.y() - wg.height() if p.y() > wg.height() else p.y()
-                x -= 250
-                y -= 150
-                self.setGeometry(x, y, wg.width(), wg.height())
                 self.show()
                 # Attempt to force it to the top with raise and activate
                 self.raise_()
@@ -1505,8 +1504,9 @@ class MainWindow(QMainWindow):
             tray.setVisible(True)
         else:
             self.show()
+
         enable_listener(True)
-        enable_notifier(True)
+        enable_notifier(config_panel.get_config().getboolean('options', 'start_with_notifications_enabled'))
 
         rc = app.exec_()
         if rc == 999:  # EXIT_CODE_FOR_RESTART:
@@ -1514,12 +1514,16 @@ class MainWindow(QMainWindow):
 
     def event(self, event: 'QEvent') -> bool:
         super().event(event)
-        #debug(event.type())
+        # debug(event.type())
         # ApplicationPaletteChange happens after the new style sheet is in use.
         if event.type() == QEvent.ApplicationPaletteChange:
             debug(f"ApplicationPaletteChange is_dark_theme() {is_dark_theme()}") if debugging else None
             self.signal_theme_change.emit()
         return True
+
+    def closeEvent(self, event: QCloseEvent) -> None:
+        self.settings.setValue("geometry", self.saveGeometry())
+        super().closeEvent(event)
 
 
 class JournalMainWindow(QMainWindow):
@@ -1626,7 +1630,7 @@ class JournalPanel(QDockWidget):
 
         self.setWindowTitle(tr("Recently notified"))
         self.setTitleBarWidget(QWidget())
-        self.setMinimumHeight(parent.minimumHeight() * 3 // 8)
+        self.setMinimumHeight(int(parent.minimumHeight() * 0.4))
         layout.addWidget(self.table_view)
 
         def top_level_changed(top_level: bool):
