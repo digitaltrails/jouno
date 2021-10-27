@@ -1072,7 +1072,7 @@ class ConfigPanel(QWidget):
 
     def __init__(self, tab_change: Callable, config_change_func: Callable, parent: QWidget):
         super().__init__(parent=parent)
-
+        self.setObjectName('config_panel')
         layout = QVBoxLayout()
         self.setLayout(layout)
         tabs = QTabWidget()
@@ -1472,7 +1472,6 @@ class MainWindow(QMainWindow):
 
         self.setCentralWidget(config_panel)
 
-
         tool_bar = MainToolBar(
             run_func=toggle_listener, notify_func=toggle_notifier,
             add_func=add_filter, del_func=delete_filter,
@@ -1529,30 +1528,36 @@ class MainWindow(QMainWindow):
         super().closeEvent(event)
 
     def app_save_state(self):
-        for widget in [self.journal_window, self]:
+        for widget in [self.journal_window, self.journal_panel, self.config_panel, self]:
             geometry_key = 'geometry_' + widget.objectName()
             state_key = 'window_state_' + widget.objectName()
+            info(f"Saving {geometry_key} {self.config_panel.height()}")
             self.settings.setValue(geometry_key, widget.saveGeometry())
-            self.settings.setValue(state_key, widget.saveState())
+            if isinstance(widget, QMainWindow):
+                info(f"Saving {state_key}")
+                self.settings.setValue(state_key, widget.saveState())
         self.settings.setValue('journal_panel_in_main_dock', b'yes' if self.journal_panel.is_docked_to_main else b'no')
 
     def app_restore_state(self):
         dock_val = self.settings.value('journal_panel_in_main_dock', b'yes')
         debug("doc_val=", dock_val)
-        for widget in [self, self.journal_window]:
+        for widget in [self.config_panel, self.journal_panel, self.journal_window, self]:
             geometry_key = 'geometry_' + widget.objectName()
             state_key = 'window_state_' + widget.objectName()
             geometry = self.settings.value(geometry_key, None)
             if geometry is not None:
                 info(f"Restoring {geometry_key}")
                 widget.restoreGeometry(geometry)
-            window_state = self.settings.value(state_key, None)
-            if window_state is not None:
-                info(f"Restoring {state_key}")
-                self.restoreState(window_state)
+            if isinstance(widget, QMainWindow):
+                window_state = self.settings.value(state_key, None)
+                if window_state is not None:
+                    info(f"Restoring {state_key}")
+                    self.restoreState(window_state)
         if dock_val == b'yes':
+            info(f"Restoring journal to dock main")
             self.journal_panel.dock_main_window()
         else:
+            info(f"Restoring journal to dock journal")
             self.journal_panel.dock_journal_window()
 
 
