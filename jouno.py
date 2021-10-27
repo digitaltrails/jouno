@@ -1380,6 +1380,7 @@ class MainContextMenu(QMenu):
             self.notifier_action.setText(tr("Enable notifications"))
             self.notifier_action.setIcon(self.icon_notifier_enabled)
 
+
 class MainWindow(QMainWindow):
     signal_theme_change = pyqtSignal()
 
@@ -1387,6 +1388,7 @@ class MainWindow(QMainWindow):
         super().__init__()
 
         global debugging
+        self.setObjectName('main_window')
 
         journal_watcher_task = JournalWatcherTask()
         print(QStyleFactory.keys())
@@ -1485,17 +1487,7 @@ class MainWindow(QMainWindow):
         tray.setContextMenu(app_context_menu)
         self.signal_theme_change.connect(update_title_and_tray_indicators)
 
-        geometry = self.settings.value('geometry', None)
-        if geometry is not None:
-            info("Restoring geometry")
-            self.restoreGeometry(geometry)
-        window_state = self.settings.value('windowState', None)
-        if window_state is not None:
-            info("Restoring window state")
-            self.restoreState(window_state)
-            print(window_state)
-        else:
-            self.addDockWidget(Qt.DockWidgetArea.TopDockWidgetArea, journal_panel)
+
 
         def show_window():
             if self.isVisible():
@@ -1515,6 +1507,8 @@ class MainWindow(QMainWindow):
         enable_listener(True)
         enable_notifier(config_panel.get_config().getboolean('options', 'start_with_notifications_enabled'))
 
+        self.app_restore_state()
+
         rc = app.exec_()
         if rc == 999:  # EXIT_CODE_FOR_RESTART:
             QProcess.startDetached(app.arguments()[0], app.arguments()[1:])
@@ -1530,13 +1524,38 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event: QCloseEvent) -> None:
         info("closeEvent")
-        self.save_state()
+
+        self.app_save_state()
         super().closeEvent(event)
 
-    def save_state(self):
-        info("Saving geometry and window state.")
-        self.settings.setValue("geometry", self.saveGeometry())
-        self.settings.setValue("windowState", self.saveState());
+    def app_save_state(self):
+        for widget in [self.journal_window, self]:
+            geometry_key = 'geometry_' + widget.objectName()
+            state_key = 'window_state_' + widget.objectName()
+            self.settings.setValue(geometry_key, widget.saveGeometry())
+            self.settings.setValue(state_key, widget.saveState())
+        self.settings.setValue('journal_panel_in_main_dock', b'yes' if self.journal_panel.is_docked_to_main else b'no')
+
+    def app_restore_state(self):
+        dock_val = self.settings.value('journal_panel_in_main_dock', b'yes')
+        debug("doc_val=", dock_val)
+        if dock_val == b'yes':
+            self.journal_panel.dock_main_window()
+        else:
+            pass
+            self.journal_panel.dock_journal_window()
+        for widget in [self, self.journal_window]:
+            geometry_key = 'geometry_' + widget.objectName()
+            state_key = 'window_state_' + widget.objectName()
+            geometry = self.settings.value(geometry_key, None)
+            if geometry is not None:
+                info(f"Restoring {geometry_key}")
+                widget.restoreGeometry(geometry)
+            window_state = self.settings.value(state_key, None)
+            if window_state is not None:
+                info(f"Restoring {state_key}")
+                self.restoreState(window_state)
+
 
 
 class JournalPanel(QDockWidget):
@@ -1548,6 +1567,7 @@ class JournalPanel(QDockWidget):
 
         debug('JournalPanel','')
         self.setObjectName("journal-panel")
+        self.is_docked_to_main = None
 
         self.app_main_window = app_main_window
         self.journal_main_window = journal_main_window
@@ -1620,10 +1640,18 @@ class JournalPanel(QDockWidget):
 
         self.topLevelChanged.connect(top_level_changed)
 
-        if self.isHidden():
-            debug('Hidden')
-            self.dock_journal_window()
-            self.setVisible(True)
+        # if not self.is_docked_to_main:
+        #     debug('Hidden', self.parent())
+        #     self.dock_journal_window()
+        #     self.setVisible(True)
+        # else:
+        #     self.dock_main_window()
+
+        self.setVisible(True)
+        # if self.isHidden():
+        #     debug('Hidden')
+        #     self.dock_journal_window()
+        #     self.setVisible(True)
 
         debug("is floating", self.isFloating(), self.parent())
 
@@ -1699,6 +1727,7 @@ class JournalPanel(QDockWidget):
 
     def dock_main_window(self):
         debug('dock_main_window')
+        self.is_docked_to_main = True
         self.setFloating(True)
         self.journal_main_window.hide()
         self.dock_button.setIcon(get_icon(ICON_UNDOCK))
@@ -1710,13 +1739,13 @@ class JournalPanel(QDockWidget):
 
     def dock_journal_window(self):
         debug('dock_journal_window')
+        self.is_docked_to_main = False
         self.setFloating(True)
         self.dock_button.setIcon(get_icon(ICON_DOCK))
         self.journal_main_window.addDockWidget(Qt.DockWidgetArea.TopDockWidgetArea, self)
         self.setFloating(False)
         self.journal_main_window.show()
         self.journal_main_window.setFocus()
-
 
 
 class JournalMainWindow(QMainWindow):
@@ -1728,22 +1757,13 @@ class JournalMainWindow(QMainWindow):
 
     def __init__(self, app_main_window: MainWindow):
         super().__init__(parent=app_main_window)
+        self.setObjectName('journal_main_window')
         self.app_main_window = app_main_window
-        geometry = self.app_main_window.settings.value('journal.geometry', None)
-        if geometry is not None:
-            info("Restoring journal geometry")
-            self.restoreGeometry(geometry)
-        window_state = self.app_main_window.settings.value('journal.windowState', None)
-        if window_state is not None:
-            info("Restoring journal window state")
-            self.restoreState(window_state)
-            print(window_state)
+        debug("JournalMainWindow visible", self.isVisible())
 
     def closeEvent(self, close_event: QCloseEvent) -> None:
         close_event.ignore()
-        info("Saving journal geometry and window state.")
-        self.app_main_window.settings.setValue("journal.geometry", self.saveGeometry())
-        self.app_main_window.settings.setValue("journal.windowState", self.saveState());
+        self.hide()
         self.app_main_window.journal_panel.dock_main_window()
 
 
