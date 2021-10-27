@@ -1539,11 +1539,6 @@ class MainWindow(QMainWindow):
     def app_restore_state(self):
         dock_val = self.settings.value('journal_panel_in_main_dock', b'yes')
         debug("doc_val=", dock_val)
-        if dock_val == b'yes':
-            self.journal_panel.dock_main_window()
-        else:
-            pass
-            self.journal_panel.dock_journal_window()
         for widget in [self, self.journal_window]:
             geometry_key = 'geometry_' + widget.objectName()
             state_key = 'window_state_' + widget.objectName()
@@ -1555,7 +1550,10 @@ class MainWindow(QMainWindow):
             if window_state is not None:
                 info(f"Restoring {state_key}")
                 self.restoreState(window_state)
-
+        if dock_val == b'yes':
+            self.journal_panel.dock_main_window()
+        else:
+            self.journal_panel.dock_journal_window()
 
 
 class JournalPanel(QDockWidget):
