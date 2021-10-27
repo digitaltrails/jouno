@@ -226,7 +226,7 @@ import dbus
 from PyQt5.QtCore import QCoreApplication, QProcess, Qt, pyqtSignal, QThread, QModelIndex, QItemSelectionModel, QSize, \
     QEvent, QSettings
 from PyQt5.QtGui import QPixmap, QIcon, QImage, QPainter, QCursor, QStandardItemModel, QStandardItem, QIntValidator, \
-    QFontDatabase, QGuiApplication, QCloseEvent, QPalette
+    QFontDatabase, QGuiApplication, QCloseEvent, QPalette, QShowEvent
 from PyQt5.QtSvg import QSvgRenderer
 from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QMessageBox, QLineEdit, QLabel, \
     QPushButton, QSystemTrayIcon, QMenu, QTextEdit, QDialog, QTabWidget, \
@@ -910,7 +910,6 @@ class FilterTableView(QTableView):
         self.resizeColumnsToContents()
         self.setSelectionMode(QAbstractItemView.SingleSelection)
         self.setSelectionBehavior(QAbstractItemView.SelectRows)
-        # self.setItemDelegateForColumn(1, ColumnItemDelegate())
         self.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
         self.horizontalHeader().setDefaultAlignment(Qt.AlignLeft)
         self.setShowGrid(False)
@@ -1178,6 +1177,8 @@ class ConfigPanel(QWidget):
         layout.addWidget(tabs)
         layout.addWidget(button_box)
 
+        self.setMinimumHeight(280)
+
         tabs.currentChanged.connect(tab_change)
 
         reload_from_config()
@@ -1213,6 +1214,7 @@ class MainToolBar(QToolBar):
                  add_func: Callable, del_func: Callable,
                  parent: QMainWindow):
         super().__init__(parent=parent)
+        self.setObjectName("main-tool-bar")
         # main_tool_bar.setFixedHeight(80)
         self.setIconSize(QSize(32, 32))
         self.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
@@ -1378,7 +1380,6 @@ class MainContextMenu(QMenu):
             self.notifier_action.setText(tr("Enable notifications"))
             self.notifier_action.setIcon(self.icon_notifier_enabled)
 
-
 class MainWindow(QMainWindow):
     signal_theme_change = pyqtSignal()
 
@@ -1397,12 +1398,7 @@ class MainWindow(QMainWindow):
         app.setApplicationDisplayName(app_name)
         app.setApplicationVersion(JOUNO_VERSION)
 
-        self.setMinimumWidth(1200)
-        self.setMinimumHeight(1000)
-
-        # self.resize(QSize(
-        #    QDesktopWidget().availableGeometry(self).width() * 0.5,
-        #    QDesktopWidget().availableGeometry(self).height() * 0.7))
+        self.settings = QSettings('jouno.qt.state', 'jouno')
 
         def update_title_and_tray_indicators() -> None:
             if journal_watcher_task.isRunning():
@@ -1443,6 +1439,7 @@ class MainWindow(QMainWindow):
 
         def quit_app() -> None:
             journal_watcher_task.requestInterruption()
+            self.save_state()
             app.quit()
 
         def tab_change(tab_number) -> None:
@@ -1464,13 +1461,15 @@ class MainWindow(QMainWindow):
 
         debugging = config_panel.get_config().getboolean('options', 'debug_enabled')
 
+        self.journal_window = JournalMainWindow(app_main_window=self)
+
         self.journal_panel = journal_panel = JournalPanel(
             journal_watcher_task=journal_watcher_task,
             max_journal_entries=config_panel.get_config().getint('options', 'journal_history_max'),
-            parent=self)
+            app_main_window=self, journal_main_window=self.journal_window)
 
         self.setCentralWidget(config_panel)
-        self.addDockWidget(Qt.DockWidgetArea.TopDockWidgetArea, journal_panel)
+
 
         tool_bar = MainToolBar(
             run_func=toggle_listener, notify_func=toggle_notifier,
@@ -1485,10 +1484,18 @@ class MainWindow(QMainWindow):
         tray.setIcon(get_icon(ICON_JOUNO))
         tray.setContextMenu(app_context_menu)
         self.signal_theme_change.connect(update_title_and_tray_indicators)
-        self.settings = QSettings('nz.gen.actrix.michael', 'jouno')
+
         geometry = self.settings.value('geometry', None)
         if geometry is not None:
+            info("Restoring geometry")
             self.restoreGeometry(geometry)
+        window_state = self.settings.value('windowState', None)
+        if window_state is not None:
+            info("Restoring window state")
+            self.restoreState(window_state)
+            print(window_state)
+        else:
+            self.addDockWidget(Qt.DockWidgetArea.TopDockWidgetArea, journal_panel)
 
         def show_window():
             if self.isVisible():
@@ -1514,7 +1521,7 @@ class MainWindow(QMainWindow):
 
     def event(self, event: 'QEvent') -> bool:
         super().event(event)
-        # debug(event.type())
+        #debug(event.type())
         # ApplicationPaletteChange happens after the new style sheet is in use.
         if event.type() == QEvent.ApplicationPaletteChange:
             debug(f"ApplicationPaletteChange is_dark_theme() {is_dark_theme()}") if debugging else None
@@ -1522,55 +1529,31 @@ class MainWindow(QMainWindow):
         return True
 
     def closeEvent(self, event: QCloseEvent) -> None:
-        self.settings.setValue("geometry", self.saveGeometry())
+        info("closeEvent")
+        self.save_state()
         super().closeEvent(event)
 
-
-class JournalMainWindow(QMainWindow):
-    """
-    I wanted an undockable component, but one with normal window decorations.
-    So I've taken over the undocking process and reparent the floating window onto
-    this alternate main window.
-    """
-
-    def __init__(self, journal_widget: QDockWidget, top_main_window: QMainWindow):
-        super().__init__(parent=top_main_window)
-        self.journal_widget = journal_widget
-        self.top_main_window = top_main_window
-        self.setMinimumWidth(1100)
-        self.setMinimumHeight(800)
-
-    def switch(self):
-        if self.isVisible():
-            self.journal_widget.setFloating(True)
-            self.hide()
-            self.journal_widget.dock_button.setIcon(get_icon(ICON_UNDOCK))
-            self.top_main_window.addDockWidget(Qt.DockWidgetArea.TopDockWidgetArea, self.journal_widget)
-            self.journal_widget.setFloating(False)
-            self.top_main_window.setFocus()
-        else:
-            self.journal_widget.setFloating(True)
-            self.journal_widget.dock_button.setIcon(get_icon(ICON_DOCK))
-            self.addDockWidget(Qt.DockWidgetArea.TopDockWidgetArea, self.journal_widget)
-            g = self.top_main_window.geometry()
-            self.setGeometry(
-                g.x() + 10, g.y() + 10, self.journal_widget.width() + 10, self.journal_widget.height() + 10)
-            self.show()
-            self.setFocus()
-
-    def closeEvent(self, close_event: QCloseEvent) -> None:
-        self.switch()
-        close_event.ignore()
+    def save_state(self):
+        info("Saving geometry and window state.")
+        self.settings.setValue("geometry", self.saveGeometry())
+        self.settings.setValue("windowState", self.saveState());
 
 
 class JournalPanel(QDockWidget):
 
-    def __init__(self, journal_watcher_task: JournalWatcherTask, max_journal_entries: int, parent: QMainWindow):
-        super().__init__(parent=parent, flags=Qt.WindowFlags(Qt.WindowStaysOnTopHint))
+    def __init__(self, journal_watcher_task: JournalWatcherTask, max_journal_entries: int,
+                 app_main_window: QMainWindow,
+                 journal_main_window: QMainWindow):
+        super().__init__(parent=None, flags=Qt.WindowFlags(Qt.WindowStaysOnTopHint))
+
+        debug('JournalPanel','')
+        self.setObjectName("journal-panel")
+
+        self.app_main_window = app_main_window
+        self.journal_main_window = journal_main_window
 
         self.setFloating(False)
         self.setFeatures(QDockWidget.DockWidgetFloatable | QDockWidget.DockWidgetMovable)
-        self.tmp_main_window = JournalMainWindow(journal_widget=self, top_main_window=parent)
 
         self.table_view = JournalTableView(journal_watcher_task, max_journal_entries=max_journal_entries)
 
@@ -1626,17 +1609,41 @@ class JournalPanel(QDockWidget):
         layout.addWidget(title_container)
         self.setWidget(container)
 
-        self.dock_button.pressed.connect(self.tmp_main_window.switch)
+        self.dock_button.pressed.connect(self.switch_dock_state)
 
         self.setWindowTitle(tr("Recently notified"))
         self.setTitleBarWidget(QWidget())
-        self.setMinimumHeight(int(parent.minimumHeight() * 0.4))
         layout.addWidget(self.table_view)
 
         def top_level_changed(top_level: bool):
             pass
 
         self.topLevelChanged.connect(top_level_changed)
+
+        if self.isHidden():
+            debug('Hidden')
+            self.dock_journal_window()
+            self.setVisible(True)
+
+        debug("is floating", self.isFloating(), self.parent())
+
+
+    def event(self, event: QEvent) -> bool:
+        #print(event.type(), self.isFloating(), self.parent())
+        if event.type() == 21 and self.isFloating():
+            print(self.parent())
+            # self.setFloating(True)
+            # self.parent().removeDockWidget(self)
+            # self.tmp_main_window.addDockWidget(Qt.DockWidgetArea.TopDockWidgetArea, self)
+            # self.tmp_main_window.show()
+        return super().event(event)
+
+    # def showEvent(self, a0: QShowEvent) -> None:
+    #     debug("is floating", self.isFloating())
+    #     if self.isFloating():
+    #         debug("is floating2", self.isFloating())
+    #         #self.tmp_main_window.addDockWidget(Qt.DockWidgetArea.TopDockWidgetArea, self)
+    #         #self.tmp_main_window.show()
 
     def get_selected_journal_entry(self):
         indexes = self.table_view.selectedIndexes()
@@ -1681,6 +1688,64 @@ class JournalPanel(QDockWidget):
     def set_max_journal_entries(self, max_entries: int) -> None:
         self.table_view.model().set_max_journal_entries(max_entries)
 
+    def switch_dock_state(self):
+        # Switch between docked and undocked - use the system window manager.
+        if self.parent() == self.journal_main_window:
+            self.setParent(self.app_main_window)
+            self.dock_main_window()
+        else:
+            self.setParent(self.journal_main_window)
+            self.dock_journal_window()
+
+    def dock_main_window(self):
+        debug('dock_main_window')
+        self.setFloating(True)
+        self.journal_main_window.hide()
+        self.dock_button.setIcon(get_icon(ICON_UNDOCK))
+        self.app_main_window.addDockWidget(Qt.DockWidgetArea.TopDockWidgetArea, self)
+        self.setFloating(False)
+        self.app_main_window.setFocus()
+        if self.journal_main_window.isVisible():
+            self.journal_main_window.hide()
+
+    def dock_journal_window(self):
+        debug('dock_journal_window')
+        self.setFloating(True)
+        self.dock_button.setIcon(get_icon(ICON_DOCK))
+        self.journal_main_window.addDockWidget(Qt.DockWidgetArea.TopDockWidgetArea, self)
+        self.setFloating(False)
+        self.journal_main_window.show()
+        self.journal_main_window.setFocus()
+
+
+
+class JournalMainWindow(QMainWindow):
+    """
+    I wanted an undockable component, but one with normal window decorations.
+    So I've taken over the undocking process and reparent the floating window onto
+    this alternate main window.
+    """
+
+    def __init__(self, app_main_window: MainWindow):
+        super().__init__(parent=app_main_window)
+        self.app_main_window = app_main_window
+        geometry = self.app_main_window.settings.value('journal.geometry', None)
+        if geometry is not None:
+            info("Restoring journal geometry")
+            self.restoreGeometry(geometry)
+        window_state = self.app_main_window.settings.value('journal.windowState', None)
+        if window_state is not None:
+            info("Restoring journal window state")
+            self.restoreState(window_state)
+            print(window_state)
+
+    def closeEvent(self, close_event: QCloseEvent) -> None:
+        close_event.ignore()
+        info("Saving journal geometry and window state.")
+        self.app_main_window.settings.setValue("journal.geometry", self.saveGeometry())
+        self.app_main_window.settings.setValue("journal.windowState", self.saveState());
+        self.app_main_window.journal_panel.dock_main_window()
+
 
 class JournalTableView(QTableView):
 
@@ -1703,7 +1768,6 @@ class JournalTableView(QTableView):
         # Cannot use xor!
         self.setEditTriggers(
             QAbstractItemView.AnyKeyPressed | QAbstractItemView.SelectedClicked | QAbstractItemView.CurrentChanged)
-        # self.setGridStyle(Qt.NoPen)
         self.setShowGrid(False)
         self.setIconSize(QSize(30, 30))
 
