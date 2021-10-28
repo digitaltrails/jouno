@@ -1323,7 +1323,7 @@ def pad_text(text_list: List[str]):
         tmp.adjustSize()
         width = tmp.fontMetrics().boundingRect(tmp.text()).width()
         if width > max_width:
-            debug(f"text='{text}' New max='{width}'")
+            #debug(f"text='{text}' New max='{width}'")
             max_width = width
         width_list.append(width)
     for text, width in zip(text_list, width_list):
@@ -1335,7 +1335,7 @@ def pad_text(text_list: List[str]):
                 spaced_width = tmp2.fontMetrics().boundingRect(tmp2.text()).width()
                 if spaced_width > max_width:
                     break
-                debug(f"text='{text}' w={spaced_width} max={max_width}")
+                #debug(f"text='{text}' w={spaced_width} max={max_width}")
                 text = spaced
         output_list.append(text)
     return output_list
@@ -1391,7 +1391,7 @@ class MainWindow(QMainWindow):
         self.setObjectName('main_window')
 
         journal_watcher_task = JournalWatcherTask()
-        print(QStyleFactory.keys())
+        debug('QStyleFactory.keys()=', QStyleFactory.keys())
         info(f"Icon theme path={QIcon.themeSearchPaths()}")
         info(f"Icon theme '{QIcon.themeName()}' >> is_dark_theme()={is_dark_theme()}")
 
@@ -1441,7 +1441,7 @@ class MainWindow(QMainWindow):
 
         def quit_app() -> None:
             journal_watcher_task.requestInterruption()
-            self.save_state()
+            self.app_save_state()
             app.quit()
 
         def tab_change(tab_number) -> None:
@@ -1451,6 +1451,12 @@ class MainWindow(QMainWindow):
             journal_panel.set_max_journal_entries(config_panel.get_config().getint('options', 'journal_history_max'))
             global debugging
             debugging = config_panel.get_config().getboolean('options', 'debug_enabled')
+            if config_panel.get_config().getboolean('options', 'system_tray_enabled'):
+                if not tray.isVisible():
+                    tray.setVisible(True)
+            else:
+                if tray.isVisible():
+                    tray.setVisible(False)
 
         def add_filter() -> None:
             journal_entry = journal_panel.get_selected_journal_entry()
@@ -1486,19 +1492,8 @@ class MainWindow(QMainWindow):
         tray.setContextMenu(app_context_menu)
         self.signal_theme_change.connect(update_title_and_tray_indicators)
 
-
-
-        def show_window():
-            if self.isVisible():
-                self.hide()
-            else:
-                self.show()
-                # Attempt to force it to the top with raise and activate
-                self.raise_()
-                self.activateWindow()
-
+        tray.activated.connect(self.tray_activate_window)
         if config_panel.get_config().getboolean('options', 'system_tray_enabled'):
-            tray.activated.connect(show_window)
             tray.setVisible(True)
         else:
             self.show()
@@ -1514,8 +1509,7 @@ class MainWindow(QMainWindow):
 
     def event(self, event: 'QEvent') -> bool:
         super().event(event)
-        #debug(event.type())
-        # ApplicationPaletteChange happens after the new style sheet is in use.
+        # ApplicationPaletteChange happens after the new style theme is in use.
         if event.type() == QEvent.ApplicationPaletteChange:
             debug(f"ApplicationPaletteChange is_dark_theme() {is_dark_theme()}") if debugging else None
             self.signal_theme_change.emit()
@@ -1523,42 +1517,63 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event: QCloseEvent) -> None:
         info("closeEvent")
-
-        self.app_save_state()
+        if self.config_panel.get_config().getboolean('options', 'system_tray_enabled'):
+            self.tray_activate_window()
+        else:
+            self.app_save_state()
         super().closeEvent(event)
+
+    def tray_activate_window(self):
+        if self.isVisible():
+            debug("tray_activate_window hide")
+            self.hide()
+            if not self.journal_panel.is_docked_to_main:
+                debug("Hide journal window too")
+                self.journal_window.hide()
+        else:
+            debug("tray_activate_window show")
+            self.show()
+            # Attempt to force it to the top with raise and activate
+            self.raise_()
+            self.activateWindow()
+            if not self.journal_panel.is_docked_to_main:
+                self.journal_window.show()
+                self.journal_window.raise_()
+                self.journal_window.activateWindow()
 
     def app_save_state(self):
         for widget in [self.journal_window, self.journal_panel, self.config_panel, self]:
             geometry_key = 'geometry_' + widget.objectName()
             state_key = 'window_state_' + widget.objectName()
-            info(f"Saving {geometry_key} {self.config_panel.height()}")
+            debug(f"Saving {geometry_key} {self.config_panel.height()}")
             self.settings.setValue(geometry_key, widget.saveGeometry())
             if isinstance(widget, QMainWindow):
-                info(f"Saving {state_key}")
+                debug(f"Saving {state_key}")
                 self.settings.setValue(state_key, widget.saveState())
         self.settings.setValue('journal_panel_in_main_dock', b'yes' if self.journal_panel.is_docked_to_main else b'no')
 
     def app_restore_state(self):
         dock_val = self.settings.value('journal_panel_in_main_dock', b'yes')
-        debug("doc_val=", dock_val)
+        debug("journal_panel_in_main_dock=", dock_val)
         for widget in [self.config_panel, self.journal_panel, self.journal_window, self]:
             geometry_key = 'geometry_' + widget.objectName()
             state_key = 'window_state_' + widget.objectName()
             geometry = self.settings.value(geometry_key, None)
             if geometry is not None:
-                info(f"Restoring {geometry_key}")
+                debug(f"Restoring {geometry_key}")
                 widget.restoreGeometry(geometry)
             if isinstance(widget, QMainWindow):
                 window_state = self.settings.value(state_key, None)
                 if window_state is not None:
-                    info(f"Restoring {state_key}")
+                    debug(f"Restoring {state_key}")
                     self.restoreState(window_state)
         if dock_val == b'yes':
-            info(f"Restoring journal to dock main")
+            debug(f"Restoring journal to dock main window")
             self.journal_panel.dock_main_window()
         else:
-            info(f"Restoring journal to dock journal")
-            self.journal_panel.dock_journal_window()
+            debug(f"Restoring journal to dock journal window")
+            self.journal_panel.dock_journal_window(
+                show=not self.config_panel.get_config().getboolean('options', 'system_tray_enabled'))
 
 
 class JournalPanel(QDockWidget):
@@ -1642,39 +1657,7 @@ class JournalPanel(QDockWidget):
             pass
 
         self.topLevelChanged.connect(top_level_changed)
-
-        # if not self.is_docked_to_main:
-        #     debug('Hidden', self.parent())
-        #     self.dock_journal_window()
-        #     self.setVisible(True)
-        # else:
-        #     self.dock_main_window()
-
         self.setVisible(True)
-        # if self.isHidden():
-        #     debug('Hidden')
-        #     self.dock_journal_window()
-        #     self.setVisible(True)
-
-        debug("is floating", self.isFloating(), self.parent())
-
-
-    def event(self, event: QEvent) -> bool:
-        #print(event.type(), self.isFloating(), self.parent())
-        if event.type() == 21 and self.isFloating():
-            print(self.parent())
-            # self.setFloating(True)
-            # self.parent().removeDockWidget(self)
-            # self.tmp_main_window.addDockWidget(Qt.DockWidgetArea.TopDockWidgetArea, self)
-            # self.tmp_main_window.show()
-        return super().event(event)
-
-    # def showEvent(self, a0: QShowEvent) -> None:
-    #     debug("is floating", self.isFloating())
-    #     if self.isFloating():
-    #         debug("is floating2", self.isFloating())
-    #         #self.tmp_main_window.addDockWidget(Qt.DockWidgetArea.TopDockWidgetArea, self)
-    #         #self.tmp_main_window.show()
 
     def get_selected_journal_entry(self):
         indexes = self.table_view.selectedIndexes()
@@ -1740,15 +1723,16 @@ class JournalPanel(QDockWidget):
         if self.journal_main_window.isVisible():
             self.journal_main_window.hide()
 
-    def dock_journal_window(self):
+    def dock_journal_window(self, show: bool = True):
         debug('dock_journal_window')
         self.is_docked_to_main = False
         self.setFloating(True)
         self.dock_button.setIcon(get_icon(ICON_DOCK))
         self.journal_main_window.addDockWidget(Qt.DockWidgetArea.TopDockWidgetArea, self)
         self.setFloating(False)
-        self.journal_main_window.show()
-        self.journal_main_window.setFocus()
+        if show:
+            self.journal_main_window.show()
+            self.journal_main_window.setFocus()
 
 
 class JournalMainWindow(QMainWindow):
