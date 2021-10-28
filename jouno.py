@@ -1501,6 +1501,13 @@ class MainWindow(QMainWindow):
         enable_listener(True)
         enable_notifier(config_panel.get_config().getboolean('options', 'start_with_notifications_enabled'))
 
+        if len(self.settings.allKeys()) == 0:
+            # First run or qt settings have been erased - guess at sizes and locations
+            rec = QApplication.desktop().screenGeometry()
+            x = int(rec.width())
+            y = int(rec.height())
+            self.setGeometry(x//2 - 100, y//3, x//3, y//2)
+            self.journal_window.setGeometry(x//2 - 150 - x//3, y // 3, x // 3, y // 2)
         self.app_restore_state()
 
         rc = app.exec_()
