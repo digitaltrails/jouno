@@ -232,7 +232,7 @@ from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QMessageBox, QLi
     QPushButton, QSystemTrayIcon, QMenu, QTextEdit, QDialog, QTabWidget, \
     QCheckBox, QGridLayout, QTableView, \
     QAbstractItemView, QHeaderView, QMainWindow, QSizePolicy, QStyledItemDelegate, QToolBar, QDockWidget, \
-    QHBoxLayout, QStyleFactory, QDesktopWidget
+    QHBoxLayout, QStyleFactory, QDesktopWidget, QToolButton
 from systemd import journal
 
 JOUNO_VERSION = '0.9.6'
@@ -244,6 +244,7 @@ JOUNO_VERSION = '0.9.6'
 # The load_icon() function dynamically figures out which so we can
 # switch from one source to another without editing the code proper
 # TODO: consider moving the icon definitions to a file read at startup.
+
 ICON_HELP_ABOUT = "help-about"
 ICON_HELP_CONTENTS = "help-contents"
 ICON_APPLICATION_EXIT = "application-exit"
@@ -352,6 +353,22 @@ ICON_TOOLBAR_DEL_FILTER = b"""
     </defs>
     <path id="path4" class="ColorScheme-Text" d="m5 3-1 1v1.3046875l5 7.0625005v3.671872l3 2.226563v-1.246092l-2-1.484375v-3.535156h-0.035156l-4.964844-7.0117188v-0.9882812h12v0.9882812l-4.964844 7.0117188h1.22461l4.740234-6.6953125v-1.3046875l-1-1zm1 2 2 3v-2l2-1z" fill="currentColor"/>
     <path id="path6" d="M 13.990234,13 13,13.990234 15.009766,16 13,18.009766 13.990234,19 16,16.990234 18.009766,19 19,18.009766 16.990234,16 19,13.990234 18.009766,13 16,15.009766 Z" fill="#da4453"/>
+</svg>
+"""
+
+ICON_TOOLBAR_HAMBURGER_MENU = b"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 22 22">
+  <defs id="defs3051">
+    <style type="text/css" id="current-color-scheme">
+      .ColorScheme-Text {
+        color:#232629;
+      }
+      </style>
+  </defs>
+ <path 
+     style="fill:currentColor;fill-opacity:1;stroke:none" 
+	d="m3 5v2h16v-2h-16m0 5v2h16v-2h-16m0 5v2h16v-2h-16"
+	 class="ColorScheme-Text"
+     />
 </svg>
 """
 
@@ -1212,6 +1229,7 @@ class MainToolBar(QToolBar):
     def __init__(self,
                  run_func: Callable, notify_func: Callable,
                  add_func: Callable, del_func: Callable,
+                 menu: QMenu,
                  parent: QMainWindow):
         super().__init__(parent=parent)
         self.setObjectName("main-tool-bar")
@@ -1226,6 +1244,7 @@ class MainToolBar(QToolBar):
         self.icon_run_stop = get_icon(ICON_TOOLBAR_STOP)
         self.icon_add_filter = get_icon(ICON_TOOLBAR_ADD_FILTER)
         self.icon_del_filter = get_icon(ICON_TOOLBAR_DEL_FILTER)
+        self.icon_menu = get_icon(ICON_TOOLBAR_HAMBURGER_MENU)
 
         self.run_action = self.addAction(self.icon_run_enabled, tr("Run"), run_func)
         self.run_action.setObjectName("run_button")
@@ -1262,6 +1281,11 @@ class MainToolBar(QToolBar):
         self.addWidget(spacer)
         self.addAction(get_icon(ICON_HELP_CONTENTS), tr('Help'), HelpDialog.invoke)
         self.addAction(get_icon(ICON_HELP_ABOUT), tr('About'), AboutDialog.invoke)
+        self.menu_button = QToolButton(self)
+        self.menu_button.setIcon(self.icon_menu)
+        self.menu_button.setMenu(menu)
+        self.menu_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.addWidget(self.menu_button)
         self.installEventFilter(self)
         # parent.toolButtonStyleChanged.connect(style_changed)
 
@@ -1273,6 +1297,7 @@ class MainToolBar(QToolBar):
         self.icon_run_stop = get_icon(ICON_TOOLBAR_STOP)
         self.icon_add_filter = get_icon(ICON_TOOLBAR_ADD_FILTER)
         self.icon_del_filter = get_icon(ICON_TOOLBAR_DEL_FILTER)
+        self.icon_menu = get_icon(ICON_TOOLBAR_HAMBURGER_MENU)
 
     def eventFilter(self, target: 'QObject', event: 'QEvent') -> bool:
         super().eventFilter(target, event)
@@ -1283,6 +1308,7 @@ class MainToolBar(QToolBar):
             self.stop_action.setIcon(self.icon_run_stop)
             self.add_filter_action.setIcon(self.icon_add_filter)
             self.del_filter_action.setIcon(self.icon_del_filter)
+            self.menu_button.setIcon(self.icon_menu)
         event.accept()
         return True
 
@@ -1478,14 +1504,15 @@ class MainWindow(QMainWindow):
 
         self.setCentralWidget(config_panel)
 
+        app_context_menu = MainContextMenu(
+            run_func=toggle_listener, notify_func=toggle_notifier, quit_func=quit_app, parent=self)
+
         tool_bar = MainToolBar(
             run_func=toggle_listener, notify_func=toggle_notifier,
             add_func=add_filter, del_func=delete_filter,
+            menu=app_context_menu,
             parent=self)
         self.addToolBar(tool_bar)
-
-        app_context_menu = MainContextMenu(
-            run_func=toggle_listener, notify_func=toggle_notifier, quit_func=quit_app, parent=self)
 
         tray = QSystemTrayIcon()
         tray.setIcon(get_icon(ICON_JOUNO))
@@ -1998,7 +2025,7 @@ class HelpDialog(QDialog, DialogSingletonMixin):
         markdown_view.setMarkdown(__doc__)
         layout.addWidget(markdown_view)
         self.setLayout(layout)
-        # TODO maybe compute a minimum from the actual screen size
+        # TODO maybe compute a minimum from the actual screen size or use geometry
         self.setMinimumWidth(1400)
         self.setMinimumHeight(1000)
         # .show() is non-modal, .exec() is modal
