@@ -235,7 +235,7 @@ from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QMessageBox, QLi
     QHBoxLayout, QStyleFactory, QDesktopWidget, QToolButton
 from systemd import journal
 
-JOUNO_VERSION = '0.9.6'
+JOUNO_VERSION = '0.9.7'
 
 # The icons can either be:
 #   1) str: named icons from the freedesktop theme which should all be available on most Linux desktops.
@@ -1084,14 +1084,50 @@ class JournalWatcherTask(QThread):
     def new_journal_entry(self, journal_entry: Mapping):
         self.signal_new_entry.emit(journal_entry)
 
+class ConfigMainWindow(QMainWindow):
+    """
+    I wanted an undockable component, but one with normal window decorations.
+    So I've taken over the undocking process and reparent the floating window onto
+    this alternate main window.
+    """
 
-class ConfigPanel(QWidget):
+    def __init__(self, app_main_window: 'MainWindow'):
+        super().__init__(parent=app_main_window)
+        self.setObjectName('config_main_window')
+        self.app_main_window = app_main_window
+        debug("ConfigMainWindow visible", self.isVisible())
 
-    def __init__(self, tab_change: Callable, config_change_func: Callable, parent: QWidget):
-        super().__init__(parent=parent)
-        self.setObjectName('config_panel')
+    def closeEvent(self, close_event: QCloseEvent) -> None:
+        close_event.ignore()
+        self.hide()
+        self.app_main_window.config_panel.dock_main_window()
+
+class ConfigPanel(QDockWidget):
+
+    def __init__(self, tab_change: Callable, config_change_func: Callable, app_main_window: QMainWindow, config_main_window: QMainWindow):
+        super().__init__(parent=None, flags=Qt.WindowFlags(Qt.WindowStaysOnTopHint))
+        self.setObjectName('config-panel')
+        self.is_docked_to_main = None
+
+        self.app_main_window = app_main_window
+        self.config_main_window = config_main_window
+
+        self.setFloating(False)
+        self.setFeatures(QDockWidget.DockWidgetFloatable | QDockWidget.DockWidgetMovable)
+
+        container = QWidget(self)
         layout = QVBoxLayout()
-        self.setLayout(layout)
+        container.setLayout(layout)
+
+        title_container = QWidget(self)
+        title_layout = QHBoxLayout()
+        title_container.setLayout(title_layout)
+        title_label = big_label(QLabel(tr("Configuration")))
+        title_layout.addWidget(title_label)
+        spacer = QWidget()
+        spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        title_layout.addWidget(spacer)
+
         tabs = QTabWidget()
         self.tabs = tabs
 
@@ -1103,12 +1139,12 @@ class ConfigPanel(QWidget):
         match_panel = FilterPanel(
             self.config['match'],
             tooltip=tr("Only issue notifications for journal-entry messages that match one of these rules."),
-            parent=parent)
+            parent=self)
 
         ignore_panel = FilterPanel(
             self.config['ignore'],
             tooltip=tr("Ignore journal-entry messages that match any of these rules."),
-            parent=parent)
+            parent=self)
 
         button_box = QWidget()
         button_box_layout = QGridLayout()
@@ -1190,15 +1226,24 @@ class ConfigPanel(QWidget):
         tabs.addTab(options_panel, tr("Options"))
         tabs.setCurrentIndex(0)
 
-        layout.addWidget(big_label(QLabel("Configuration")))
+        self.dock_button = transparent_button(QPushButton(get_icon(ICON_UNDOCK), '', self))
+        self.dock_button.setToolTip(tr("Dock/undock the Configuration panel"))
+        self.dock_button.pressed.connect(self.switch_dock_state)
+        title_layout.addWidget(self.dock_button)
+        layout.addWidget(title_container)
+
         layout.addWidget(tabs)
         layout.addWidget(button_box)
 
-        self.setMinimumHeight(280)
+        self.setWidget(container)
 
         tabs.currentChanged.connect(tab_change)
 
+        self.setWindowTitle(tr("Configuration"))
+        self.setTitleBarWidget(QWidget())
+
         reload_from_config()
+
         self.config_watcher = ConfigWatcherTask(self.config)
 
         def config_change():
@@ -1207,6 +1252,8 @@ class ConfigPanel(QWidget):
 
         self.config_watcher.signal_config_change.connect(config_change)
         self.config_watcher.start()
+
+        self.setVisible(True)
 
     def add_filter(self, rule_id, pattern) -> None:
         if isinstance(self.tabs.currentWidget(), FilterPanel):
@@ -1222,6 +1269,39 @@ class ConfigPanel(QWidget):
 
     def get_config(self) -> Config:
         return self.config
+
+    def switch_dock_state(self):
+        # Switch between docked and undocked - use the system window manager.
+        if self.parent() == self.config_main_window:
+            self.setParent(self.app_main_window)
+            self.dock_main_window()
+        else:
+            self.setParent(self.config_main_window)
+            self.dock_config_window()
+
+    def dock_main_window(self):
+        debug('dock_main_window')
+        self.is_docked_to_main = True
+        self.setFloating(True)
+        self.config_main_window.hide()
+        self.dock_button.setIcon(get_icon(ICON_UNDOCK))
+        self.app_main_window.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self)
+        self.setFloating(False)
+        self.app_main_window.setFocus()
+        if self.config_main_window.isVisible():
+            self.config_main_window.hide()
+
+    def dock_config_window(self, show: bool = True):
+        debug('dock_config_window')
+        self.is_docked_to_main = False
+        self.setFloating(True)
+        self.dock_button.setIcon(get_icon(ICON_DOCK))
+        self.config_main_window.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self)
+        self.setFloating(False)
+        if show:
+            self.config_main_window.show()
+            self.config_main_window.setFocus()
+
 
 
 class MainToolBar(QToolBar):
@@ -1491,7 +1571,13 @@ class MainWindow(QMainWindow):
         def delete_filter() -> None:
             config_panel.delete_filter()
 
-        self.config_panel = config_panel = ConfigPanel(tab_change=tab_change, config_change_func=config_change, parent=self)
+        self.config_window = ConfigMainWindow(app_main_window=self)
+
+        self.config_panel = config_panel = ConfigPanel(
+            tab_change=tab_change,
+            config_change_func=config_change,
+            app_main_window=self,
+            config_main_window=self.config_window)
 
         debugging = config_panel.get_config().getboolean('options', 'debug_enabled')
 
@@ -1502,7 +1588,7 @@ class MainWindow(QMainWindow):
             max_journal_entries=config_panel.get_config().getint('options', 'journal_history_max'),
             app_main_window=self, journal_main_window=self.journal_window)
 
-        self.setCentralWidget(config_panel)
+        #self.setCentralWidget(config_panel)
 
         app_context_menu = MainContextMenu(
             run_func=toggle_listener, notify_func=toggle_notifier, quit_func=quit_app, parent=self)
@@ -1534,7 +1620,8 @@ class MainWindow(QMainWindow):
             x = int(rec.width())
             y = int(rec.height())
             self.setGeometry(x//2 - 100, y//3, x//3, y//2)
-            self.journal_window.setGeometry(x//2 - 150 - x//3, y // 3, x // 3, y // 2)
+            self.journal_window.setGeometry(x // 2 - 150 - x // 3, y // 3, x // 3, y // 2)
+            self.config_window.setGeometry(x // 2 - 150 - 2 * x // 3, y // 3, x // 3, y // 2)
         self.app_restore_state()
 
         rc = app.exec_()
@@ -1574,9 +1661,13 @@ class MainWindow(QMainWindow):
                 self.journal_window.show()
                 self.journal_window.raise_()
                 self.journal_window.activateWindow()
+            if not self.config_panel.is_docked_to_main:
+                self.config_window.show()
+                self.config_window.raise_()
+                self.config_window.activateWindow()
 
     def app_save_state(self):
-        for widget in [self.journal_window, self.journal_panel, self.config_panel, self]:
+        for widget in [self.journal_window, self.config_window, self.journal_panel, self.config_panel, self]:
             geometry_key = 'geometry_' + widget.objectName()
             state_key = 'window_state_' + widget.objectName()
             debug(f"Saving {geometry_key} {self.config_panel.height()}")
@@ -1585,11 +1676,13 @@ class MainWindow(QMainWindow):
                 debug(f"Saving {state_key}")
                 self.settings.setValue(state_key, widget.saveState())
         self.settings.setValue('journal_panel_in_main_dock', b'yes' if self.journal_panel.is_docked_to_main else b'no')
+        self.settings.setValue('config_panel_in_main_dock', b'yes' if self.config_panel.is_docked_to_main else b'no')
 
     def app_restore_state(self):
         dock_val = self.settings.value('journal_panel_in_main_dock', b'yes')
+        config_dock_val = self.settings.value('config_panel_in_main_dock', b'yes')
         debug("journal_panel_in_main_dock=", dock_val)
-        for widget in [self.config_panel, self.journal_panel, self.journal_window, self]:
+        for widget in [self.config_panel, self.journal_panel, self.config_window,  self.journal_window, self]:
             geometry_key = 'geometry_' + widget.objectName()
             state_key = 'window_state_' + widget.objectName()
             geometry = self.settings.value(geometry_key, None)
@@ -1607,6 +1700,13 @@ class MainWindow(QMainWindow):
         else:
             debug(f"Restoring journal to dock journal window")
             self.journal_panel.dock_journal_window(
+                show=not self.config_panel.get_config().getboolean('options', 'system_tray_enabled'))
+        if config_dock_val == b'yes':
+            debug(f"Restoring config to dock main window")
+            self.config_panel.dock_main_window()
+        else:
+            debug(f"Restoring config to dock config window")
+            self.config_panel.dock_config_window(
                 show=not self.config_panel.get_config().getboolean('options', 'system_tray_enabled'))
 
 
@@ -1633,12 +1733,12 @@ class JournalPanel(QDockWidget):
         container = QWidget(self)
         layout = QVBoxLayout()
         container.setLayout(layout)
+
         title_container = QWidget(self)
         title_layout = QHBoxLayout()
         title_container.setLayout(title_layout)
         title_label = big_label(QLabel(tr("Recently notified")))
         title_layout.addWidget(title_label)
-
         spacer = QWidget()
         spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         title_layout.addWidget(spacer)
@@ -1677,20 +1777,16 @@ class JournalPanel(QDockWidget):
 
         self.dock_button = transparent_button(QPushButton(get_icon(ICON_UNDOCK), '', self))
         self.dock_button.setToolTip(tr("Dock/undock the Recently Notified panel"))
+        self.dock_button.pressed.connect(self.switch_dock_state)
         title_layout.addWidget(self.dock_button)
         layout.addWidget(title_container)
-        self.setWidget(container)
 
-        self.dock_button.pressed.connect(self.switch_dock_state)
+        self.setWidget(container)
 
         self.setWindowTitle(tr("Recently notified"))
         self.setTitleBarWidget(QWidget())
         layout.addWidget(self.table_view)
 
-        def top_level_changed(top_level: bool):
-            pass
-
-        self.topLevelChanged.connect(top_level_changed)
         self.setVisible(True)
 
     def get_selected_journal_entry(self):
