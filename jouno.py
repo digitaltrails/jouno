@@ -232,7 +232,7 @@ from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QMessageBox, QLi
     QPushButton, QSystemTrayIcon, QMenu, QTextEdit, QDialog, QTabWidget, \
     QCheckBox, QGridLayout, QTableView, \
     QAbstractItemView, QHeaderView, QMainWindow, QSizePolicy, QStyledItemDelegate, QToolBar, QDockWidget, \
-    QHBoxLayout, QStyleFactory, QDesktopWidget, QToolButton
+    QHBoxLayout, QStyleFactory, QDesktopWidget, QToolButton, QScrollArea, QLayout
 from systemd import journal
 
 JOUNO_VERSION = '0.9.7'
@@ -811,6 +811,9 @@ class OptionsTab(QWidget):
     def __init__(self, config_section: Mapping[str, str], parent: QWidget = None):
         super().__init__(parent=parent)
         self.option_map: Mapping[str, QWidget] = {}
+        scroll_area = QScrollArea(self)
+        container = QWidget(self)
+
         layout = QGridLayout(self)
         row_number = 0
         for option_id, value in config_section.items():
@@ -835,7 +838,12 @@ class OptionsTab(QWidget):
             row_number += 1
         # Add a spacer to force those above to scrunch up.
         layout.addWidget(QWidget(), row_number, 1, 2, 2, alignment=Qt.AlignLeft)
-        self.setLayout(layout)
+        layout.setColumnStretch(2,10)
+        layout.setSizeConstraint(QLayout.SizeConstraint.SetMaximumSize)
+        container.setLayout(layout)
+        scroll_area.setWidget(container)
+        scroll_area.setWidgetResizable(True)
+        scroll_area.adjustSize()
 
     def copy_from_config(self, config_section: Mapping[str, str]):
         for option_id, widget in self.option_map.items():
@@ -1129,7 +1137,7 @@ class DockContainer(QDockWidget):
         self.setObjectName(dockable_widget.objectName() + '_dock_container')
         self.window_geometry_key = self.objectName() + '_dock_window_geometry'
         self.window_state_key = self.objectName() + '_dock_window_state'
-        self.geometry_key = self.objectName() + '_geometry'
+        self.target_geometry_key = self.objectName() + '_dock_target_geometry'
         self.dock_key = self.objectName() + '_in_home_dock'
 
         self.target = dockable_widget
@@ -1208,14 +1216,16 @@ class DockContainer(QDockWidget):
     def app_save_state(self, to_settings: QSettings):
         to_settings.setValue(self.window_geometry_key, self.dock_window.saveGeometry())
         to_settings.setValue(self.window_state_key, self.dock_window.saveState())
-        to_settings.setValue(self.geometry_key, self.saveGeometry())
+        to_settings.setValue(self.target_geometry_key, self.target.saveGeometry())
         to_settings.setValue(self.dock_key, b'home_window' if self.is_docked_to_home else b'dock_window')
 
     def app_restore_state(self, from_settings: QSettings, show: bool = True):
         if from_settings.value(self.window_geometry_key) is not None:
             self.dock_window.restoreGeometry(from_settings.value(self.window_geometry_key))
             self.dock_window.restoreState(from_settings.value(self.window_state_key))
-            self.restoreGeometry(from_settings.value(self.geometry_key))
+            self.target.restoreGeometry(from_settings.value(self.target_geometry_key))
+            # Constrain the height until showEvent() when we will remove the constraint.
+            self.target.setMinimumHeight(self.target.geometry().height())
             self.is_docked_to_home = from_settings.value(self.dock_key) == b'home_window'
         if self.is_docked_to_home is None or self.is_docked_to_home:
             self.dock_to_main_window()
