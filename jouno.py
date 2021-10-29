@@ -1390,6 +1390,8 @@ class MainToolBar(QToolBar):
                  menu: QMenu,
                  parent: QMainWindow):
         super().__init__(parent=parent)
+
+        # TODO figure out why this toolbar no longer has an undocking handle.
         debug("Toolbar floatable", self.isFloatable(), "movable", self.isMovable())
 
         self.setObjectName("main-tool-bar")
