@@ -261,6 +261,7 @@ ICON_UNDOCK = "window-new"
 ICON_DOCK = "view-restore"
 ICON_GO_NEXT = "go-down"
 ICON_GO_PREVIOUS = "go-up"
+ICON_CLEAR_RECENTS = "edit-clear-all"
 
 ICON_BLACK_COLOR = b"#232629"
 ICON_WHITE_COLOR = b"#f3f3f3"
@@ -357,6 +358,22 @@ ICON_TOOLBAR_DEL_FILTER = b"""
     </defs>
     <path id="path4" class="ColorScheme-Text" d="m5 3-1 1v1.3046875l5 7.0625005v3.671872l3 2.226563v-1.246092l-2-1.484375v-3.535156h-0.035156l-4.964844-7.0117188v-0.9882812h12v0.9882812l-4.964844 7.0117188h1.22461l4.740234-6.6953125v-1.3046875l-1-1zm1 2 2 3v-2l2-1z" fill="currentColor"/>
     <path id="path6" d="M 13.990234,13 13,13.990234 15.009766,16 13,18.009766 13.990234,19 16,16.990234 18.009766,19 19,18.009766 16.990234,16 19,13.990234 18.009766,13 16,15.009766 Z" fill="#da4453"/>
+</svg>
+"""
+
+ICON_TOOLBAR_TEST_FILTERS = b"""
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">
+  <defs id="defs3051">
+    <style type="text/css" id="current-color-scheme">
+      .ColorScheme-Text {
+        color:#232629;
+      }
+      </style>
+  </defs>
+ <path style="fill:currentColor;fill-opacity:1;stroke:none" 
+     d="M 7 2 L 7 3.1015625 A 5 5 0 0 0 5.2460938 3.8320312 L 4.4648438 3.0507812 L 3.0507812 4.4648438 L 3.8320312 5.2460938 A 5 5 0 0 0 3.1054688 7 L 2 7 L 2 9 L 3.1015625 9 A 5 5 0 0 0 3.8320312 10.753906 L 3.0507812 11.535156 L 4.4648438 12.949219 L 5.2460938 12.167969 A 5 5 0 0 0 7 12.894531 L 7 14 L 9 14 L 9 12.898438 L 9 11.869141 A 4 4 0 0 1 8 12 A 4 4 0 0 1 5.1308594 10.787109 A 4 4 0 0 1 4 8 A 4 4 0 0 1 5.2128906 5.1308594 A 4 4 0 0 1 8 4 A 4 4 0 0 1 10.869141 5.2128906 A 4 4 0 0 1 12 8 L 14 8 L 14 7 L 12.898438 7 A 5 5 0 0 0 12.167969 5.2460938 L 12.949219 4.4648438 L 11.535156 3.0507812 L 10.753906 3.8320312 A 5 5 0 0 0 9 3.1054688 L 9 2 L 7 2 z M 7 6 L 7 10 L 10 8 L 7 6 z M 10 9 L 10 10 L 14 10 L 14 9 L 10 9 z M 10 11 L 10 12 L 14 12 L 14 11 L 10 11 z M 10 13 L 10 14 L 14 14 L 14 13 L 10 13 z "
+     class="ColorScheme-Text"
+     />
 </svg>
 """
 
@@ -819,6 +836,309 @@ def transparent_button(button: QPushButton) -> QPushButton:
     return button
 
 
+class DockUndockWindow(QMainWindow):
+    """
+    I wanted an undockable component, but one with normal window decorations.
+    So I've taken over the undocking process and reparent the floating window onto
+    this alternate main window.
+    """
+
+    def __init__(self, panel_container: 'DockContainer'):
+        super().__init__(parent=None)
+        self.setObjectName('config_main_window')
+        self.panel_container = panel_container
+        self.previous_geometry = None
+        debug("ConfigMainWindow visible", self.isVisible())
+
+    def hide(self) -> None:
+        self.previous_geometry = self.saveGeometry()
+        super().hide()
+
+    def show(self) -> None:
+        self.restoreGeometry(self.previous_geometry) if self.previous_geometry is not None else None
+        super().show()
+
+    def closeEvent(self, close_event: QCloseEvent) -> None:
+        close_event.ignore()
+        self.hide()
+        self.panel_container.dock_to_main_window()
+
+
+class DockableWidget(QWidget):
+
+    def __init__(self, parent=None, flags=None, *args, **kwargs):
+        super().__init__(parent=None, *args, **kwargs)
+
+    def add_dock_control(self, dock_button: QPushButton):
+        pass
+
+
+class DockContainer(QDockWidget):
+
+    def __init__(self, dockable_widget: DockableWidget, home_window: QMainWindow, home_dock_area: Qt.DockWidgetArea):
+        super().__init__(parent=None, flags=Qt.WindowFlags(Qt.WindowStaysOnTopHint))
+        self.setObjectName(dockable_widget.objectName() + '_dock_container')
+        self.window_geometry_key = self.objectName() + '_dock_window_geometry'
+        self.window_state_key = self.objectName() + '_dock_window_state'
+        self.target_geometry_key = self.objectName() + '_dock_target_geometry'
+        self.dock_key = self.objectName() + '_in_home_dock'
+
+        self.target = dockable_widget
+        self.previous_home_geometry: Mapping[str, QWidget] = {}
+
+        self.is_docked_to_home = None
+        self.home_window = home_window
+        self.home_dock_area = home_dock_area
+
+        self.setTitleBarWidget(QWidget())
+        self.dock_window = DockUndockWindow(panel_container=self)
+
+        self.setFloating(False)
+        self.setFeatures(QDockWidget.DockWidgetFloatable | QDockWidget.DockWidgetMovable)
+
+        self.dock_button = transparent_button(QPushButton(get_icon(ICON_UNDOCK), '', self))
+        self.dock_button.setToolTip(tr("Dock/undock this panel"))
+        self.dock_button.pressed.connect(self.switch_dock_state)
+        self.target.add_dock_control(self.dock_button)
+
+        self.setWidget(self.target)
+
+    def showEvent(self, event: QEvent):
+        debug(event.type(), event)
+        super().showEvent(event)
+        self.target.setMinimumHeight(0)
+
+    def switch_dock_state(self):
+        # Switch between docked and undocked - use the system window manager.
+        if self.is_docked_to_home is None or self.is_docked_to_home:
+            self.dock_to_dock_window()
+        else:
+            self.dock_to_main_window()
+
+    def dock_to_main_window(self):
+        debug('dock_main_window')
+        self.is_docked_to_home = True
+        self.setFloating(True)
+        self.dock_window.hide()
+        self.dock_button.setIcon(get_icon(ICON_UNDOCK))
+        if self.previous_home_geometry:
+            # Hacky trick to force the panel to restore it's previous size.
+            # The minimum be be retracted in showEvent().
+            # if self.home_window.height() > self.previous_home_geometry.height():
+            self.target.setMinimumHeight(self.previous_home_geometry.height())
+        self.home_window.addDockWidget(self.home_dock_area, self)
+        self.setFloating(False)
+        if self.dock_window.isVisible():
+            self.dock_window.hide()
+
+    def dock_to_dock_window(self, show: bool = True):
+        debug('dock_config_window')
+        # self.previous_home_geometry = {}
+        # for dock_widget in self.home_window.findChildren(QDockWidget):
+        #     self.previous_home_geometry[dock_widget.objectName()] = dock_widget.geometry()
+        #     debug("saving", dock_widget.objectName(), dock_widget.panel.geometry())
+        self.previous_home_geometry = self.target.geometry()
+        self.is_docked_to_home = False
+        self.setFloating(True)
+        self.dock_button.setIcon(get_icon(ICON_DOCK))
+        self.dock_window.addDockWidget(Qt.DockWidgetArea.TopDockWidgetArea, self)
+        self.setFloating(False)
+        if show:
+            self.dock_window.show()
+
+    def activate_dock_window(self):
+        if not self.is_docked_to_home:
+            self.dock_window.show()
+            self.dock_window.raise_()
+            self.dock_window.activateWindow()
+
+    def deactivate_dock_window(self):
+        if not self.is_docked_to_home:
+            self.dock_window.hide()
+
+    def app_save_state(self, to_settings: QSettings):
+        to_settings.setValue(self.window_geometry_key, self.dock_window.saveGeometry())
+        to_settings.setValue(self.window_state_key, self.dock_window.saveState())
+        to_settings.setValue(self.target_geometry_key, self.target.saveGeometry())
+        to_settings.setValue(self.dock_key, b'home_window' if self.is_docked_to_home else b'dock_window')
+
+    def app_restore_state(self, from_settings: QSettings, show: bool = True):
+        if from_settings.value(self.window_geometry_key) is not None:
+            try:
+                self.dock_window.restoreGeometry(from_settings.value(self.window_geometry_key))
+                self.dock_window.restoreState(from_settings.value(self.window_state_key))
+                self.target.restoreGeometry(from_settings.value(self.target_geometry_key))
+                # Constrain the height until showEvent() when we will remove the constraint.
+                self.target.setMinimumHeight(self.target.geometry().height())
+                self.is_docked_to_home = from_settings.value(self.dock_key) == b'home_window'
+            except:
+                warning("Failed to restore geometry of GUI components.")
+        if self.is_docked_to_home is None or self.is_docked_to_home:
+            self.dock_to_main_window()
+        else:
+            self.dock_to_dock_window(show=show)
+
+
+class ConfigPanel(DockableWidget):
+    signal_new_filter_pattern = pyqtSignal(str, bool)
+
+    def __init__(self, tab_change: Callable, config_change_func: Callable):
+        super().__init__(parent=None, flags=Qt.WindowFlags(Qt.WindowStaysOnTopHint))
+        self.setObjectName('config-panel-new')
+
+        container = self
+        layout = QVBoxLayout()
+        container.setLayout(layout)
+
+        title_container = QWidget(self)
+        title_layout = QHBoxLayout()
+        self.title_layout = title_layout
+        title_container.setLayout(title_layout)
+        title_label = big_label(QLabel(tr("Configuration")))
+        title_layout.addWidget(title_label)
+        spacer = QWidget()
+        spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        title_layout.addWidget(spacer)
+
+        tabs = QTabWidget()
+        self.tabs = tabs
+
+        self.config = Config()
+        self.config.refresh()
+
+        options_panel = OptionsTab(self.config['options'], parent=self)
+
+        match_panel = FilterPanel(
+            self.config['match'],
+            tooltip=tr("Only issue notifications for journal-entry messages that match one of these rules."),
+            config_panel=self)
+
+        ignore_panel = FilterPanel(
+            self.config['ignore'],
+            tooltip=tr("Ignore journal-entry messages that match any of these rules."),
+            config_panel=self)
+
+        button_box = QWidget()
+        button_box_layout = QGridLayout()
+        button_box.setLayout(button_box_layout)
+        apply_button = QPushButton(tr("Apply"))
+        revert_button = QPushButton(tr("Revert"))
+
+        button_box_layout.addWidget(apply_button, 0, 0)
+        button_box_layout.addWidget(revert_button, 0, 1)
+        button_box_layout.setColumnMinimumWidth(3, 200)
+
+        def save_action():
+            debug("save action") if debugging else None
+            try:
+                if match_panel.is_valid() and ignore_panel.is_valid():
+                    options_panel.copy_to_config(self.config['options'])
+                    match_panel.copy_to_config(self.config['match'])
+                    ignore_panel.copy_to_config(self.config['ignore'])
+                    self.config.save()
+                    match_panel.clear_selection()
+                    ignore_panel.clear_selection()
+                    message = QMessageBox(self)
+                    message.setWindowTitle(tr('Applied'))
+                    message.setText(tr('Changes are now active.'))
+                    message.setIcon(QMessageBox.Information)
+                    message.setStandardButtons(QMessageBox.Ok)
+                    # message.setDetailedText()
+                    message.exec()
+                    debug(f'config saved ok') if debugging else None
+            except FilterValidationException as e:
+                e_title, summary, text = e.args
+                message = QMessageBox(self)
+                message.setWindowTitle(e_title)
+                message.setText(f"{tr('Cannot apply changes.')}\n{summary}\n{text}")
+                message.setIcon(QMessageBox.Critical)
+                message.setStandardButtons(QMessageBox.Ok)
+                # message.setDetailedText()
+                message.exec()
+
+        apply_button.clicked.connect(save_action)
+
+        def revert_action():
+            debug("revert") if debugging else None
+            before = pickle.dumps(self.config)
+            tmp = pickle.loads(before)
+            options_panel.copy_to_config(tmp['options'])
+            match_panel.copy_to_config(tmp['match'])
+            ignore_panel.copy_to_config(tmp['ignore'])
+            after = pickle.dumps(tmp)
+            if before == after:
+                revert_message = QMessageBox(self)
+                revert_message.setText(tr('There are no unapplied changes, there is nothing to revert.'))
+                revert_message.setIcon(QMessageBox.Warning)
+                revert_message.setStandardButtons(QMessageBox.Ok)
+                revert_message.exec()
+                return
+            else:
+                revert_message = QMessageBox(self)
+                revert_message.setText(tr('There are unapplied changes, revert and loose all changes?'))
+                revert_message.setIcon(QMessageBox.Question)
+                revert_message.setStandardButtons(QMessageBox.Ok | QMessageBox.Cancel)
+                if revert_message.exec() == QMessageBox.Cancel:
+                    return
+            info("reverting unsaved edits")
+            reload_from_config()
+
+        def reload_from_config():
+            info("GUI reloading config") if debugging else None
+            options_panel.copy_from_config(self.config['options'])
+            match_panel.copy_from_config(self.config['match'])
+            ignore_panel.copy_from_config(self.config['ignore'])
+            match_panel.clear_selection()
+            ignore_panel.clear_selection()
+
+        revert_button.clicked.connect(revert_action)
+
+        tabs.addTab(ignore_panel, tr("Ignore Filters"))
+        tabs.addTab(match_panel, tr("Match Filters"))
+        tabs.addTab(options_panel, tr("Options"))
+        tabs.setCurrentIndex(0)
+
+        # TODO - setter for adding button
+        # title_layout.addWidget(self.dock_button)
+        layout.addWidget(title_container)
+
+        layout.addWidget(tabs)
+        layout.addWidget(button_box)
+
+        tabs.currentChanged.connect(tab_change)
+
+        self.setWindowTitle(tr("Configuration"))
+
+        reload_from_config()
+
+        self.config_watcher = ConfigWatcherTask(self.config)
+
+        def config_change():
+            reload_from_config()
+            config_change_func()
+
+        self.config_watcher.signal_config_change.connect(config_change)
+        self.config_watcher.start()
+
+    def add_dock_control(self, dock_button: QPushButton):
+        self.title_layout.addWidget(dock_button)
+
+    def add_filter(self, rule_id, pattern) -> None:
+        if isinstance(self.tabs.currentWidget(), FilterPanel):
+            self.tabs.currentWidget().add_rule(rule_id, pattern)
+        else:
+            raise TypeError("Was expecting FilterPanel")
+
+    def delete_filter(self) -> None:
+        if isinstance(self.tabs.currentWidget(), FilterPanel):
+            self.tabs.currentWidget().delete_rules()
+        else:
+            raise TypeError("Was expecting FilterPanel")
+
+    def get_config(self) -> Config:
+        return self.config
+
+
 class OptionsTab(QWidget):
 
     def __init__(self, config_section: Mapping[str, str], parent: QWidget = None):
@@ -885,11 +1205,11 @@ class OptionsTab(QWidget):
 
 class FilterPanel(QWidget):
 
-    def __init__(self, config_section: Mapping[str, str], tooltip: str = 'tip', parent: QWidget = None):
-        super().__init__(parent=parent)
+    def __init__(self, config_section: Mapping[str, str], tooltip: str, config_panel: ConfigPanel):
+        super().__init__(parent=config_panel)
         debug("table", str(config_section.keys())) if debugging else None
 
-        self.table_view = FilterTableView(config_section, tooltip)
+        self.table_view = FilterTableView(config_section, tooltip, config_panel)
 
         # TODO add a test rules button that pops up a testing dialog with an input field.
         layout = QVBoxLayout(self)
@@ -928,9 +1248,29 @@ class FilterValidationException(Exception):
     pass
 
 
+class FilterPatternEntryDelegate(QStyledItemDelegate):
+
+    def __init__(self, model: FilterTableModel, config_panel: 'ConfigPanel'):
+        super().__init__(model)
+        self.config_panel = config_panel
+        self.line_edit = None
+
+    def createEditor(self, parent, option, index):
+        if self.line_edit is None:
+            self.line_edit = QLineEdit(parent)
+
+        def text_changed(text: str):
+            text = text.strip()
+            if text != '':
+                self.config_panel.signal_new_filter_pattern.emit(text, False)
+
+        self.line_edit.textEdited.connect(text_changed)
+        return self.line_edit
+
+
 class FilterTableView(QTableView):
 
-    def __init__(self, config_section: Mapping[str, str], tooltip=""):
+    def __init__(self, config_section: Mapping[str, str], tooltip: str, config_panel: ConfigPanel = None):
         super().__init__()
         self.enable_tooltip = \
             tr("Enable: rules can be selective enabled/disabled.")
@@ -959,6 +1299,7 @@ class FilterTableView(QTableView):
         self.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
         self.horizontalHeader().setDefaultAlignment(Qt.AlignLeft)
         self.setShowGrid(False)
+        self.setItemDelegateForColumn(1, FilterPatternEntryDelegate(self.model(), config_panel))
 
     def item_view_order(self) -> List[int]:
         """
@@ -1117,308 +1458,6 @@ class JournalWatcherTask(QThread):
         self.signal_new_entry.emit(journal_entry, notable)
 
 
-class DockUndockWindow(QMainWindow):
-    """
-    I wanted an undockable component, but one with normal window decorations.
-    So I've taken over the undocking process and reparent the floating window onto
-    this alternate main window.
-    """
-
-    def __init__(self, panel_container: 'DockContainer'):
-        super().__init__(parent=None)
-        self.setObjectName('config_main_window')
-        self.panel_container = panel_container
-        self.previous_geometry = None
-        debug("ConfigMainWindow visible", self.isVisible())
-
-    def hide(self) -> None:
-        self.previous_geometry = self.saveGeometry()
-        super().hide()
-
-    def show(self) -> None:
-        self.restoreGeometry(self.previous_geometry) if self.previous_geometry is not None else None
-        super().show()
-
-    def closeEvent(self, close_event: QCloseEvent) -> None:
-        close_event.ignore()
-        self.hide()
-        self.panel_container.dock_to_main_window()
-
-
-class DockableWidget(QWidget):
-
-    def __init__(self, parent=None, flags=None, *args, **kwargs):
-        super().__init__(parent=None, *args, **kwargs)
-
-    def add_dock_control(self, dock_button: QPushButton):
-        pass
-
-
-class DockContainer(QDockWidget):
-
-    def __init__(self, dockable_widget: DockableWidget, home_window: QMainWindow, home_dock_area: Qt.DockWidgetArea):
-        super().__init__(parent=None, flags=Qt.WindowFlags(Qt.WindowStaysOnTopHint))
-        self.setObjectName(dockable_widget.objectName() + '_dock_container')
-        self.window_geometry_key = self.objectName() + '_dock_window_geometry'
-        self.window_state_key = self.objectName() + '_dock_window_state'
-        self.target_geometry_key = self.objectName() + '_dock_target_geometry'
-        self.dock_key = self.objectName() + '_in_home_dock'
-
-        self.target = dockable_widget
-        self.previous_home_geometry: Mapping[str, QWidget] = {}
-
-        self.is_docked_to_home = None
-        self.home_window = home_window
-        self.home_dock_area = home_dock_area
-
-        self.setTitleBarWidget(QWidget())
-        self.dock_window = DockUndockWindow(panel_container=self)
-
-        self.setFloating(False)
-        self.setFeatures(QDockWidget.DockWidgetFloatable | QDockWidget.DockWidgetMovable)
-
-        self.dock_button = transparent_button(QPushButton(get_icon(ICON_UNDOCK), '', self))
-        self.dock_button.setToolTip(tr("Dock/undock this panel"))
-        self.dock_button.pressed.connect(self.switch_dock_state)
-        self.target.add_dock_control(self.dock_button)
-
-        self.setWidget(self.target)
-
-    def showEvent(self, event: QEvent):
-        debug(event.type(), event)
-        super().showEvent(event)
-        self.target.setMinimumHeight(0)
-
-    def switch_dock_state(self):
-        # Switch between docked and undocked - use the system window manager.
-        if self.is_docked_to_home is None or self.is_docked_to_home:
-            self.dock_to_dock_window()
-        else:
-            self.dock_to_main_window()
-
-    def dock_to_main_window(self):
-        debug('dock_main_window')
-        self.is_docked_to_home = True
-        self.setFloating(True)
-        self.dock_window.hide()
-        self.dock_button.setIcon(get_icon(ICON_UNDOCK))
-        if self.previous_home_geometry:
-            # Hacky trick to force the panel to restore it's previous size.
-            # The minimum be be retracted in showEvent().
-            #if self.home_window.height() > self.previous_home_geometry.height():
-            self.target.setMinimumHeight(self.previous_home_geometry.height())
-        self.home_window.addDockWidget(self.home_dock_area, self)
-        self.setFloating(False)
-        if self.dock_window.isVisible():
-            self.dock_window.hide()
-
-    def dock_to_dock_window(self, show: bool = True):
-        debug('dock_config_window')
-        # self.previous_home_geometry = {}
-        # for dock_widget in self.home_window.findChildren(QDockWidget):
-        #     self.previous_home_geometry[dock_widget.objectName()] = dock_widget.geometry()
-        #     debug("saving", dock_widget.objectName(), dock_widget.panel.geometry())
-        self.previous_home_geometry = self.target.geometry()
-        self.is_docked_to_home = False
-        self.setFloating(True)
-        self.dock_button.setIcon(get_icon(ICON_DOCK))
-        self.dock_window.addDockWidget(Qt.DockWidgetArea.TopDockWidgetArea, self)
-        self.setFloating(False)
-        if show:
-            self.dock_window.show()
-
-    def activate_dock_window(self):
-        if not self.is_docked_to_home:
-            self.dock_window.show()
-            self.dock_window.raise_()
-            self.dock_window.activateWindow()
-
-    def deactivate_dock_window(self):
-        if not self.is_docked_to_home:
-            self.dock_window.hide()
-
-    def app_save_state(self, to_settings: QSettings):
-        to_settings.setValue(self.window_geometry_key, self.dock_window.saveGeometry())
-        to_settings.setValue(self.window_state_key, self.dock_window.saveState())
-        to_settings.setValue(self.target_geometry_key, self.target.saveGeometry())
-        to_settings.setValue(self.dock_key, b'home_window' if self.is_docked_to_home else b'dock_window')
-
-    def app_restore_state(self, from_settings: QSettings, show: bool = True):
-        if from_settings.value(self.window_geometry_key) is not None:
-            try:
-                self.dock_window.restoreGeometry(from_settings.value(self.window_geometry_key))
-                self.dock_window.restoreState(from_settings.value(self.window_state_key))
-                self.target.restoreGeometry(from_settings.value(self.target_geometry_key))
-                # Constrain the height until showEvent() when we will remove the constraint.
-                self.target.setMinimumHeight(self.target.geometry().height())
-                self.is_docked_to_home = from_settings.value(self.dock_key) == b'home_window'
-            except:
-                warning("Failed to restore geometry of GUI components.")
-        if self.is_docked_to_home is None or self.is_docked_to_home:
-            self.dock_to_main_window()
-        else:
-            self.dock_to_dock_window(show=show)
-
-
-class ConfigPanel(DockableWidget):
-
-    def __init__(self, tab_change: Callable, config_change_func: Callable):
-        super().__init__(parent=None, flags=Qt.WindowFlags(Qt.WindowStaysOnTopHint))
-        self.setObjectName('config-panel-new')
-
-        container = self
-        layout = QVBoxLayout()
-        container.setLayout(layout)
-
-        title_container = QWidget(self)
-        title_layout = QHBoxLayout()
-        self.title_layout = title_layout
-        title_container.setLayout(title_layout)
-        title_label = big_label(QLabel(tr("Configuration")))
-        title_layout.addWidget(title_label)
-        spacer = QWidget()
-        spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        title_layout.addWidget(spacer)
-
-        tabs = QTabWidget()
-        self.tabs = tabs
-
-        self.config = Config()
-        self.config.refresh()
-
-        options_panel = OptionsTab(self.config['options'], parent=self)
-
-        match_panel = FilterPanel(
-            self.config['match'],
-            tooltip=tr("Only issue notifications for journal-entry messages that match one of these rules."),
-            parent=self)
-
-        ignore_panel = FilterPanel(
-            self.config['ignore'],
-            tooltip=tr("Ignore journal-entry messages that match any of these rules."),
-            parent=self)
-
-        button_box = QWidget()
-        button_box_layout = QGridLayout()
-        button_box.setLayout(button_box_layout)
-        apply_button = QPushButton(tr("Apply"))
-        revert_button = QPushButton(tr("Revert"))
-
-        button_box_layout.addWidget(apply_button, 0, 0)
-        button_box_layout.addWidget(revert_button, 0, 1)
-        button_box_layout.setColumnMinimumWidth(3, 200)
-
-        def save_action():
-            debug("save action") if debugging else None
-            try:
-                if match_panel.is_valid() and ignore_panel.is_valid():
-                    options_panel.copy_to_config(self.config['options'])
-                    match_panel.copy_to_config(self.config['match'])
-                    ignore_panel.copy_to_config(self.config['ignore'])
-                    self.config.save()
-                    match_panel.clear_selection()
-                    ignore_panel.clear_selection()
-                    message = QMessageBox(self)
-                    message.setWindowTitle(tr('Applied'))
-                    message.setText(tr('Changes are now active.'))
-                    message.setIcon(QMessageBox.Information)
-                    message.setStandardButtons(QMessageBox.Ok)
-                    # message.setDetailedText()
-                    message.exec()
-                    debug(f'config saved ok') if debugging else None
-            except FilterValidationException as e:
-                e_title, summary, text = e.args
-                message = QMessageBox(self)
-                message.setWindowTitle(e_title)
-                message.setText(f"{tr('Cannot apply changes.')}\n{summary}\n{text}")
-                message.setIcon(QMessageBox.Critical)
-                message.setStandardButtons(QMessageBox.Ok)
-                # message.setDetailedText()
-                message.exec()
-
-        apply_button.clicked.connect(save_action)
-
-        def revert_action():
-            debug("revert") if debugging else None
-            before = pickle.dumps(self.config)
-            tmp = pickle.loads(before)
-            options_panel.copy_to_config(tmp['options'])
-            match_panel.copy_to_config(tmp['match'])
-            ignore_panel.copy_to_config(tmp['ignore'])
-            after = pickle.dumps(tmp)
-            if before == after:
-                revert_message = QMessageBox(self)
-                revert_message.setText(tr('There are no unapplied changes, there is nothing to revert.'))
-                revert_message.setIcon(QMessageBox.Warning)
-                revert_message.setStandardButtons(QMessageBox.Ok)
-                revert_message.exec()
-                return
-            else:
-                revert_message = QMessageBox(self)
-                revert_message.setText(tr('There are unapplied changes, revert and loose all changes?'))
-                revert_message.setIcon(QMessageBox.Question)
-                revert_message.setStandardButtons(QMessageBox.Ok | QMessageBox.Cancel)
-                if revert_message.exec() == QMessageBox.Cancel:
-                    return
-            info("reverting unsaved edits")
-            reload_from_config()
-
-        def reload_from_config():
-            info("GUI reloading config") if debugging else None
-            options_panel.copy_from_config(self.config['options'])
-            match_panel.copy_from_config(self.config['match'])
-            ignore_panel.copy_from_config(self.config['ignore'])
-            match_panel.clear_selection()
-            ignore_panel.clear_selection()
-
-        revert_button.clicked.connect(revert_action)
-
-        tabs.addTab(ignore_panel, tr("Ignore Filters"))
-        tabs.addTab(match_panel, tr("Match Filters"))
-        tabs.addTab(options_panel, tr("Options"))
-        tabs.setCurrentIndex(0)
-
-        # TODO - setter for adding button
-        # title_layout.addWidget(self.dock_button)
-        layout.addWidget(title_container)
-
-        layout.addWidget(tabs)
-        layout.addWidget(button_box)
-
-        tabs.currentChanged.connect(tab_change)
-
-        self.setWindowTitle(tr("Configuration"))
-
-        reload_from_config()
-
-        self.config_watcher = ConfigWatcherTask(self.config)
-
-        def config_change():
-            reload_from_config()
-            config_change_func()
-
-        self.config_watcher.signal_config_change.connect(config_change)
-        self.config_watcher.start()
-
-    def add_dock_control(self, dock_button: QPushButton):
-        self.title_layout.addWidget(dock_button)
-
-    def add_filter(self, rule_id, pattern) -> None:
-        if isinstance(self.tabs.currentWidget(), FilterPanel):
-            self.tabs.currentWidget().add_rule(rule_id, pattern)
-        else:
-            raise TypeError("Was expecting FilterPanel")
-
-    def delete_filter(self) -> None:
-        if isinstance(self.tabs.currentWidget(), FilterPanel):
-            self.tabs.currentWidget().delete_rules()
-        else:
-            raise TypeError("Was expecting FilterPanel")
-
-    def get_config(self) -> Config:
-        return self.config
-
-
 class MainToolBar(QToolBar):
 
     def __init__(self,
@@ -1442,6 +1481,7 @@ class MainToolBar(QToolBar):
         self.icon_run_stop = get_icon(ICON_TOOLBAR_STOP)
         self.icon_add_filter = get_icon(ICON_TOOLBAR_ADD_FILTER)
         self.icon_del_filter = get_icon(ICON_TOOLBAR_DEL_FILTER)
+        self.icon_test_filters = get_icon(ICON_TOOLBAR_TEST_FILTERS)
         self.icon_menu = get_icon(ICON_TOOLBAR_HAMBURGER_MENU)
 
         self.run_action = self.addAction(self.icon_run_enabled, "run", run_func)
@@ -1476,6 +1516,25 @@ class MainToolBar(QToolBar):
             tr("Delete selected filter.") + "\n" +
             tr("Select a filter tab and click in its left margin to select a filter to delete."))
 
+        # self.addSeparator()
+        # def test_filters_func():
+        #     pass
+        #
+        # self.test_filters_action = self.addAction(self.icon_test_filters, "test_filters", test_filters_func)
+        # self.test_filters_action.setObjectName("test_filters_button")
+        # self.test_filters_action.setIconText(tr("Test filters."))
+        # self.test_filters_action.setToolTip(tr("Test enabled filters against the recently notified table."))
+
+        # self.addSeparator()
+        #
+        # def clear_all_func():
+        #     pass
+        #
+        # self.clear_all_action = self.addAction(get_icon(ICON_CLEAR_RECENTS), "clear_all", clear_all_func)
+        # self.clear_all_action.setObjectName("clear_all_button")
+        # self.clear_all_action.setIconText(tr("Clear all."))
+        # self.clear_all_action.setToolTip(tr("Clear all recent journal entries."))
+
         spacer = QWidget()
         spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         self.addWidget(spacer)
@@ -1496,6 +1555,7 @@ class MainToolBar(QToolBar):
         self.icon_run_stop = get_icon(ICON_TOOLBAR_STOP)
         self.icon_add_filter = get_icon(ICON_TOOLBAR_ADD_FILTER)
         self.icon_del_filter = get_icon(ICON_TOOLBAR_DEL_FILTER)
+        self.icon_test_filters = get_icon(ICON_TOOLBAR_TEST_FILTERS)
         self.icon_menu = get_icon(ICON_TOOLBAR_HAMBURGER_MENU)
 
     def eventFilter(self, target: QObject, event: QEvent) -> bool:
@@ -1704,6 +1764,8 @@ class MainWindow(QMainWindow):
         self.journal_dock_container = DockContainer(
             dockable_widget=journal_panel, home_window=self, home_dock_area=Qt.DockWidgetArea.TopDockWidgetArea)
 
+        self.config_panel.signal_new_filter_pattern.connect(journal_panel.search_select_journal)
+
         app_context_menu = MainContextMenu(
             run_func=toggle_listener, notify_func=toggle_notifier, quit_func=quit_app, parent=self)
 
@@ -1811,6 +1873,7 @@ class JournalPanel(DockableWidget):
         title_container.setLayout(title_layout)
         title_label = big_label(QLabel(tr("Recently notified")))
         title_layout.addWidget(title_label)
+
         spacer = QWidget()
         spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         title_layout.addWidget(spacer)
@@ -1826,7 +1889,7 @@ class JournalPanel(DockableWidget):
         search_input.setFixedWidth(350)
         search_input.addAction(get_icon(ICON_SEARCH_JOURNAL), QLineEdit.LeadingPosition)
         search_input.setToolTip(tr("Incrementally search journal entries.\nSearches all fields."))
-        search_input.textChanged.connect(search_entries)
+        search_input.textEdited.connect(search_entries)
         title_layout.addWidget(search_input)
         self.scrolled_to_selected = None
 
@@ -1841,6 +1904,7 @@ class JournalPanel(DockableWidget):
         go_previous_button.setToolTip(tr("Previous match."))
         go_previous_button.setEnabled(False)
         title_layout.addWidget(go_previous_button)
+
         self.title_layout = title_layout
 
         spacer = QWidget()
@@ -1868,7 +1932,8 @@ class JournalPanel(DockableWidget):
             return None
         return self.table_view.model().get_journal_entry(self.table_view.model().rowCount() - 1)
 
-    def search_select_journal(self, text: str):
+    def search_select_journal(self, text: str, regexp_search: bool = False):
+        save_focus = QWidget.focusWidget()
         self.table_view.clearSelection()
         model = self.table_view.model()
         if text.strip() != '':
@@ -1883,6 +1948,7 @@ class JournalPanel(DockableWidget):
                         self.scrolled_to_selected = model.index(row_num, 0)
         if self.scrolled_to_selected is not None:
             self.table_view.scrollTo(self.scrolled_to_selected)
+        save_focus.setFocus()
 
     def scroll_selected(self, direction: int):
         all_indexes = self.table_view.selectedIndexes()
@@ -1899,6 +1965,15 @@ class JournalPanel(DockableWidget):
 
     def set_max_journal_entries(self, max_entries: int) -> None:
         self.table_view.model().set_max_journal_entries(max_entries)
+
+
+class JournalEntryDelegate(QStyledItemDelegate):
+
+    def createEditor(self, parent, option, index):
+        line_edit = QLineEdit(parent)
+        # Makes it behave line a normal readonly text entry (unlike making the whole table read only).
+        line_edit.setReadOnly(True)
+        return line_edit
 
 
 class JournalTableView(QTableView):
@@ -1996,15 +2071,6 @@ class JournalTableModel(QStandardItemModel):
 
     def set_max_journal_entries(self, max_entries: int) -> None:
         self.max_journal_entries = max_entries
-
-
-class JournalEntryDelegate(QStyledItemDelegate):
-
-    def createEditor(self, parent, option, index):
-        line_edit = QLineEdit(parent)
-        # Makes it behave line a normal readonly text entry (unlike making the whole table read only).
-        line_edit.setReadOnly(True)
-        return line_edit
 
 
 class JournalEntryDialogPlain(QDialog):
