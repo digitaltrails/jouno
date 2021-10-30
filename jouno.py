@@ -811,20 +811,17 @@ class OptionsTab(QWidget):
     def __init__(self, config_section: Mapping[str, str], parent: QWidget = None):
         super().__init__(parent=parent)
         self.option_map: Mapping[str, QWidget] = {}
-        #container.setMaximumWidth(2000)
-        #scroll_area.setMaximumWidth(2000)
-        items_per_column = 5
         grid_layout = QGridLayout(self)
-        row_number = 0
+        bool_count = 0
+        text_count = 0
         for i, (option_id, value) in enumerate(config_section.items()):
-            row_number = i % items_per_column
-            column_number = 2 * (i // items_per_column)
-            print(row_number, column_number)
             label_widget = QLabel(tr(option_id))
             if option_id.endswith("_enabled"):
                 input_widget = QCheckBox()
                 input_widget.setChecked(value == 'yes')
                 column_number = 3
+                row_number = bool_count
+                bool_count += 1
             else:
                 input_widget = QLineEdit()
                 if '_seconds' in option_id:
@@ -837,16 +834,14 @@ class OptionsTab(QWidget):
                 input_widget.setMaximumWidth(100)
                 input_widget.setText(value)
                 column_number = 0
+                row_number = text_count
+                text_count += 1
             grid_layout.addWidget(label_widget, row_number, column_number)
             grid_layout.addWidget(input_widget, row_number, column_number + 1, 1, 1, alignment=Qt.AlignLeft)
             self.option_map[option_id] = input_widget
             if column_number == 0:
                 spacer = QLabel("\u2003\u2003")
                 grid_layout.addWidget(spacer, row_number, 2)
-
-        # Add a spacer to force those above to scrunch up.
-        #layout.addWidget(QWidget(), row_number, 1, 2, 2, alignment=Qt.AlignLeft)
-        #layout.setColumnStretch(2,10)
         grid_layout.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
         scroll_area = QScrollArea(self)
         container = QWidget(scroll_area)
@@ -857,9 +852,6 @@ class OptionsTab(QWidget):
         grid_layout.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
         grid_layout.setHorizontalSpacing(20)
         self.setLayout(layout)
-        #scroll_area.setWidget(container)
-        #scroll_area.setWidgetResizable(True)
-        #scroll_area.adjustSize()
 
     def copy_from_config(self, config_section: Mapping[str, str]):
         for option_id, widget in self.option_map.items():
