@@ -136,6 +136,10 @@ The config files are in INI-format divided into a number of sections as outlined
         journal_history_max = 100
         # Run out of the system tray
         system_tray_enabled = yes
+        # Start the application with notifications enabled (disable notifications from start up).
+        start_with_notifications_enabled = yes
+        # List all messages in the "Recently notified" table, not just the ones that passed the filters.
+        list_all_enabled = yes
         # For debugging the application
         debug_enabled = yes
 
@@ -519,7 +523,8 @@ class Config(configparser.ConfigParser):
         self.read_string(DEFAULT_CONFIG)
 
     def save(self):
-        with open(self.path, 'w') as config_file:
+        self.path.rename(self.path.with_suffix('.bak'))
+        with self.path.open('w') as config_file:
             self.write(config_file)
 
     def refresh(self) -> bool:
