@@ -224,15 +224,15 @@ from typing import Mapping, Any, List, Type, Callable
 
 import dbus
 from PyQt5.QtCore import QCoreApplication, QProcess, Qt, pyqtSignal, QThread, QModelIndex, QItemSelectionModel, QSize, \
-    QEvent, QSettings
-from PyQt5.QtGui import QPixmap, QIcon, QImage, QPainter, QCursor, QStandardItemModel, QStandardItem, QIntValidator, \
-    QFontDatabase, QGuiApplication, QCloseEvent, QPalette, QShowEvent
+    QEvent, QSettings, QObject
+from PyQt5.QtGui import QPixmap, QIcon, QImage, QPainter, QStandardItemModel, QStandardItem, QIntValidator, \
+    QFontDatabase, QGuiApplication, QCloseEvent, QPalette
 from PyQt5.QtSvg import QSvgRenderer
 from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QMessageBox, QLineEdit, QLabel, \
     QPushButton, QSystemTrayIcon, QMenu, QTextEdit, QDialog, QTabWidget, \
     QCheckBox, QGridLayout, QTableView, \
     QAbstractItemView, QHeaderView, QMainWindow, QSizePolicy, QStyledItemDelegate, QToolBar, QDockWidget, \
-    QHBoxLayout, QStyleFactory, QDesktopWidget, QToolButton, QScrollArea, QLayout
+    QHBoxLayout, QStyleFactory, QToolButton, QScrollArea, QLayout
 from systemd import journal
 
 JOUNO_VERSION = '0.9.7'
@@ -411,6 +411,7 @@ notification_seconds = 60
 journal_history_max = 100
 system_tray_enabled = yes
 start_with_notifications_enabled = yes
+list_all_enabled = no
 debug_enabled = no
 
 [ignore] 
@@ -527,7 +528,7 @@ class Config(configparser.ConfigParser):
             if self.modified_time == modified_time:
                 return False
             self.modified_time = modified_time
-            info(f"Reading {self.path}")
+            info(f"Config: reading {self.path}")
             config_text = self.path.read_text()
             for section in ['match', 'ignore']:
                 self.remove_section(section)
@@ -552,6 +553,7 @@ class JournalWatcher:
         self.burst_max_millis = 10_000
         self.ignore_regexp: Mapping[str, re] = {}
         self.match_regexp: Mapping[str, re] = {}
+        self.forward_all = False
         self.update_config()
         self._stop = False
         self.supervisor = supervisor
@@ -563,11 +565,15 @@ class JournalWatcher:
     def enable_notifications(self, enable: bool):
         self.notifications_enabled = enable
 
+    def enable_forward_all(self, enable: bool):
+        self.forward_all = enable
+
     def update_config(self):
         if self.config is None:
             self.config = Config()
         if not self.config.refresh():
             return
+        info('JournalWatcher reading config.')
         if 'poll_seconds' in self.config['options']:
             self.polling_millis = 1_000 * self.config.getint('options', 'poll_seconds')
         if 'burst_truncate_messages' in self.config['options']:
@@ -576,6 +582,8 @@ class JournalWatcher:
             self.burst_max_millis = 1_000 * self.config.getint('options', 'burst_seconds')
         if 'notification_seconds' in self.config['options']:
             self.notification_timeout_millis = 1_000 * self.config.getint('options', 'notification_seconds')
+        if 'list_all_enabled' in self.config['options']:
+            self.forward_all = self.config.getboolean('options', 'list_all_enabled')
         if 'debug' in self.config['options']:
             global debugging
             debugging = self.config.getboolean('options', 'debug')
@@ -703,7 +711,7 @@ class JournalWatcher:
                 return
             self.update_config()
             burst_count = 0
-            notable = []
+            notable_list = []
             limit_time_ns = self.burst_max_millis * 1_000_000 + time.time_ns()
             while journal_reader_poll.poll(self.polling_millis) and time.time_ns() < limit_time_ns:
                 if self.is_stop_requested():
@@ -713,15 +721,15 @@ class JournalWatcher:
                         if self.is_stop_requested():
                             return
                         burst_count += 1
-                        if self.is_notable(journal_entry):
-                            # debug(f"Notable: burst_count={len(notable)}: {journal_entry['MESSAGE']}") if debugging else None
-                            notable.append(journal_entry)
-                            self.supervisor.new_journal_entry(journal_entry)
-            if self.notifications_enabled and len(notable):
-                notify.notify_desktop(app_name=self.determine_app_name(notable),
-                                      summary=self.determine_summary(notable),
-                                      message=self.determine_message(notable),
-                                      priority=self.determine_priority(notable),
+                        notable = self.is_notable(journal_entry)
+                        notable_list.append(journal_entry) if notable else None
+                        if notable or self.forward_all:
+                            self.supervisor.new_journal_entry(journal_entry, notable)
+            if self.notifications_enabled and len(notable_list):
+                notify.notify_desktop(app_name=self.determine_app_name(notable_list),
+                                      summary=self.determine_summary(notable_list),
+                                      message=self.determine_message(notable_list),
+                                      priority=self.determine_priority(notable_list),
                                       timeout=self.notification_timeout_millis)
 
 
@@ -1082,7 +1090,7 @@ class ConfigWatcherTask(QThread):
 
 
 class JournalWatcherTask(QThread):
-    signal_new_entry = pyqtSignal(dict)
+    signal_new_entry = pyqtSignal(dict, bool)
 
     def __init__(self) -> None:
         super().__init__()
@@ -1094,11 +1102,14 @@ class JournalWatcherTask(QThread):
     def enable_notifications(self, enable: bool):
         self.watcher.enable_notifications(enable)
 
+    def enable_forward_all(self, enable: bool):
+        self.watcher.enable_forward_all(enable)
+
     def run(self) -> None:
         self.watcher.watch_journal()
 
-    def new_journal_entry(self, journal_entry: Mapping):
-        self.signal_new_entry.emit(journal_entry)
+    def new_journal_entry(self, journal_entry: Mapping, notable: bool):
+        self.signal_new_entry.emit(journal_entry, notable)
 
 
 class DockUndockWindow(QMainWindow):
@@ -1348,7 +1359,7 @@ class ConfigPanel(DockableWidget):
             reload_from_config()
 
         def reload_from_config():
-            debug("GUI reloading config") if debugging else None
+            info("GUI reloading config") if debugging else None
             options_panel.copy_from_config(self.config['options'])
             match_panel.copy_from_config(self.config['match'])
             ignore_panel.copy_from_config(self.config['ignore'])
@@ -1482,7 +1493,7 @@ class MainToolBar(QToolBar):
         self.icon_del_filter = get_icon(ICON_TOOLBAR_DEL_FILTER)
         self.icon_menu = get_icon(ICON_TOOLBAR_HAMBURGER_MENU)
 
-    def eventFilter(self, target: 'QObject', event: 'QEvent') -> bool:
+    def eventFilter(self, target: QObject, event: QEvent) -> bool:
         super().eventFilter(target, event)
         # PalletChange happens after the new style sheet is in use.
         if event.type() == QEvent.PaletteChange:
@@ -1915,8 +1926,8 @@ class JournalTableView(QTableView):
 
         self.doubleClicked.connect(view_journal_entry)
 
-        def new_journal_entry(journal_entry):
-            self.model().new_journal_entry(journal_entry)
+        def new_journal_entry(journal_entry, notable):
+            self.model().new_journal_entry(journal_entry, notable)
             self.scrollToBottom()
 
         journal_watcher_task.signal_new_entry.connect(new_journal_entry)
@@ -1935,7 +1946,8 @@ class JournalTableModel(QStandardItemModel):
     def get_journal_entry(self, row: int):
         return self.journal_entries[row]
 
-    def new_journal_entry(self, journal_entry):
+    def new_journal_entry(self, journal_entry, notable):
+
         while self.rowCount() >= self.max_journal_entries:
             self.removeRow(0)
             self.journal_entries.pop(0)
@@ -1948,11 +1960,14 @@ class JournalTableModel(QStandardItemModel):
             item.setFlags(Qt.ItemIsSelectable | Qt.ItemIsEnabled | Qt.ItemIsEditable)
             return item
 
-        def setIcon(item: QStandardItem):
-            priority = journal_entry['PRIORITY'] if 'PRIORITY' in journal_entry else Priority.NOTICE.value
-            if not Priority.EMERGENCY.value <= priority <= Priority.DEBUG.value:
-                priority = Priority.NOTICE.value
-            notification_icon_name = NOTIFICATION_ICONS[Priority(priority)]
+        def set_icon(item: QStandardItem):
+            if not notable:
+                notification_icon_name = 'edit-delete'
+            else:
+                priority = journal_entry['PRIORITY'] if 'PRIORITY' in journal_entry else Priority.NOTICE.value
+                if not Priority.EMERGENCY.value <= priority <= Priority.DEBUG.value:
+                    priority = Priority.NOTICE.value
+                notification_icon_name = NOTIFICATION_ICONS[Priority(priority)]
             if notification_icon_name in self.icon_cache:
                 icon = self.icon_cache[notification_icon_name]
             else:
@@ -1971,7 +1986,7 @@ class JournalTableModel(QStandardItemModel):
                 selectable(QStandardItem(journal_entry['_COMM'] if '_COMM' in journal_entry else 'unknown')),
                 # TODO smarter choice when _PID is not present.
                 selectable(align_right(QStandardItem(str(journal_entry['_PID'] if '_PID' in journal_entry else '')))),
-                setIcon(selectable(QStandardItem(journal_entry['MESSAGE'])))
+                set_icon(selectable(QStandardItem(journal_entry['MESSAGE'])))
             ])
 
     def set_max_journal_entries(self, max_entries: int) -> None:
