@@ -197,17 +197,10 @@ with this program. If not, see <https://www.gnu.org/licenses/>.
 
 """
 
-# DONE Add option for how many journal rows to show - if zero hide panel.
-# DONE Add option for non-tray use.
 # TODO Consider creating a separate full log browser making use of the journal API for search and random access.
-# DONE Search 'recent' on toolbar
 # TODO Display more fields in 'recent' - priority as icon perhaps.
-# DONE https://specifications.freedesktop.org/icon-naming-spec/latest/
-# DONE Position the GUI to the left so as not to be covered by alerts.
-# TODO Smaller Apply/Revert button widths.
 # TODO figure out why QIntValidator is only working approximately.
-# DONE Unify treatment of icon loading.
-# DONE Fix tray hover title
+# TODO refine Apply/Revert and dynamically enable/disable the buttons.
 
 import argparse
 import configparser
@@ -262,11 +255,15 @@ ICON_DOCK = "view-restore"
 ICON_GO_NEXT = "go-down"
 ICON_GO_PREVIOUS = "go-up"
 ICON_CLEAR_RECENTS = "edit-clear-all"
+ICON_REVERT = 'edit-undo'
+# This might only be KDE/Linux icons - not in Freedesktop Standard.
+ICON_APPLY = "dialog-ok-apply"
+
 
 ICON_BLACK_COLOR = b"#232629"
 ICON_WHITE_COLOR = b"#f3f3f3"
 
-ICON_JOUNO = b"""
+SVG_JOUNO = b"""
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">
  <path fill="#232629" style="fill:currentColor;fill-opacity:1;stroke:none" 
       d="M 4 2 L 4 3 L 13 3 L 13 13 L 4 13 L 4 14 L 13 14 L 14 14 L 14 3 L 14 2 L 7 2 z"
@@ -279,9 +276,9 @@ ICON_JOUNO = b"""
 
 </svg>
 """
-ICON_JOUNO_LIGHT = ICON_JOUNO.replace(ICON_BLACK_COLOR, b'#bbbbbb')
+SVG_JOUNO_LIGHT = SVG_JOUNO.replace(ICON_BLACK_COLOR, b'#bbbbbb')
 
-ICON_TOOLBAR_RUN_DISABLED = b"""
+SVG_TOOLBAR_RUN_DISABLED = b"""
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 22 22">
     <style type="text/css" id="current-color-scheme">
         .ColorScheme-Text {
@@ -292,8 +289,8 @@ ICON_TOOLBAR_RUN_DISABLED = b"""
 </svg>
 """
 
-ICON_TOOLBAR_RUN_ENABLED = ICON_TOOLBAR_RUN_DISABLED.replace(b"#232629;", b"#3daee9;")
-ICON_TOOLBAR_STOP = b"""
+SVG_TOOLBAR_RUN_ENABLED = SVG_TOOLBAR_RUN_DISABLED.replace(b"#232629;", b"#3daee9;")
+SVG_TOOLBAR_STOP = b"""
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 22 22">
     <style type="text/css" id="current-color-scheme">
         .ColorScheme-Text {
@@ -303,7 +300,7 @@ ICON_TOOLBAR_STOP = b"""
     <path d="m3 3h16v16h-16z" class="ColorScheme-Text" fill="currentColor"/>
 </svg>
 """
-ICON_TOOLBAR_NOTIFIER_ENABLED = b"""
+SVG_TOOLBAR_NOTIFIER_ENABLED = b"""
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 22 22">
   <defs id="defs3051">
     <style type="text/css" id="current-color-scheme">
@@ -318,7 +315,7 @@ ICON_TOOLBAR_NOTIFIER_ENABLED = b"""
      />
 </svg>
 """
-ICON_TOOLBAR_NOTIFIER_DISABLED = b"""
+SVG_TOOLBAR_NOTIFIER_DISABLED = b"""
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 22 22">
   <defs id="defs3051">
     <style type="text/css" id="current-color-scheme">
@@ -333,7 +330,7 @@ ICON_TOOLBAR_NOTIFIER_DISABLED = b"""
      />
 </svg>
 """
-ICON_TOOLBAR_ADD_FILTER = b"""
+SVG_TOOLBAR_ADD_FILTER = b"""
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 22 22">
   <defs id="defs3051">
     <style type="text/css" id="current-color-scheme">
@@ -349,7 +346,8 @@ ICON_TOOLBAR_ADD_FILTER = b"""
      />
 </svg>
 """
-ICON_TOOLBAR_DEL_FILTER = b"""
+
+SVG_TOOLBAR_DEL_FILTER = b"""
 <svg id="svg8" version="1.1" viewBox="0 0 22 22" xmlns="http://www.w3.org/2000/svg">
     <defs id="defs3051">
         <style id="current-color-scheme" type="text/css">.ColorScheme-Text {
@@ -361,7 +359,7 @@ ICON_TOOLBAR_DEL_FILTER = b"""
 </svg>
 """
 
-ICON_TOOLBAR_TEST_FILTERS = b"""
+SVG_TOOLBAR_TEST_FILTERS = b"""
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">
   <defs id="defs3051">
     <style type="text/css" id="current-color-scheme">
@@ -377,7 +375,7 @@ ICON_TOOLBAR_TEST_FILTERS = b"""
 </svg>
 """
 
-ICON_TOOLBAR_HAMBURGER_MENU = b"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 22 22">
+SVG_TOOLBAR_HAMBURGER_MENU = b"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 22 22">
   <defs id="defs3051">
     <style type="text/css" id="current-color-scheme">
       .ColorScheme-Text {
@@ -1022,11 +1020,15 @@ class ConfigPanel(DockableWidget):
         button_box_layout = QGridLayout()
         button_box.setLayout(button_box_layout)
         apply_button = QPushButton(tr("Apply"))
+        apply_button.setIcon(get_icon(ICON_APPLY))
         revert_button = QPushButton(tr("Revert"))
-
-        button_box_layout.addWidget(apply_button, 0, 0)
+        revert_button.setIcon(get_icon(ICON_REVERT))
+        spacer = QWidget()
+        spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         button_box_layout.addWidget(revert_button, 0, 1)
-        button_box_layout.setColumnMinimumWidth(3, 200)
+        button_box_layout.addWidget(spacer, 0, 2)
+        button_box_layout.addWidget(apply_button, 0, 3)
+
 
         def save_action():
             debug("save action") if debugging else None
@@ -1498,15 +1500,15 @@ class MainToolBar(QToolBar):
         self.setIconSize(QSize(32, 32))
         self.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
 
-        self.icon_run_enabled = get_icon(ICON_TOOLBAR_RUN_ENABLED)
-        self.icon_run_disabled = get_icon(ICON_TOOLBAR_RUN_DISABLED)
-        self.icon_notifier_enabled = get_icon(ICON_TOOLBAR_NOTIFIER_ENABLED)
-        self.icon_notifier_disabled = get_icon(ICON_TOOLBAR_NOTIFIER_DISABLED)
-        self.icon_run_stop = get_icon(ICON_TOOLBAR_STOP)
-        self.icon_add_filter = get_icon(ICON_TOOLBAR_ADD_FILTER)
-        self.icon_del_filter = get_icon(ICON_TOOLBAR_DEL_FILTER)
-        self.icon_test_filters = get_icon(ICON_TOOLBAR_TEST_FILTERS)
-        self.icon_menu = get_icon(ICON_TOOLBAR_HAMBURGER_MENU)
+        self.icon_run_enabled = get_icon(SVG_TOOLBAR_RUN_ENABLED)
+        self.icon_run_disabled = get_icon(SVG_TOOLBAR_RUN_DISABLED)
+        self.icon_notifier_enabled = get_icon(SVG_TOOLBAR_NOTIFIER_ENABLED)
+        self.icon_notifier_disabled = get_icon(SVG_TOOLBAR_NOTIFIER_DISABLED)
+        self.icon_run_stop = get_icon(SVG_TOOLBAR_STOP)
+        self.icon_add_filter = get_icon(SVG_TOOLBAR_ADD_FILTER)
+        self.icon_del_filter = get_icon(SVG_TOOLBAR_DEL_FILTER)
+        self.icon_test_filters = get_icon(SVG_TOOLBAR_TEST_FILTERS)
+        self.icon_menu = get_icon(SVG_TOOLBAR_HAMBURGER_MENU)
 
         self.run_action = self.addAction(self.icon_run_enabled, "run", run_func)
         self.run_action.setObjectName("run_button")
@@ -1572,15 +1574,15 @@ class MainToolBar(QToolBar):
         self.installEventFilter(self)
 
     def reload_icons(self):
-        self.icon_run_enabled = get_icon(ICON_TOOLBAR_RUN_ENABLED)
-        self.icon_run_disabled = get_icon(ICON_TOOLBAR_RUN_DISABLED)
-        self.icon_notifier_enabled = get_icon(ICON_TOOLBAR_NOTIFIER_ENABLED)
-        self.icon_notifier_disabled = get_icon(ICON_TOOLBAR_NOTIFIER_DISABLED)
-        self.icon_run_stop = get_icon(ICON_TOOLBAR_STOP)
-        self.icon_add_filter = get_icon(ICON_TOOLBAR_ADD_FILTER)
-        self.icon_del_filter = get_icon(ICON_TOOLBAR_DEL_FILTER)
-        self.icon_test_filters = get_icon(ICON_TOOLBAR_TEST_FILTERS)
-        self.icon_menu = get_icon(ICON_TOOLBAR_HAMBURGER_MENU)
+        self.icon_run_enabled = get_icon(SVG_TOOLBAR_RUN_ENABLED)
+        self.icon_run_disabled = get_icon(SVG_TOOLBAR_RUN_DISABLED)
+        self.icon_notifier_enabled = get_icon(SVG_TOOLBAR_NOTIFIER_ENABLED)
+        self.icon_notifier_disabled = get_icon(SVG_TOOLBAR_NOTIFIER_DISABLED)
+        self.icon_run_stop = get_icon(SVG_TOOLBAR_STOP)
+        self.icon_add_filter = get_icon(SVG_TOOLBAR_ADD_FILTER)
+        self.icon_del_filter = get_icon(SVG_TOOLBAR_DEL_FILTER)
+        self.icon_test_filters = get_icon(SVG_TOOLBAR_TEST_FILTERS)
+        self.icon_menu = get_icon(SVG_TOOLBAR_HAMBURGER_MENU)
 
     def eventFilter(self, target: QObject, event: QEvent) -> bool:
         super().eventFilter(target, event)
@@ -1654,8 +1656,8 @@ class MainContextMenu(QMenu):
 
     def __init__(self, run_func: Callable, notify_func: Callable, quit_func: Callable, parent: QWidget):
         super().__init__(parent=parent)
-        self.icon_notifier_enabled = get_icon(ICON_TOOLBAR_NOTIFIER_ENABLED)
-        self.icon_notifier_disabled = get_icon(ICON_TOOLBAR_NOTIFIER_DISABLED)
+        self.icon_notifier_enabled = get_icon(SVG_TOOLBAR_NOTIFIER_ENABLED)
+        self.icon_notifier_disabled = get_icon(SVG_TOOLBAR_NOTIFIER_DISABLED)
         self.listen_action = self.addAction(get_icon(ICON_CONTEXT_MENU_LISTENING_DISABLE),
                                             tr("Stop journal monitoring"),
                                             run_func)
@@ -1707,7 +1709,7 @@ class MainWindow(QMainWindow):
         info(f"Icon theme '{QIcon.themeName()}' >> is_dark_theme()={is_dark_theme()}")
 
         app_name = tr('Jouno')
-        app.setWindowIcon(get_icon(ICON_JOUNO_LIGHT))
+        app.setWindowIcon(get_icon(SVG_JOUNO_LIGHT))
         app.setApplicationDisplayName(app_name)
         app.setApplicationVersion(JOUNO_VERSION)
 
@@ -1718,7 +1720,7 @@ class MainWindow(QMainWindow):
                 title_text = tr("Running") if journal_watcher_task.is_notifying() else tr("Muted")
                 self.setWindowTitle(title_text)
                 tray.setToolTip(f"{title_text} \u2014 {app_name}")
-                tray.setIcon(get_icon(ICON_JOUNO))
+                tray.setIcon(get_icon(SVG_JOUNO))
             else:
                 self.setWindowTitle(tr("Stopped"))
                 tray.setToolTip(f"{tr('Stopped')} \u2014 {app_name}")
@@ -1801,7 +1803,7 @@ class MainWindow(QMainWindow):
         self.addToolBar(tool_bar)
 
         tray = QSystemTrayIcon()
-        tray.setIcon(get_icon(ICON_JOUNO))
+        tray.setIcon(get_icon(SVG_JOUNO))
         tray.setContextMenu(app_context_menu)
         self.signal_theme_change.connect(update_title_and_tray_indicators)
 
@@ -2334,7 +2336,7 @@ def install_as_desktop_application(uninstall: bool = False):
         warning(f"skipping installation of {icon_path.as_posix()}, it is already present.")
     else:
         info(f'creating {icon_path.as_posix()}')
-        create_pixmap_from_svg_bytes(ICON_JOUNO).save(icon_path.as_posix())
+        create_pixmap_from_svg_bytes(SVG_JOUNO).save(icon_path.as_posix())
 
     info('installation complete. Your desktop->applications->system should now contain jouno')
 
