@@ -203,7 +203,7 @@ with this program. If not, see <https://www.gnu.org/licenses/>.
 # DONE Search 'recent' on toolbar
 # TODO Display more fields in 'recent' - priority as icon perhaps.
 # DONE https://specifications.freedesktop.org/icon-naming-spec/latest/
-# TODO Position the GUI to the left so as not to be covered by alerts.
+# DONE Position the GUI to the left so as not to be covered by alerts.
 # TODO Smaller Apply/Revert button widths.
 # TODO figure out why QIntValidator is only working approximately.
 # DONE Unify treatment of icon loading.
@@ -621,8 +621,9 @@ class JournalWatcher:
                 pass
             else:
                 rule_enabled_key = rule_id + "_enabled"
+                re_indicator_key = rule_id + "_regexp_enabled"
                 if rule_enabled_key not in rules_map or rules_map[rule_enabled_key].lower() == 'yes':
-                    if rule_id.endswith('_regexp'):
+                    if re_indicator_key in rules_map and rules_map[re_indicator_key].lower() == 'yes':
                         patterns_map[rule_id] = re.compile(rule_text)
                     else:
                         patterns_map[rule_id] = re.compile(re.escape(rule_text))
@@ -634,7 +635,6 @@ class JournalWatcher:
             for key, prefix in {'_CMDLINE': '', '_EXE': '', '_COMM': '', 'SYSLOG_IDENTIFIER': '',
                                 '_KERNEL_SUBSYSTEM': 'kernel ',
                                 }.items():
-                # debug("determine_app_name", key, journal_entry[key] if key in journal_entry else False) if debugging else None
                 if key in journal_entry:
                     value = str(journal_entry[key])
                     if app_name_info.find(value) < 0:
@@ -848,7 +848,7 @@ class DockUndockWindow(QMainWindow):
         self.setObjectName('config_main_window')
         self.panel_container = panel_container
         self.previous_geometry = None
-        debug("ConfigMainWindow visible", self.isVisible())
+        debug("ConfigMainWindow visible", self.isVisible()) if debugging else None
 
     def hide(self) -> None:
         self.previous_geometry = self.saveGeometry()
@@ -904,7 +904,7 @@ class DockContainer(QDockWidget):
         self.setWidget(self.target)
 
     def showEvent(self, event: QEvent):
-        debug(event.type(), event)
+        # debug(event.type(), event) if debugging else None
         super().showEvent(event)
         self.target.setMinimumHeight(0)
 
@@ -916,7 +916,7 @@ class DockContainer(QDockWidget):
             self.dock_to_main_window()
 
     def dock_to_main_window(self):
-        debug('dock_main_window')
+        # debug('dock_main_window') if debugging else None
         self.is_docked_to_home = True
         self.setFloating(True)
         self.dock_window.hide()
@@ -932,7 +932,7 @@ class DockContainer(QDockWidget):
             self.dock_window.hide()
 
     def dock_to_dock_window(self, show: bool = True):
-        debug('dock_config_window')
+        # debug('dock_config_window') if debugging else None
         # self.previous_home_geometry = {}
         # for dock_widget in self.home_window.findChildren(QDockWidget):
         #     self.previous_home_geometry[dock_widget.objectName()] = dock_widget.geometry()
@@ -1098,8 +1098,6 @@ class ConfigPanel(DockableWidget):
         tabs.addTab(options_panel, tr("Options"))
         tabs.setCurrentIndex(0)
 
-        # TODO - setter for adding button
-        # title_layout.addWidget(self.dock_button)
         layout.addWidget(title_container)
 
         layout.addWidget(tabs)
@@ -1208,10 +1206,7 @@ class FilterPanel(QWidget):
     def __init__(self, config_section: Mapping[str, str], tooltip: str, config_panel: ConfigPanel):
         super().__init__(parent=config_panel)
         debug("table", str(config_section.keys())) if debugging else None
-
         self.table_view = FilterTableView(config_section, tooltip, config_panel)
-
-        # TODO add a test rules button that pops up a testing dialog with an input field.
         layout = QVBoxLayout(self)
         layout.addWidget(self.table_view)
         self.setLayout(layout)
@@ -1241,7 +1236,7 @@ class FilterTableModel(QStandardItemModel):
         super().__init__(number_of_rows, 2)
         # use spaces to force a wider column - seems to be no other EASY way to do this.
         self.setHorizontalHeaderLabels(
-            [tr("Rule-ID (enabled/disabled)"), tr("Pattern")])
+            [tr("Rule-ID (enabled/disabled)"), tr("Pattern (regexp/text)")])
 
 
 class FilterValidationException(Exception):
@@ -1252,17 +1247,25 @@ class FilterPatternEntryDelegate(QStyledItemDelegate):
 
     def __init__(self, model: FilterTableModel, config_panel: 'ConfigPanel'):
         super().__init__(model)
+        self.model = model
         self.config_panel = config_panel
         self.line_edit = None
 
     def createEditor(self, parent, option, index):
-        if self.line_edit is None:
-            self.line_edit = QLineEdit(parent)
+        self.line_edit = QLineEdit(parent)
 
-        def text_changed(text: str):
-            text = text.strip()
-            if text != '':
-                self.config_panel.signal_new_filter_pattern.emit(text, False)
+        def text_changed(pattern: str):
+            # Ask the JournalPanel to select/highlight partial matches as the user types.
+            pattern = pattern.strip()
+            if pattern != '':
+                pattern_is_regexp = self.model.itemFromIndex(index).checkState()
+                try:
+                    if pattern_is_regexp:
+                        re.compile(pattern)
+                    self.config_panel.signal_new_filter_pattern.emit(pattern, pattern_is_regexp)
+                except re.error:
+                    # Incomplete/illegal regular expression, only signal for valid regular expressions (or plain text)
+                    pass
 
         self.line_edit.textEdited.connect(text_changed)
         return self.line_edit
@@ -1277,9 +1280,10 @@ class FilterTableView(QTableView):
         self.rule_id_tooltip_1 = \
             tr("Rule ID: a letter followed by letters, digits, underscores and hyphens")
         self.rule_id_tooltip_2 = \
-            tr("A rule ID with a _regexp suffix denotes its pattern to be a regular expression.")
+            tr("Tick/untick the checkbox to enable/disable this rule.")
         self.pattern_tooltip = \
-            tr("Pattern: Text or regexp to partially match in the journal entry's message field.")
+            tr("Pattern: Text or regexp to partially match in the journal entry\n"
+               "Tick the checkbox if this pattern is a regular expression")
         tooltip += "\n\n" + tr("Columns:") + "\n" + \
                    tr(f"    {self.enable_tooltip}\n") + \
                    tr(f"    {self.rule_id_tooltip_1}\n") + \
@@ -1320,31 +1324,46 @@ class FilterTableView(QTableView):
         return [row_num for _, row_num in row_y_positions]
 
     def create_rule_id_item(self, rule_id: str):
-        enable_item = QStandardItem(rule_id)
-        enable_item.setCheckable(True)
-        enable_item.setCheckState(Qt.Checked)
-        enable_item.setEditable(True)
-        enable_item.setToolTip(tr(self.rule_id_tooltip_1 + "\n" + self.rule_id_tooltip_2))
-        return enable_item
+        rule_id_item = QStandardItem(rule_id)
+        rule_id_item.setCheckable(True)
+        rule_id_item.setCheckState(Qt.Checked)
+        rule_id_item.setEditable(True)
+        rule_id_item.setToolTip(tr(self.rule_id_tooltip_1 + "\n" + self.rule_id_tooltip_2))
+        return rule_id_item
+
+    def create_pattern_item(self, pattern: str):
+        pattern_item = QStandardItem(pattern)
+        pattern_item.setCheckable(True)
+        pattern_item.setCheckState(Qt.Unchecked)
+        pattern_item.setEditable(True)
+        pattern_item.setToolTip(self.pattern_tooltip)
+        return pattern_item
 
     def is_valid(self) -> bool:
         model = self.model()
         seen = []
         for row_num in self.item_view_order():
             key = model.item(row_num, 0).text()
+            if key.endswith('_enabled'):
+                raise FilterValidationException(
+                    self.__class__.__name__, f"Invalid ID '{key}'", "ID ends in reserved suffix '_enabled'")
             value = model.item(row_num, 1).text()
+            value_is_regexp = model.item(row_num, 1).checkState()
             if re.fullmatch("[a-zA-Z]([a-zA-Z0-9_-])*", key) is None:
                 raise FilterValidationException(
-                    self.__class__.__name__, "Invalid Rule-ID", f"ID='{key}'")
+                    self.__class__.__name__, f"Invalid ID '{key}'",
+                    "ID's should start with a letter and consist of letters, digits, underscores and hypens only.")
             elif key in seen:
                 raise FilterValidationException(
-                    self.__class__.__name__, "Duplicate Rule-ID", f"ID='{key}'")
-            elif key.endswith("_regexp"):
+                    self.__class__.__name__, f"Duplicate ID '{key}'",
+                    "ID's in must be unique within their own filter-tab.")
+            elif value_is_regexp:
                 try:
                     re.compile(value)
-                except Exception as e:
+                except re.error as e:
                     raise FilterValidationException(
-                        self.__class__.__name__, "Invalid Regular Expression", f"\n{key}={value}\n\n{str(e)}")
+                        self.__class__.__name__,
+                        f"Invalid Regular Expression\nID='{key}'\nRegexp='{value}'", f"{str(e)}")
             seen.append(key)
         return True
 
@@ -1358,15 +1377,18 @@ class FilterTableView(QTableView):
             if key.endswith("_enabled"):
                 pass
             else:
-                key_item = self.create_rule_id_item(key)
+                rule_id_item = self.create_rule_id_item(key)
                 key_enabled = key + "_enabled"
                 if key_enabled in config_section:
                     if config_section[key_enabled].strip().lower() != 'yes':
-                        key_item.setCheckState(Qt.Unchecked)
-                model.setItem(row, 0, key_item)
-                value_item = QStandardItem(value)
-                value_item.setToolTip(self.pattern_tooltip)
-                model.setItem(row, 1, QStandardItem(value_item))
+                        rule_id_item.setCheckState(Qt.Unchecked)
+                re_flag = key + "_regexp_enabled"
+                model.setItem(row, 0, rule_id_item)
+                pattern_item = self.create_pattern_item(value)
+                if re_flag in config_section:
+                    if config_section[re_flag].strip().lower() == 'yes':
+                        pattern_item.setCheckState(Qt.Checked)
+                model.setItem(row, 1, QStandardItem(pattern_item))
                 row += 1
 
     def copy_to_config(self, config_section: Mapping[str, str]):
@@ -1382,6 +1404,8 @@ class FilterTableView(QTableView):
             config_section[key] = value
             if model.item(row_num, 0).checkState() == Qt.Unchecked:
                 config_section[key + "_enabled"] = "no"
+            if model.item(row_num, 1).checkState() == Qt.Checked:
+                config_section[key + "_regexp_enabled"] = "yes"
 
     select_flags = QItemSelectionModel.Clear | QItemSelectionModel.Rows | QItemSelectionModel.SelectCurrent | QItemSelectionModel.Rows
 
@@ -1390,12 +1414,12 @@ class FilterTableView(QTableView):
         selected_row_indices = self.selectionModel().selectedRows()
         if len(selected_row_indices) > 0:
             index = sorted(selected_row_indices)[0]
-            model.insertRow(index.row(), [self.create_rule_id_item(rule_id), QStandardItem(pattern)])
+            model.insertRow(index.row(), [self.create_rule_id_item(rule_id), self.create_pattern_item(pattern)])
             self.scrollTo(index)
             self.clearSelection()
             self.selectRow(index.row())
         else:
-            model.appendRow([self.create_rule_id_item(rule_id), QStandardItem(pattern)])
+            model.appendRow([self.create_rule_id_item(rule_id), self.create_pattern_item(pattern)])
             self.scrollToBottom()
             self.selectRow(model.rowCount() - 1)
 
@@ -1468,7 +1492,7 @@ class MainToolBar(QToolBar):
         super().__init__(parent=parent)
 
         # TODO figure out why this toolbar no longer has an undocking handle.
-        debug("Toolbar floatable", self.isFloatable(), "movable", self.isMovable())
+        debug("Toolbar floatable", self.isFloatable(), "movable", self.isMovable()) if debugging else None
 
         self.setObjectName("main-tool-bar")
         self.setIconSize(QSize(32, 32))
@@ -1678,7 +1702,7 @@ class MainWindow(QMainWindow):
         self.state_key = self.objectName() + "_window_state"
 
         journal_watcher_task = JournalWatcherTask()
-        debug('QStyleFactory.keys()=', QStyleFactory.keys())
+        info('QStyleFactory.keys()=', QStyleFactory.keys())
         info(f"Icon theme path={QIcon.themeSearchPaths()}")
         info(f"Icon theme '{QIcon.themeName()}' >> is_dark_theme()={is_dark_theme()}")
 
@@ -1863,7 +1887,6 @@ class JournalPanel(DockableWidget):
 
         self.table_view = JournalTableView(journal_watcher_task, max_journal_entries=max_journal_entries)
 
-        # TODO add a test rules button that pops up a testing dialog with an input field.
         container = self
         layout = QVBoxLayout()
         container.setLayout(layout)
@@ -1883,7 +1906,6 @@ class JournalPanel(DockableWidget):
             self.search_select_journal(text)
             go_next_button.setEnabled(self.scrolled_to_selected is not None)
             go_previous_button.setEnabled(self.scrolled_to_selected is not None)
-            search_input.setFocus()
 
         search_input = QLineEdit()
         search_input.setFixedWidth(350)
@@ -1933,7 +1955,8 @@ class JournalPanel(DockableWidget):
         return self.table_view.model().get_journal_entry(self.table_view.model().rowCount() - 1)
 
     def search_select_journal(self, text: str, regexp_search: bool = False):
-        save_focus = QWidget.focusWidget()
+        save_triggers = self.table_view.editTriggers()
+        self.table_view.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.table_view.clearSelection()
         model = self.table_view.model()
         if text.strip() != '':
@@ -1942,13 +1965,14 @@ class JournalPanel(DockableWidget):
                 # Assume case insensitive if all text is in lower case.
                 # Use an easy a format that is easy to pattern match: "'key=value', 'key=value'"
                 fields_str = ', '.join((f"'{key}={str(value)}'" for key, value in journal_entry.items()))
-                if text in fields_str.lower() if text.islower() else fields_str:
+                regexp = re.compile(text if regexp_search else re.escape(text))
+                if regexp.search(fields_str.lower()) is not None:
                     self.table_view.selectRow(row_num)
                     if self.scrolled_to_selected is None:
                         self.scrolled_to_selected = model.index(row_num, 0)
         if self.scrolled_to_selected is not None:
             self.table_view.scrollTo(self.scrolled_to_selected)
-        save_focus.setFocus()
+        self.table_view.setEditTriggers(save_triggers)
 
     def scroll_selected(self, direction: int):
         all_indexes = self.table_view.selectedIndexes()
