@@ -732,18 +732,20 @@ class JournalWatcher:
         # Use an easy a format that is easy to pattern match
         fields_str = ', '.join((f"'{key}={str(value)}'" for key, value in journal_entry.items()))
         # debug(fields_str) if debugging else None
-        for rule_id, match_re in self.match_regexp.items():
-            if match_re.search(fields_str) is not None:
-                # debug(f"rule=match.{rule_id}: {journal_entry['MESSAGE']}") if debugging else None
-                return True
-        for rule_id, ignore_re in self.ignore_regexp.items():
-            if ignore_re.search(fields_str) is not None:
-                # debug(f"rule=ignore.{rule_id}: {journal_entry['MESSAGE']}") if debugging else None
-                return False
-        # otherwise no patterns matched:
-        # 1) if there are any 'match' patterns at all, we need to return False.
-        # 2) if there are no 'match' patterns at all, we need to return True.
-        return len(self.match_regexp) == 0
+        notable = len(self.match_regexp) == 0
+        if not notable:
+            for rule_id, match_re in self.match_regexp.items():
+                if match_re.search(fields_str) is not None:
+                    # debug(f"rule=match.{rule_id}: {journal_entry['MESSAGE']}") if debugging else None
+                    notable = True
+                    break
+        if notable:
+            for rule_id, ignore_re in self.ignore_regexp.items():
+                if ignore_re.search(fields_str) is not None:
+                    # debug(f"rule=ignore.{rule_id}: {journal_entry['MESSAGE']}") if debugging else None
+                    notable = False
+                    break
+        return notable
 
     def is_stop_requested(self) -> bool:
         return self.supervisor.isInterruptionRequested()
