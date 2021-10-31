@@ -15,24 +15,28 @@ New entries are filtered and forwarded to the desktop as standard *freedesktop D
 Most linux desktops present DBUS notifications as individual popup messages.  Bursts of messages are handled 
 by bundling them in to a single summarising notification. The application's feature set includes:
 
- * A live-view of the current journal with easy access to full journal entry contents, including easy cut and paste.
- * Live view incremental search ans select of all journal fields.
- * Filtering to include or exclude messages.
- * Forwarding of filtered messages to DBUS desktop-notifications.
- * Journal burst handling/bundling for desktop notifications.
- * Plain-text and regular-expression filtering.
- * Easy filter creation from any selected journal entry.
- * Incremental filter design-assistance by incremental search/select against previous journal entries.
- * Filters are saved to file and reloaded at startup.
- * Filters may be edited, deleted, or selectively enabled or disabled.
- * Filter application-order may be altered by drag and drop.
- * Desktop theming support, dynamic support for theme changes, including light/dark theme switching.
- * Panels undock for maximising and customising views.
- * Panel and window sizes and configurations are preserved across panel-docking and application-restarts.
- * Configuration UI, editing of config INI files is not required.
- * Config INI files may be externally edited, file changes are detected and automatically reloaded.
- * An option for running from the system-tray.
-
+ * Journal live-view.
+   + Overview table with live view incremental-search and select.
+   + Double-click access to the all 50+ journal entry fields, including easy cut and paste the text.
+   + Configurable history length, configurable full or filtered view.
+ * Journal forwarding.
+   + Forwarding of filtered messages to the desktop as DBUS-notifications.
+   + Journal message-burst bundling to minimise desktop notifications.
+   + Controls and options to enable/disable forwarding.
+ * Filtering
+   + Filtering to include or exclude messages.
+   + Plain-text and regular-expression filtering.
+   + Easy filter creation from any selected journal entry.
+   + Filters may be edited, deleted, reordered, or selectively enabled or disabled.
+   + Filter editing feedback via incremental-search of past journal entries as you edit.
+   + Filters are saved to the config file and reloaded at startup.
+ * User interface and configuration
+   + Panels undock for maximised or customised viewing.
+   + Panel and window geometries are preserved across panel-docking and application-restarts.
+   + Dynamic (no restart) support for desktop theme changes, including light/dark theme switching.
+   + An option to run minimised in the system-tray with a quick-access tray context-menu.
+   + Full configuration UI, editing of config INI files is not required.
+   + If Config INI files are externally edited, the changes are automatically reloaded without requiring a restart.
 
 ``jouno`` is a tool designed to improve awareness of background activity by monitoring
 the journal and raising interesting journal-entries as desktop notifications.  Possibilities for 
