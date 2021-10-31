@@ -24,23 +24,15 @@ Optional arguments:
 Description
 ===========
 
-``jouno`` is system-tray application for monitoring the ``systemd-journal.`` It raises selected
-entries as desktop-notifications.
-
-The application monitors the ``systemd-journal`` for new entries, filters them, and forwards them as
-standard ``freedesktop dbus notifications``.  Most linux desktops present these notifications
-as individual popup messages.
-
-Bursts of messages are handled by bundling them in to a single summarising notification.
-
-``jouno`` is a tool designed to improve awareness of background activity by monitoring
-the journal and raising interesting journal-entries as desktop notifications.  The application's
-feature set includes:
+``jouno`` is a system-tray application that monitors the ``systemd-journal`` for new journal entries.
+New entries are filtered and forwarded to the desktop as standard *freedesktop DBUS notifications*.
+Most linux desktops present DBUS notifications as individual popup messages.  Bursts of messages are handled
+by bundling them in to a single summarising notification. The application's feature set includes:
 
  * A live-view of the current journal with easy access to full journal entry contents, including easy cut and paste.
  * Live view incremental search ans select of all journal fields.
  * Filtering to include or exclude messages.
- * Desktop-notification forwarding of filtered messages, see important journal messages as popup notifications.
+ * Forwarding of filtered messages to DBUS desktop-notifications.
  * Journal burst handling/bundling for desktop notifications.
  * Plain-text and regular-expression filtering.
  * Easy filter creation from any selected journal entry.
@@ -55,26 +47,23 @@ feature set includes:
  * Config INI files may be externally edited, file changes are detected and automatically reloaded.
  * An option for running from the system-tray.
 
-Possibilities for its use include:
+
+``jouno`` is a tool designed to improve awareness of background activity by monitoring
+the journal and raising interesting journal-entries as desktop notifications.  Possibilities for
+it use include:
 
  * Monitoring specific jobs, such as the progress of the daily backups.
  * Watching for specific events, such as background core dumps.
  * Investigating desktop actions that raise journal log entries.
  * Discovering unnecessary daemon activity and unnecessary services.
  * Notifying access attempts, such as su, ssh, samba, or pam events.
- * Awareness of undesirable desktop activity, such as shutting down during the backups.
+ * Prevention of adverse desktop activity, such as shutting down during the backups.
  * Detecting hardware events.
+ * Providing new jobs with a simple way to raise desktop notifications.
  * Raising general awareness of what is going on in the background.
 
-
-
-I have previously released a gist [notify-desktop](https://gist.github.com/digitaltrails/26aad3282d8739db1de8bc2e59c812eb)
-that allows root batch-jobs, such as my daily backups, to raise notifications for the current desktop
-user, but ``notify-desktop`` only covers my own code.  ``jouno`` allows me to watch for and monitor any
-jobs on the system and potentially removes the need for my jobs to use my ``notify-desktop`` script.
-
-Configuration
-=============
+Getting started
+===============
 
 Clicking on the ``jouno`` system-tray icon brings up an ``options and filters`` panel which includes three
 tabs:

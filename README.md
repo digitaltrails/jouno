@@ -10,21 +10,15 @@ Description
 
 ![Default](screen-shots/Screenshot_Large.png) 
 
-``jouno`` is a system-tray application for monitoring the ``systemd-journal,`` it raises  desktop-notifications
-for journal entries selected according to filter patterns.
-
-The application monitors the ``systemd-journal`` for new entries, filters them, and forwards them as 
-standard ``freedesktop dbus notifications``.  Most linux desktops present these notifications
-as individual popup messages.
-
-Bursts of messages are handled by bundling them in to a single summarising notification.
-
-The application's feature set includes:
+``jouno`` is a system-tray application that monitors the ``systemd-journal`` for new journal entries.
+New entries are filtered and forwarded to the desktop as standard *freedesktop DBUS notifications*.  
+Most linux desktops present DBUS notifications as individual popup messages.  Bursts of messages are handled 
+by bundling them in to a single summarising notification. The application's feature set includes:
 
  * A live-view of the current journal with easy access to full journal entry contents, including easy cut and paste.
  * Live view incremental search ans select of all journal fields.
  * Filtering to include or exclude messages.
- * Desktop-notification forwarding of filtered messages, see important journal messages as popup notifications.
+ * Forwarding of filtered messages to DBUS desktop-notifications.
  * Journal burst handling/bundling for desktop notifications.
  * Plain-text and regular-expression filtering.
  * Easy filter creation from any selected journal entry.
@@ -49,7 +43,7 @@ it use include:
  * Investigating desktop actions that raise journal log entries.
  * Discovering unnecessary daemon activity and unnecessary services.
  * Notifying access attempts, such as su, ssh, samba, or pam events.
- * Awareness of undesirable desktop activity, such as shutting down during the backups.
+ * Prevention of adverse desktop activity, such as shutting down during the backups.
  * Detecting hardware events. 
  * Providing new jobs with a simple way to raise desktop notifications.
  * Raising general awareness of what is going on in the background.
