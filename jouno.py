@@ -232,7 +232,7 @@ from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QMessageBox, QLi
     QHBoxLayout, QStyleFactory, QToolButton, QScrollArea, QLayout
 from systemd import journal
 
-JOUNO_VERSION = '0.9.7'
+JOUNO_VERSION = '1.0.0'
 
 # The icons can either be:
 #   1) str: named icons from the freedesktop theme which should all be available on most Linux desktops.
@@ -1914,6 +1914,7 @@ class JournalPanel(DockableWidget):
         search_input.addAction(get_icon(ICON_SEARCH_JOURNAL), QLineEdit.LeadingPosition)
         search_input.setToolTip(tr("Incrementally search journal entries.\nSearches all fields."))
         search_input.textEdited.connect(search_entries)
+        search_input.setClearButtonEnabled(True)
         title_layout.addWidget(search_input)
         self.scrolled_to_selected = None
 
