@@ -1819,6 +1819,7 @@ class MainWindow(QMainWindow):
             global debugging
             debugging = config_panel.get_config().getboolean('options', 'debug_enabled')
             self.status_bar.showMessage(tr("Applying configuration changes."), 3000)
+            self.static_status_label.setText("")
             if config_panel.get_config().getboolean('options', 'system_tray_enabled'):
                 if not tray.isVisible():
                     tray.setVisible(True)
@@ -2012,7 +2013,8 @@ class JournalPanel(DockableWidget):
             self.table_view.new_journal_entry(journal_entry, notable)
             #self.journal_status_bar.showMessage(tr("New journal entry."), 1000)
             self.static_status_label.setText(
-                tr("{n}/{m}").format(n=self.table_view.model().rowCount(), m=max_journal_entries))
+                tr("{n}/{m}").format(
+                    n=self.table_view.model().rowCount(), m=self.table_view.model().get_max_journal_entries()))
 
         journal_watcher_task.signal_new_entry.connect(new_journal_entry)
 
@@ -2176,6 +2178,8 @@ class JournalTableModel(QStandardItemModel):
     def set_max_journal_entries(self, max_entries: int) -> None:
         self.max_journal_entries = max_entries
 
+    def get_max_journal_entries(self):
+        return self.max_journal_entries
 
 class JournalEntryDialogPlain(QDialog):
 
