@@ -469,11 +469,11 @@ with this program. If not, see <a href="https://www.gnu.org/licenses/">https://w
 
 DEFAULT_CONFIG = '''
 [options]
-poll_seconds = 2
+poll_seconds = 5
 burst_seconds = 5
-burst_truncate_messages = 3
-notification_seconds = 60
-journal_history_max = 100
+burst_truncate_messages = 6
+notification_seconds = 30
+journal_history_max = 500
 system_tray_enabled = yes
 start_with_notifications_enabled = yes
 list_all_enabled = no
