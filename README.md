@@ -1,7 +1,6 @@
 jouno: Journal notifications forwarder
 ======================================
 
-A Systemd-Journal viewer with Freedesktop-Notifications 
 A [Systemd-Journal](https://www.freedesktop.org/software/systemd/man/systemd-journald.service.html) viewer with 
 [Freedesktop Notifications](https://specifications.freedesktop.org/notification-spec/latest/ar01s09.html) 
 forwarding including burst-handling and filtering.

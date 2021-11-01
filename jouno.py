@@ -443,9 +443,7 @@ ABOUT_TEXT = f"""
 
 <b>jouno version {JOUNO_VERSION}</b>
 <p>
-A journal-entry to desktop-notification forwarder. 
-<p>
-<i>Right-mouse &rarr; context-menu &rarr; help</i> for help.
+A Systemd-Journal viewer with Freedesktop-Notifications forwarding including burst-handling and filtering.
 <p>
 Visit <a href="https://github.com/digitaltrails/jouno">https://github.com/digitaltrails/jouno</a> for 
 more details.
