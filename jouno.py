@@ -63,7 +63,7 @@ it use include:
  * Notifying access attempts, such as su, ssh, samba, or pam events.
  * Prevention of adverse desktop activity, such as shutting down during the backups.
  * Detecting hardware events.
- * Providing new jobs with a simple way to raise desktop notifications.
+ * Providing timer and cron jobs with a simple way to raise desktop notifications.
  * Raising general awareness of what is going on in the background.
 
 Getting started
