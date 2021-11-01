@@ -1815,7 +1815,7 @@ class MainWindow(QMainWindow):
             tool_bar.configure_filter_actions(tab_number == 0 or tab_number == 1)
 
         def config_change() -> None:
-            journal_panel.set_max_journal_entries(config_panel.get_config().getint('options', 'journal_history_max'))
+            journal_panel.set_max_entries(config_panel.get_config().getint('options', 'journal_history_max'))
             global debugging
             debugging = config_panel.get_config().getboolean('options', 'debug_enabled')
             self.status_bar.showMessage(tr("Applying configuration changes."), 3000)
@@ -1842,7 +1842,7 @@ class MainWindow(QMainWindow):
 
         self.journal_panel = journal_panel = JournalPanel(
             journal_watcher_task=journal_watcher_task,
-            max_journal_entries=config_panel.get_config().getint('options', 'journal_history_max'))
+            max_entries=config_panel.get_config().getint('options', 'journal_history_max'))
         self.journal_dock_container = DockContainer(
             dockable_widget=journal_panel, home_window=self, home_dock_area=Qt.DockWidgetArea.TopDockWidgetArea)
 
@@ -1942,11 +1942,12 @@ class MainWindow(QMainWindow):
 
 class JournalPanel(DockableWidget):
 
-    def __init__(self, journal_watcher_task: JournalWatcherTask, max_journal_entries: int):
+    def __init__(self, journal_watcher_task: JournalWatcherTask, max_entries: int):
         super().__init__(parent=None, flags=Qt.WindowFlags(Qt.WindowStaysOnTopHint))
         self.setObjectName("journal-panel")
 
-        self.table_view = JournalTableView(max_journal_entries=max_journal_entries)
+        self.table_view = JournalTableView()
+        self.table_view.model().set_max_entries(max_entries)
 
         container = self
         layout = QVBoxLayout()
@@ -2006,15 +2007,16 @@ class JournalPanel(DockableWidget):
         self.static_status_label = QLabel("")
         self.journal_status_bar.addPermanentWidget(self.static_status_label)
         layout.addWidget(self.journal_status_bar)
-        self.static_status_label.setText(
-            tr("{n}/{m}").format(n=0, m=max_journal_entries))
+        self.static_status_label.setText(tr("{n}/{m}").format(n=0, m=max_entries))
+
+        self.counter = 0
 
         def new_journal_entry(journal_entry, notable):
+            self.counter += 1
             self.table_view.new_journal_entry(journal_entry, notable)
             #self.journal_status_bar.showMessage(tr("New journal entry."), 1000)
             self.static_status_label.setText(
-                tr("{n}/{m}").format(
-                    n=self.table_view.model().rowCount(), m=self.table_view.model().get_max_journal_entries()))
+                tr("{n}/{m}").format(n=self.counter, m=self.table_view.model().get_max_entries()))
 
         journal_watcher_task.signal_new_entry.connect(new_journal_entry)
 
@@ -2072,8 +2074,8 @@ class JournalPanel(DockableWidget):
             self.scrolled_to_selected = row_start_selections[new_pos]
         self.table_view.scrollTo(self.scrolled_to_selected, QAbstractItemView.PositionAtCenter)
 
-    def set_max_journal_entries(self, max_entries: int) -> None:
-        self.table_view.model().set_max_journal_entries(max_entries)
+    def set_max_entries(self, max_entries: int) -> None:
+        self.table_view.model().set_max_entries(max_entries)
 
 
 class JournalEntryDelegate(QStyledItemDelegate):
@@ -2087,10 +2089,10 @@ class JournalEntryDelegate(QStyledItemDelegate):
 
 class JournalTableView(QTableView):
 
-    def __init__(self, max_journal_entries: int):
+    def __init__(self):
         super().__init__()
         self.setToolTip(tr("Double click the row's message icon to view the complete journal entry."))
-        self.setModel(JournalTableModel(max_journal_entries=max_journal_entries))
+        self.setModel(JournalTableModel())
         self.setDragDropOverwriteMode(False)
         self.resizeColumnsToContents()
         self.setSelectionBehavior(QAbstractItemView.SelectRows)
@@ -2121,9 +2123,9 @@ class JournalTableView(QTableView):
 
 class JournalTableModel(QStandardItemModel):
 
-    def __init__(self, max_journal_entries: int):
+    def __init__(self):
         super().__init__(0, 5)
-        self.max_journal_entries = max_journal_entries
+        self.max_entries = 100
         self.icon_cache = {}
         self.journal_entries = []
         self.setHorizontalHeaderLabels(
@@ -2134,7 +2136,7 @@ class JournalTableModel(QStandardItemModel):
 
     def new_journal_entry(self, journal_entry, notable):
 
-        while self.rowCount() >= self.max_journal_entries:
+        while self.rowCount() >= self.max_entries:
             self.removeRow(0)
             self.journal_entries.pop(0)
 
@@ -2175,11 +2177,12 @@ class JournalTableModel(QStandardItemModel):
                 set_icon(selectable(QStandardItem(journal_entry['MESSAGE'])))
             ])
 
-    def set_max_journal_entries(self, max_entries: int) -> None:
-        self.max_journal_entries = max_entries
+    def set_max_entries(self, max_entries: int) -> None:
+        self.max_entries = max_entries
 
-    def get_max_journal_entries(self):
-        return self.max_journal_entries
+    def get_max_entries(self) -> int:
+        return self.max_entries
+
 
 class JournalEntryDialogPlain(QDialog):
 
