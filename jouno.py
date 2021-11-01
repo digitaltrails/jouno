@@ -261,6 +261,7 @@ import sys
 import textwrap
 import time
 import traceback
+from datetime import datetime
 from enum import Enum
 from functools import partial
 from pathlib import Path
@@ -276,7 +277,7 @@ from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QMessageBox, QLi
     QPushButton, QSystemTrayIcon, QMenu, QTextEdit, QDialog, QTabWidget, \
     QCheckBox, QGridLayout, QTableView, \
     QAbstractItemView, QHeaderView, QMainWindow, QSizePolicy, QStyledItemDelegate, QToolBar, QDockWidget, \
-    QHBoxLayout, QStyleFactory, QToolButton, QScrollArea, QLayout
+    QHBoxLayout, QStyleFactory, QToolButton, QScrollArea, QLayout, QStatusBar
 from systemd import journal
 
 JOUNO_VERSION = '1.0.0'
@@ -305,7 +306,6 @@ ICON_CLEAR_RECENTS = "edit-clear-all"
 ICON_REVERT = 'edit-undo'
 # This might only be KDE/Linux icons - not in Freedesktop Standard.
 ICON_APPLY = "dialog-ok-apply"
-
 
 ICON_BLACK_COLOR = b"#232629"
 ICON_WHITE_COLOR = b"#f3f3f3"
@@ -524,8 +524,8 @@ def debug(*arg):
         print('DEBUG:', *arg)
 
 
-def info(*arg):
-    print('INFO:', *arg)
+def info(message: str, millis: int = 15000):
+    print('INFO:', message)
 
 
 def warning(*arg):
@@ -1027,7 +1027,7 @@ class DockContainer(QDockWidget):
 
 
 class ConfigPanel(DockableWidget):
-    signal_new_filter_pattern = pyqtSignal(str, bool)
+    signal_editing_filter_pattern = pyqtSignal(str, bool)
 
     def __init__(self, tab_change: Callable, config_change_func: Callable):
         super().__init__(parent=None, flags=Qt.WindowFlags(Qt.WindowStaysOnTopHint))
@@ -1077,7 +1077,6 @@ class ConfigPanel(DockableWidget):
         button_box_layout.addWidget(revert_button, 0, 1)
         button_box_layout.addWidget(spacer, 0, 2)
         button_box_layout.addWidget(apply_button, 0, 3)
-
 
         def save_action():
             debug("save action") if debugging else None
@@ -1131,11 +1130,11 @@ class ConfigPanel(DockableWidget):
                 revert_message.setStandardButtons(QMessageBox.Ok | QMessageBox.Cancel)
                 if revert_message.exec() == QMessageBox.Cancel:
                     return
-            info("reverting unsaved edits")
+            info("Reverting unsaved changes.")
             reload_from_config()
 
         def reload_from_config():
-            info("GUI reloading config") if debugging else None
+            info("UI reloading config from file.") if debugging else None
             options_panel.copy_from_config(self.config['options'])
             match_panel.copy_from_config(self.config['match'])
             ignore_panel.copy_from_config(self.config['ignore'])
@@ -1308,15 +1307,14 @@ class FilterPatternEntryDelegate(QStyledItemDelegate):
         def text_changed(pattern: str):
             # Ask the JournalPanel to select/highlight partial matches as the user types.
             pattern = pattern.strip()
-            if pattern != '':
-                pattern_is_regexp = self.model.itemFromIndex(index).checkState()
-                try:
-                    if pattern_is_regexp:
-                        re.compile(pattern)
-                    self.config_panel.signal_new_filter_pattern.emit(pattern, pattern_is_regexp)
-                except re.error:
-                    # Incomplete/illegal regular expression, only signal for valid regular expressions (or plain text)
-                    pass
+            pattern_is_regexp = self.model.itemFromIndex(index).checkState()
+            try:
+                if pattern_is_regexp:
+                    re.compile(pattern)
+                self.config_panel.signal_editing_filter_pattern.emit(pattern, pattern_is_regexp)
+            except re.error:
+                # Incomplete/illegal regular expression, only signal for valid regular expressions (or plain text)
+                pass
 
         self.line_edit.textEdited.connect(text_changed)
         return self.line_edit
@@ -1398,24 +1396,29 @@ class FilterTableView(QTableView):
             key = model.item(row_num, 0).text()
             if key.endswith('_enabled'):
                 raise FilterValidationException(
-                    self.__class__.__name__, f"Invalid ID '{key}'", "ID ends in reserved suffix '_enabled'")
+                    self.__class__.__name__,
+                    tr("Invalid ID '{key}'").format(key=key),
+                    tr("ID ends in reserved suffix '_enabled'"))
             value = model.item(row_num, 1).text()
             value_is_regexp = model.item(row_num, 1).checkState()
             if re.fullmatch("[a-zA-Z]([a-zA-Z0-9_-])*", key) is None:
                 raise FilterValidationException(
-                    self.__class__.__name__, f"Invalid ID '{key}'",
-                    "ID's should start with a letter and consist of letters, digits, underscores and hypens only.")
+                    self.__class__.__name__,
+                    tr("Invalid ID '{key}'").format(key=key),
+                    tr("ID's should start with a letter and consist of letters, digits, underscores and hypens only."))
             elif key in seen:
                 raise FilterValidationException(
-                    self.__class__.__name__, f"Duplicate ID '{key}'",
-                    "ID's in must be unique within their own filter-tab.")
+                    self.__class__.__name__,
+                    tr("Invalid ID '{key}'").format(key=key),
+                    tr("ID's in must be unique within their own filter-tab."))
             elif value_is_regexp:
                 try:
                     re.compile(value)
                 except re.error as e:
                     raise FilterValidationException(
                         self.__class__.__name__,
-                        f"Invalid Regular Expression\nID='{key}'\nRegexp='{value}'", f"{str(e)}")
+                        tr("Invalid Regular Expression\nID='{key}'\nRegexp='{value}'").format(key=key, value=value),
+                        f"{str(e)}")
             seen.append(key)
         return True
 
@@ -1772,8 +1775,9 @@ class MainWindow(QMainWindow):
                 tray.setToolTip(f"{title_text} \u2014 {app_name}")
                 tray.setIcon(get_icon(SVG_JOUNO))
             else:
-                self.setWindowTitle(tr("Stopped"))
-                tray.setToolTip(f"{tr('Stopped')} \u2014 {app_name}")
+                title_text = tr("Stopped")
+                self.setWindowTitle(title_text)
+                tray.setToolTip(f"{title_text} \u2014 {app_name}")
                 tray.setIcon(get_icon(ICON_TRAY_LISTENING_DISABLED))
 
         def enable_listener(enable: bool) -> None:
@@ -1814,6 +1818,7 @@ class MainWindow(QMainWindow):
             journal_panel.set_max_journal_entries(config_panel.get_config().getint('options', 'journal_history_max'))
             global debugging
             debugging = config_panel.get_config().getboolean('options', 'debug_enabled')
+            self.status_bar.showMessage(tr("Applying configuration changes."), 3000)
             if config_panel.get_config().getboolean('options', 'system_tray_enabled'):
                 if not tray.isVisible():
                     tray.setVisible(True)
@@ -1840,7 +1845,10 @@ class MainWindow(QMainWindow):
         self.journal_dock_container = DockContainer(
             dockable_widget=journal_panel, home_window=self, home_dock_area=Qt.DockWidgetArea.TopDockWidgetArea)
 
-        self.config_panel.signal_new_filter_pattern.connect(journal_panel.search_select_journal)
+        self.status_bar = journal_panel.journal_status_bar
+        self.static_status_label = journal_panel.static_status_label
+
+        self.config_panel.signal_editing_filter_pattern.connect(journal_panel.search_select_journal)
 
         app_context_menu = MainContextMenu(
             run_func=toggle_listener, notify_func=toggle_notifier, quit_func=quit_app, parent=self)
@@ -1889,7 +1897,7 @@ class MainWindow(QMainWindow):
         return True
 
     def closeEvent(self, event: QCloseEvent) -> None:
-        info("closeEvent")
+        debug("closeEvent") if debugging else None
         if self.config_panel.get_config().getboolean('options', 'system_tray_enabled'):
             self.tray_activate_window()
         else:
@@ -1937,7 +1945,7 @@ class JournalPanel(DockableWidget):
         super().__init__(parent=None, flags=Qt.WindowFlags(Qt.WindowStaysOnTopHint))
         self.setObjectName("journal-panel")
 
-        self.table_view = JournalTableView(journal_watcher_task, max_journal_entries=max_journal_entries)
+        self.table_view = JournalTableView(self, journal_watcher_task, max_journal_entries=max_journal_entries)
 
         container = self
         layout = QVBoxLayout()
@@ -1993,6 +2001,28 @@ class JournalPanel(DockableWidget):
 
         layout.addWidget(self.table_view)
 
+        self.journal_status_bar = QStatusBar()
+        self.static_status_label = QLabel("")
+        self.journal_status_bar.addPermanentWidget(self.static_status_label)
+        layout.addWidget(self.journal_status_bar)
+        self.static_status_label.setText(
+            tr("{count} / {d}d {h:0>2}:{m:0>2}:{s:0>2}").format(count=0, d=0, h=0, m=0, s=0))
+
+        self.message_count = 0
+        self.start_time = datetime.now()
+
+        def new_journal_entry(journal_entry, notable):
+            self.table_view.new_journal_entry(journal_entry, notable)
+            self.message_count += 1
+            self.journal_status_bar.showMessage(
+                tr("Received journal entry {count}").format(count=self.message_count), 1000)
+            elapsed = (datetime.now() - self.start_time)
+            d, h, m, s = elapsed.days, elapsed.seconds // 3600, elapsed.seconds % 3600 // 60, elapsed.seconds % 3600 % 60
+            self.static_status_label.setText(
+                tr("{count} / {d}d {h:0>2}:{m:0>2}:{s:0>2}").format(count=self.message_count, d=d, h=h, m=m, s=s))
+
+        journal_watcher_task.signal_new_entry.connect(new_journal_entry)
+
     def add_dock_control(self, dock_button: QPushButton):
         self.title_layout.addWidget(dock_button)
 
@@ -2012,6 +2042,7 @@ class JournalPanel(DockableWidget):
         self.table_view.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.table_view.clearSelection()
         model = self.table_view.model()
+        match_count = 0
         if text.strip() != '':
             for row_num in range(model.rowCount()):
                 journal_entry = model.get_journal_entry(row_num)
@@ -2021,11 +2052,17 @@ class JournalPanel(DockableWidget):
                 regexp = re.compile(text if regexp_search else re.escape(text))
                 if regexp.search(fields_str.lower()) is not None:
                     self.table_view.selectRow(row_num)
+                    match_count += 1
                     if self.scrolled_to_selected is None:
                         self.scrolled_to_selected = model.index(row_num, 0)
         if self.scrolled_to_selected is not None:
             self.table_view.scrollTo(self.scrolled_to_selected)
         self.table_view.setEditTriggers(save_triggers)
+        if match_count == 0:
+            self.journal_status_bar.showMessage(tr("Nothing matches"), 2000)
+        else:
+            self.journal_status_bar.showMessage(
+                "Matched {match_count} entries.".format(match_count=match_count), 4000)
 
     def scroll_selected(self, direction: int):
         all_indexes = self.table_view.selectedIndexes()
@@ -2055,7 +2092,7 @@ class JournalEntryDelegate(QStyledItemDelegate):
 
 class JournalTableView(QTableView):
 
-    def __init__(self, journal_watcher_task: JournalWatcherTask, max_journal_entries: int):
+    def __init__(self, journal_panel: JournalPanel, journal_watcher_task: JournalWatcherTask, max_journal_entries: int):
         super().__init__()
         self.setToolTip(tr("Double click the row's message icon to view the complete journal entry."))
         self.setModel(JournalTableModel(max_journal_entries=max_journal_entries))
@@ -2083,11 +2120,9 @@ class JournalTableView(QTableView):
 
         self.doubleClicked.connect(view_journal_entry)
 
-        def new_journal_entry(journal_entry, notable):
-            self.model().new_journal_entry(journal_entry, notable)
-            self.scrollToBottom()
-
-        journal_watcher_task.signal_new_entry.connect(new_journal_entry)
+    def new_journal_entry(self, journal_entry, notable):
+        self.model().new_journal_entry(journal_entry, notable)
+        self.scrollToBottom()
 
 
 class JournalTableModel(QStandardItemModel):
@@ -2155,14 +2190,15 @@ class JournalEntryDialogPlain(QDialog):
     def __init__(self, parent, journal_entry):
         super().__init__(parent)
 
-        self.setWindowTitle(tr(f"Journal Entry {journal_entry['__REALTIME_TIMESTAMP']}"))
+        self.setWindowTitle(tr("Journal Entry {journal_entry['__REALTIME_TIMESTAMP']}"))
+        self.setWindowTitle(tr("Journal Entry {entry}").format(entry=journal_entry['__REALTIME_TIMESTAMP']))
         layout = QVBoxLayout()
 
         text_view = QTextEdit()
         text_view.setFont(QFontDatabase.systemFont(QFontDatabase.FixedFont))
         text_view.setReadOnly(True)
         text_view.setLineWrapMode(QTextEdit.LineWrapMode.NoWrap)
-        text = tr(f"Journal Entry {journal_entry['__REALTIME_TIMESTAMP']}\n\n")
+        text = tr("Journal Entry {entry}\n\n").format(entry=journal_entry['__REALTIME_TIMESTAMP'])
         for row, (k, v) in enumerate(sorted(list(journal_entry.items()))):
             text += f"{k:25}: {str(v)}\n"
         text_view.setText(text)
