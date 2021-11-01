@@ -265,7 +265,7 @@ from datetime import datetime
 from enum import Enum
 from functools import partial
 from pathlib import Path
-from typing import Mapping, Any, List, Type, Callable
+from typing import Mapping, Any, List, Type, Callable, Tuple
 
 import dbus
 from PyQt5.QtCore import QCoreApplication, QProcess, Qt, pyqtSignal, QThread, QModelIndex, QItemSelectionModel, QSize, \
@@ -489,6 +489,38 @@ qt_kde_binding_loop = Binding loop detected for property
 [match]
 
 '''
+
+
+class ConfigOption:
+
+    def __init__(self, option_id: str, tooltip: str, int_range: Tuple[int, int] = None):
+        self.option_id = option_id
+        self.int_range = int_range
+        self._tooltip = tooltip
+
+    def label(self):
+        return tr(self.option_id).replace('_', ' ').capitalize()
+
+    def tooltip(self):
+        fmt = tr(self._tooltip)
+        return fmt.format(self.int_range[0],self.int_range[1]) if self.int_range is not None else fmt
+
+
+CONFIG_OPTIONS_LIST: List[ConfigOption] = {
+    ConfigOption('poll_seconds', 'How often to poll for new messages ({}..{} seconds).', (1, 30)),
+    ConfigOption('burst_seconds', 'How long to wait for a burst of messages to complete ({}..{} seconds).', (1, 30)),
+    ConfigOption('burst_truncate_messages',
+                 'How many messages from a burst should be bundled into its desktop notification ({}..{} messages).',
+                 (1, 50)),
+    ConfigOption('notification_seconds',
+                 'How long should a desktop notification remain visible ({}..{} seconds)', (1, 60)),
+    ConfigOption('journal_history_max',
+                 'How many journal entries should be retained in the Recently Notified panel. '),
+    ConfigOption('system_tray_enabled', 'Jouno should start minimised in the system-tray.'),
+    ConfigOption('start_with_notifications_enabled', 'Jouno should start with desktop notifications enabled.'),
+    ConfigOption('list_all_enabled', 'The Recent notifications panel should show all entries, including non-notified.'),
+    ConfigOption('debug_enabled', 'Enable extra debugging output to standard-out.'),
+}
 
 
 # ######################## MONITOR SUB PROCESS CODE ###############################################################
@@ -1195,25 +1227,27 @@ class OptionsTab(QWidget):
         grid_layout = QGridLayout(self)
         bool_count = 0
         text_count = 0
-        for i, (option_id, value) in enumerate(config_section.items()):
-            label_widget = QLabel(tr(option_id))
+        for i, option_spec in enumerate(CONFIG_OPTIONS_LIST):
+            option_id = option_spec.option_id
+            value = config_section[option_id] if option_id in config_section else ''
+            label_widget = QLabel(option_spec.label())
+            label_widget.setToolTip(option_spec.tooltip())
             if option_id.endswith("_enabled"):
                 input_widget = QCheckBox()
                 input_widget.setChecked(value == 'yes')
+                input_widget.setToolTip(option_spec.tooltip())
                 column_number = 3
                 row_number = bool_count
                 bool_count += 1
             else:
                 input_widget = QLineEdit()
-                if '_seconds' in option_id:
-                    max_value = 120
-                elif '_history' in option_id:
-                    max_value = 1000
-                else:
-                    max_value = 20
-                input_widget.setValidator(QIntValidator(0, max_value))
                 input_widget.setMaximumWidth(100)
                 input_widget.setText(value)
+                if option_spec.int_range is not None:
+                    input_widget.setValidator(QIntValidator(option_spec.int_range[0], option_spec.int_range[1]))
+                else:
+                    input_widget.setValidator(QIntValidator(1, 100000))
+                input_widget.setToolTip(option_spec.tooltip())
                 column_number = 0
                 row_number = text_count
                 text_count += 1
@@ -2014,7 +2048,7 @@ class JournalPanel(DockableWidget):
         def new_journal_entry(journal_entry, notable):
             self.counter += 1
             self.table_view.new_journal_entry(journal_entry, notable)
-            #self.journal_status_bar.showMessage(tr("New journal entry."), 1000)
+            # self.journal_status_bar.showMessage(tr("New journal entry."), 1000)
             self.static_status_label.setText(
                 tr("{n}/{m}").format(n=self.counter, m=self.table_view.model().get_max_entries()))
 
