@@ -506,7 +506,7 @@ class ConfigOption:
         return fmt.format(self.int_range[0],self.int_range[1]) if self.int_range is not None else fmt
 
 
-CONFIG_OPTIONS_LIST: List[ConfigOption] = {
+CONFIG_OPTIONS_LIST: List[ConfigOption] = [
     ConfigOption('poll_seconds', 'How often to poll for new messages ({}..{} seconds).', (1, 30)),
     ConfigOption('burst_seconds', 'How long to wait for a burst of messages to complete ({}..{} seconds).', (1, 30)),
     ConfigOption('burst_truncate_messages',
@@ -520,7 +520,7 @@ CONFIG_OPTIONS_LIST: List[ConfigOption] = {
     ConfigOption('start_with_notifications_enabled', 'Jouno should start with desktop notifications enabled.'),
     ConfigOption('list_all_enabled', 'The Recent notifications panel should show all entries, including non-notified.'),
     ConfigOption('debug_enabled', 'Enable extra debugging output to standard-out.'),
-}
+]
 
 
 # ######################## MONITOR SUB PROCESS CODE ###############################################################
