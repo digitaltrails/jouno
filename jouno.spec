@@ -23,7 +23,7 @@ License: GPL-3.0-or-later
 BuildArch: noarch
 URL: https://github.com/digitaltrails/jouno
 Group: System/GUI/Other
-Summary: A desktop tray app for forwarding systemd-Journal entries to Freedesktop-Notifications
+Summary: A GUI Systemd-Journal monitor with DBUS Notification forwarding
 Source0:        %{name}-%{version}.tar.gz
 
 %if 0%{?suse_version} || 0%{?fedora_version}
