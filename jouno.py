@@ -3,7 +3,7 @@
 jouno: Journal notifications forwarder
 ======================================
 
-A Systemd-Journal viewer with Freedesktop-Notifications forwarding including burst-handling and filtering.
+A GUI Systemd-Journal viewer with Freedesktop-Notifications forwarding including burst-handling and filtering.
 
 Usage:
 ======
@@ -24,7 +24,7 @@ Optional arguments:
 Description
 ===========
 
-``Jouno`` is a ``systemd-journal`` monitoring and viewing tool.  Jouno can filter and bundle messages for
+``Jouno`` is a GUI ``systemd-journal`` monitoring and viewing tool.  Jouno can filter and bundle messages for
 forwarding to the desktop as standard *Freedesktop DBUS Notifications* (most linux desktop environments present
 DBUS Notifications as popup messages). Jouno's feature set includes:
 

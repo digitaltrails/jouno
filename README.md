@@ -10,7 +10,7 @@ Description
 
 ![Default](screen-shots/Screenshot_Large.png) 
 
-``Jouno`` is a *Systemd-Journal* monitoring and viewing tool.  Jouno can filter and bundle messages for
+``Jouno`` is a GUI *Systemd-Journal* monitoring and viewing tool.  Jouno can filter and bundle messages for
 forwarding to the desktop as standard *DBUS Freedesktop Notifications* (most linux desktop environments present 
 DBUS Notifications as popup messages). Jouno's feature set includes:
 
