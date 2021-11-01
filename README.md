@@ -32,7 +32,7 @@ by bundling them in to a single summarising notification. The application's feat
    + Filters are saved to the config file and reloaded at startup.
  * User interface and configuration
    + Panels undock for maximised or customised viewing.
-   + Panel and window geometries are preserved across panel-docking and application-restarts.
+   + Customised panel and window geometries are preserved across application-restart and panel-docking.
    + Dynamic (no restart) support for desktop theme changes, including light/dark theme switching.
    + An option to run minimised in the system-tray with a quick-access tray context-menu.
    + Full configuration UI, editing of config INI files is not required.
