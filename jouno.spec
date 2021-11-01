@@ -34,12 +34,9 @@ BuildRequires: coreutils
 
 BuildRoot: %{_tmppath}/%{name}-%{version}-build
 %description
-jouno, is system-tray application for monitoring the systemd-journal. It raises
-selected entries as desktop-notifications. The application monitors the
-systemd-journal for new entries, filters them, and forwards them as standard
-freedesktop dbus notifications.  Most linux desktops present these notifications
-as popup messages.  Bursts of messages are handled by bundling them in to a
-single summarising notification.
+Jouno is a GUI Systemd-Journal monitoring and viewing tool.  Jouno can filter and
+bundle messages for forwarding to the desktop as standard DBUS Freedesktop Notifications
+(most linux desktop environments present DBUS Notifications as popup messages).
 
 %prep
 %setup -q
