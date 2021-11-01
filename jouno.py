@@ -1945,7 +1945,7 @@ class JournalPanel(DockableWidget):
         super().__init__(parent=None, flags=Qt.WindowFlags(Qt.WindowStaysOnTopHint))
         self.setObjectName("journal-panel")
 
-        self.table_view = JournalTableView(self, journal_watcher_task, max_journal_entries=max_journal_entries)
+        self.table_view = JournalTableView(max_journal_entries=max_journal_entries)
 
         container = self
         layout = QVBoxLayout()
@@ -2006,20 +2006,13 @@ class JournalPanel(DockableWidget):
         self.journal_status_bar.addPermanentWidget(self.static_status_label)
         layout.addWidget(self.journal_status_bar)
         self.static_status_label.setText(
-            tr("{count} / {d}d {h:0>2}:{m:0>2}:{s:0>2}").format(count=0, d=0, h=0, m=0, s=0))
-
-        self.message_count = 0
-        self.start_time = datetime.now()
+            tr("{n}/{m}").format(n=0, m=max_journal_entries))
 
         def new_journal_entry(journal_entry, notable):
             self.table_view.new_journal_entry(journal_entry, notable)
-            self.message_count += 1
-            self.journal_status_bar.showMessage(
-                tr("Received journal entry {count}").format(count=self.message_count), 1000)
-            elapsed = (datetime.now() - self.start_time)
-            d, h, m, s = elapsed.days, elapsed.seconds // 3600, elapsed.seconds % 3600 // 60, elapsed.seconds % 3600 % 60
+            #self.journal_status_bar.showMessage(tr("New journal entry."), 1000)
             self.static_status_label.setText(
-                tr("{count} / {d}d {h:0>2}:{m:0>2}:{s:0>2}").format(count=self.message_count, d=d, h=h, m=m, s=s))
+                tr("{n}/{m}").format(n=self.table_view.model().rowCount(), m=max_journal_entries))
 
         journal_watcher_task.signal_new_entry.connect(new_journal_entry)
 
@@ -2092,11 +2085,10 @@ class JournalEntryDelegate(QStyledItemDelegate):
 
 class JournalTableView(QTableView):
 
-    def __init__(self, journal_panel: JournalPanel, journal_watcher_task: JournalWatcherTask, max_journal_entries: int):
+    def __init__(self, max_journal_entries: int):
         super().__init__()
         self.setToolTip(tr("Double click the row's message icon to view the complete journal entry."))
         self.setModel(JournalTableModel(max_journal_entries=max_journal_entries))
-        self.max_entries = 100
         self.setDragDropOverwriteMode(False)
         self.resizeColumnsToContents()
         self.setSelectionBehavior(QAbstractItemView.SelectRows)
