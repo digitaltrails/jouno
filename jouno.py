@@ -3,7 +3,7 @@
 jouno: Journal notifications forwarder
 ======================================
 
-A Systemd-Journal to Freedesktop-Notifications forwarder with burst-handling and filtering.
+A Systemd-Journal viewer with Freedesktop-Notifications forwarding including burst-handling and filtering.
 
 Usage:
 ======
@@ -24,10 +24,9 @@ Optional arguments:
 Description
 ===========
 
-``jouno`` is a system-tray application that monitors the ``systemd-journal`` for new journal entries.
-New entries are filtered and forwarded to the desktop as standard *freedesktop DBUS notifications*.
-Most linux desktops present DBUS notifications as individual popup messages.  Bursts of messages are handled
-by bundling them in to a single summarising notification. The application's feature set includes:
+``Jouno`` is a ``systemd-journal`` monitoring and viewing tool.  Jouno can filter and bundle messages for
+forwarding to the desktop as standard *Freedesktop DBUS Notifications* (most linux desktop environments present
+DBUS Notifications as popup messages). Jouno's feature set includes:
 
  * Journal live-view.
    + Overview table with live view incremental-search and select.
@@ -46,7 +45,7 @@ by bundling them in to a single summarising notification. The application's feat
    + Filters are saved to the config file and reloaded at startup.
  * User interface and configuration
    + Panels undock for maximised or customised viewing.
-   + Panel and window geometries are preserved across panel-docking and application-restarts.
+   + Customised panel and window geometries are saved across application-restart and panel-docking.
    + Dynamic (no restart) support for desktop theme changes, including light/dark theme switching.
    + An option to run minimised in the system-tray with a quick-access tray context-menu.
    + Full configuration UI, editing of config INI files is not required.

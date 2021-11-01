@@ -1,23 +1,23 @@
 jouno: Journal notifications forwarder
 ======================================
 
-A [Systemd Journal](https://www.freedesktop.org/software/systemd/man/systemd-journald.service.html) 
-to [Freedesktop Notifications](https://specifications.freedesktop.org/notification-spec/latest/ar01s09.html) 
-forwarder with burst-handling and filtering.
+A Systemd-Journal viewer with Freedesktop-Notifications 
+A [Systemd-Journal](https://www.freedesktop.org/software/systemd/man/systemd-journald.service.html) viewer with 
+[Freedesktop Notifications](https://specifications.freedesktop.org/notification-spec/latest/ar01s09.html) 
+forwarding including burst-handling and filtering.
 
 Description
 -----------
 
 ![Default](screen-shots/Screenshot_Large.png) 
 
-``jouno`` is a system-tray application that monitors the ``systemd-journal`` for new journal entries.
-New entries are filtered and forwarded to the desktop as standard *freedesktop DBUS notifications*.  
-Most linux desktops present DBUS notifications as individual popup messages.  Bursts of messages are handled 
-by bundling them in to a single summarising notification. The application's feature set includes:
+``Jouno`` is a *Systemd-Journal* monitoring and viewing tool.  Jouno can filter and bundle messages for
+forwarding to the desktop as standard *DBUS Freedesktop Notifications* (most linux desktop environments present 
+DBUS Notifications as popup messages). Jouno's feature set includes:
 
  * Journal live-view.
    + Overview table with live view incremental-search and select.
-   + Double-click access to the all 50+ journal entry fields, including easy cut and paste the text.
+   + Double-click access to the all 50+ journal entry fields, including easy cut and paste.
    + Configurable history length, configurable full or filtered view.
  * Journal forwarding.
    + Forwarding of filtered messages to the desktop as DBUS-notifications.
@@ -32,7 +32,7 @@ by bundling them in to a single summarising notification. The application's feat
    + Filters are saved to the config file and reloaded at startup.
  * User interface and configuration
    + Panels undock for maximised or customised viewing.
-   + Customised panel and window geometries are preserved across application-restart and panel-docking.
+   + Customised panel and window geometries are saved across application-restart and panel-docking.
    + Dynamic (no restart) support for desktop theme changes, including light/dark theme switching.
    + An option to run minimised in the system-tray with a quick-access tray context-menu.
    + Full configuration UI, editing of config INI files is not required.
