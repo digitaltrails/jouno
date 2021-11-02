@@ -471,7 +471,7 @@ poll_seconds = 5
 burst_seconds = 5
 burst_truncate_messages = 6
 notification_seconds = 30
-journal_history_max = 500
+journal_history_max = 100
 system_tray_enabled = yes
 start_with_notifications_enabled = yes
 list_all_enabled = no
@@ -771,6 +771,7 @@ class JournalWatcher:
         # Is a list comprehension slower than a for-loop for string construction?
         # Use an easy a format that is easy to pattern match
         fields_str = ', '.join((f"'{key}={str(value)}'" for key, value in journal_entry.items()))
+        journal_entry['___JOURNO_FULL_TEXT___'] = fields_str
         # debug(fields_str) if debugging else None
         notable = len(self.match_regexp) == 0
         if not notable:
@@ -2052,6 +2053,7 @@ class JournalPanel(DockableWidget):
         save_triggers = self.table_view.editTriggers()
         self.table_view.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.table_view.clearSelection()
+        regexp = re.compile(text if regexp_search else re.escape(text))
         model = self.table_view.model()
         match_count = 0
         if text.strip() != '':
@@ -2059,8 +2061,7 @@ class JournalPanel(DockableWidget):
                 journal_entry = model.get_journal_entry(row_num)
                 # Assume case insensitive if all text is in lower case.
                 # Use an easy a format that is easy to pattern match: "'key=value', 'key=value'"
-                fields_str = ', '.join((f"'{key}={str(value)}'" for key, value in journal_entry.items()))
-                regexp = re.compile(text if regexp_search else re.escape(text))
+                fields_str = journal_entry['___JOURNO_FULL_TEXT___']
                 if regexp.search(fields_str.lower()) is not None:
                     self.table_view.selectRow(row_num)
                     match_count += 1
