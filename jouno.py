@@ -512,7 +512,7 @@ CONFIG_OPTIONS_LIST: List[ConfigOption] = [
     ConfigOption('notification_seconds',
                  'How long should a desktop notification remain visible ({}..{} seconds)', (1, 60)),
     ConfigOption('journal_history_max',
-                 'How many journal entries should be retained in the Recently Notified panel. '),
+                 'How many journal entries should be retained in the Recently Notified panel ({}..{}).', (1, 200)),
     ConfigOption('system_tray_enabled', 'Jouno should start minimised in the system-tray.'),
     ConfigOption('start_with_notifications_enabled', 'Jouno should start with desktop notifications enabled.'),
     ConfigOption('list_all_enabled', 'The Recent notifications panel should show all entries, including non-notified.'),
