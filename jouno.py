@@ -2053,28 +2053,35 @@ class JournalPanel(DockableWidget):
         save_triggers = self.table_view.editTriggers()
         self.table_view.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.table_view.clearSelection()
-        regexp = re.compile(text if regexp_search else re.escape(text))
+
         model = self.table_view.model()
         match_count = 0
-        if text.strip() != '':
-            for row_num in range(model.rowCount()):
-                journal_entry = model.get_journal_entry(row_num)
-                # Assume case insensitive if all text is in lower case.
-                # Use an easy a format that is easy to pattern match: "'key=value', 'key=value'"
-                fields_str = journal_entry['___JOURNO_FULL_TEXT___']
-                if regexp.search(fields_str) is not None:
-                    self.table_view.selectRow(row_num)
-                    match_count += 1
-                    if self.scrolled_to_selected is None:
-                        self.scrolled_to_selected = model.index(row_num, 0)
-        if self.scrolled_to_selected is not None:
-            self.table_view.scrollTo(self.scrolled_to_selected)
-        self.table_view.setEditTriggers(save_triggers)
-        if match_count == 0:
-            self.journal_status_bar.showMessage(tr("Nothing matches"), 2000)
-        else:
-            self.journal_status_bar.showMessage(
-                "Matched {match_count} entries.".format(match_count=match_count), 4000)
+        if text != '':
+            if len(text) < 3:
+                self.journal_status_bar.showMessage(
+                    tr("Enter at least 3 characters to initiate an incremental search."), 1000)
+            else:
+                regexp = re.compile(text if regexp_search else re.escape(text))
+                self.table_view.blockSignals(True)
+                for row_num, journal_entry in enumerate(model.journal_entries):
+                    #journal_entry = model.get_journal_entry(row_num)
+                    # Assume case insensitive if all text is in lower case.
+                    # Use an easy a format that is easy to pattern match: "'key=value', 'key=value'"
+                    fields_str = journal_entry['___JOURNO_FULL_TEXT___']
+                    if regexp.search(fields_str) is not None:
+                        self.table_view.selectRow(row_num)
+                        match_count += 1
+                        if self.scrolled_to_selected is None:
+                            self.scrolled_to_selected = model.index(row_num, 0)
+                self.table_view.blockSignals(False)
+                if self.scrolled_to_selected is not None:
+                    self.table_view.scrollTo(self.scrolled_to_selected)
+                self.table_view.setEditTriggers(save_triggers)
+                if match_count == 0:
+                    self.journal_status_bar.showMessage(tr("Nothing matches"), 2000)
+                else:
+                    self.journal_status_bar.showMessage(
+                        "Matched {match_count} entries.".format(match_count=match_count), 4000)
 
     def scroll_selected(self, direction: int):
         all_indexes = self.table_view.selectedIndexes()
