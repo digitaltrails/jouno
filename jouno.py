@@ -2062,7 +2062,7 @@ class JournalPanel(DockableWidget):
                 # Assume case insensitive if all text is in lower case.
                 # Use an easy a format that is easy to pattern match: "'key=value', 'key=value'"
                 fields_str = journal_entry['___JOURNO_FULL_TEXT___']
-                if regexp.search(fields_str.lower()) is not None:
+                if regexp.search(fields_str) is not None:
                     self.table_view.selectRow(row_num)
                     match_count += 1
                     if self.scrolled_to_selected is None:
