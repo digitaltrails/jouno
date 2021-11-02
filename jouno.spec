@@ -17,7 +17,7 @@
 #
 
 Name: jouno
-Version: 1.0.0
+Version: 1.0.1
 Release: 0
 License: GPL-3.0-or-later
 BuildArch: noarch
@@ -80,5 +80,7 @@ install -m644 %{name}.png %{buildroot}/%{_datadir}/icons
 
 %changelog
 
-* Sun Oct 25 2021 Michael Hamilton <michael@actrix.gen.nz>
+* Sun Oct 25 2021 Michael Hamilton michael@actrix.gen.nz
 - Packaged for rpm
+* Tue Nov 02 2021 Michael Hamilton michael@actrix.gen.nz
+- Fixes for first time installation and use: jouno-1.0.1

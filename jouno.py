@@ -279,7 +279,7 @@ from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QMessageBox, QLi
     QHBoxLayout, QStyleFactory, QToolButton, QScrollArea, QLayout, QStatusBar
 from systemd import journal
 
-JOUNO_VERSION = '1.0.0'
+JOUNO_VERSION = '1.0.1'
 
 # The icons can either be:
 #   1) str: named icons from the freedesktop theme which should all be available on most Linux desktops.
