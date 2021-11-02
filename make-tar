@@ -16,5 +16,5 @@ jouno-$version/screen-shots/Screenshot_Large.png
 jouno-$version/jouno.py
 jouno-$version/jouno.png
 EOF
-
+echo /home/michael/rpmbuild/SOURCES/jouno-$version.tar.gz
 rm jouno-$version

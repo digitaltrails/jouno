@@ -612,9 +612,6 @@ class Config(configparser.ConfigParser):
         self.path = get_config_path()
         self.modified_time = 0.0
         self.read_string(DEFAULT_CONFIG)
-        if not self.path.exists():
-            # Watcher needs the default rules to avoid KDE noise.
-            self.save()
 
     def save(self):
         if self.path.exists():
@@ -646,7 +643,7 @@ class Config(configparser.ConfigParser):
 class JournalWatcher:
 
     def __init__(self, supervisor=None):
-        self.config: Config = None
+        self.config = Config()
         self.burst_truncate: int = 3
         self.polling_millis: int = 2_000
         self.notification_timeout_millis: int = 60_000
@@ -654,7 +651,7 @@ class JournalWatcher:
         self.ignore_regexp: Mapping[str, re] = {}
         self.match_regexp: Mapping[str, re] = {}
         self.forward_all = False
-        self.update_config()
+        self.update_settings_from_config()
         self._stop = False
         self.supervisor = supervisor
         self.notifications_enabled = True
@@ -668,11 +665,7 @@ class JournalWatcher:
     def enable_forward_all(self, enable: bool):
         self.forward_all = enable
 
-    def update_config(self):
-        if self.config is None:
-            self.config = Config()
-        if not self.config.refresh():
-            return
+    def update_settings_from_config(self):
         info('JournalWatcher reading config.')
         if 'poll_seconds' in self.config['options']:
             self.polling_millis = 1_000 * self.config.getint('options', 'poll_seconds')
@@ -811,7 +804,8 @@ class JournalWatcher:
         while True:
             if self.is_stop_requested():
                 return
-            self.update_config()
+            if self.config.refresh():
+                self.update_settings_from_config()
             burst_count = 0
             notable_list = []
             limit_time_ns = self.burst_max_millis * 1_000_000 + time.time_ns()
