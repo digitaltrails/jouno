@@ -599,7 +599,7 @@ class NotifyFreeDesktop:
 
 def get_config_path() -> Path:
     config_dir_path = Path.home().joinpath('.config').joinpath('jouno')
-    if not config_dir_path.parent.is_dir():
+    if not config_dir_path.parent.is_dir() or not config_dir_path.is_dir():
         os.makedirs(config_dir_path)
     path = config_dir_path.joinpath('jouno.conf')
     return path
@@ -612,9 +612,13 @@ class Config(configparser.ConfigParser):
         self.path = get_config_path()
         self.modified_time = 0.0
         self.read_string(DEFAULT_CONFIG)
+        if not self.path.exists():
+            # Watcher needs the default rules to avoid KDE noise.
+            self.save()
 
     def save(self):
-        self.path.rename(self.path.with_suffix('.bak'))
+        if self.path.exists():
+            self.path.rename(self.path.with_suffix('.bak'))
         with self.path.open('w') as config_file:
             self.write(config_file)
 
@@ -1176,6 +1180,10 @@ class ConfigPanel(DockableWidget):
         tabs.addTab(match_panel, tr("Match Filters"))
         tabs.addTab(options_panel, tr("Options"))
         tabs.setCurrentIndex(0)
+
+        tabs.setTabToolTip(0, tr("Ignored-messages will be excluded from desktop-notifications."))
+        tabs.setTabToolTip(1, tr("Matched-messages will be included in desktop-notifications (excluding all others)."))
+        tabs.setTabToolTip(2, tr("Application configuration options."))
 
         layout.addWidget(title_container)
 
@@ -2377,10 +2385,10 @@ def install_as_desktop_application(uninstall: bool = False):
     """Self install this script in the current Linux user's bin directory and desktop applications->settings menu."""
     desktop_dir = Path.home().joinpath('.local', 'share', 'applications')
     icon_dir = Path.home().joinpath('.local', 'share', 'icons')
+
     if not desktop_dir.exists():
-        error(f"No desktop directory is present:{desktop_dir.as_posix()}"
-              " Cannot proceed - is this a non-standard desktop?")
-        return
+        warning("creating:{desktop_dir.as_posix()}")
+        os.mkdir(desktop_dir)
 
     bin_dir = Path.home().joinpath('bin')
     if not bin_dir.is_dir():
