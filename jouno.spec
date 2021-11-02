@@ -80,7 +80,7 @@ install -m644 %{name}.png %{buildroot}/%{_datadir}/icons
 
 %changelog
 
-* Sun Oct 25 2021 Michael Hamilton michael@actrix.gen.nz
-- Packaged for rpm
-* Tue Nov 02 2021 Michael Hamilton michael@actrix.gen.nz
-- Fixes for first time installation and use: jouno-1.0.1
+* Tue Nov 02 2021 Michael Hamilton <michael@actrix.gen.nz>
+- Fixes for first time installation and use: jouno 1.0.1
+* Sun Oct 25 2021 Michael Hamilton <michael@actrix.gen.nz>
+- Packaged for rpm jouno 1.0.0
