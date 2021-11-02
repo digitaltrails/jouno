@@ -268,7 +268,7 @@ from typing import Mapping, Any, List, Type, Callable, Tuple
 
 import dbus
 from PyQt5.QtCore import QCoreApplication, QProcess, Qt, pyqtSignal, QThread, QModelIndex, QItemSelectionModel, QSize, \
-    QEvent, QSettings, QObject
+    QEvent, QSettings, QObject, QItemSelection
 from PyQt5.QtGui import QPixmap, QIcon, QImage, QPainter, QStandardItemModel, QStandardItem, QIntValidator, \
     QFontDatabase, QGuiApplication, QCloseEvent, QPalette
 from PyQt5.QtSvg import QSvgRenderer
@@ -471,7 +471,7 @@ poll_seconds = 5
 burst_seconds = 5
 burst_truncate_messages = 6
 notification_seconds = 30
-journal_history_max = 100
+journal_history_max = 500
 system_tray_enabled = yes
 start_with_notifications_enabled = yes
 list_all_enabled = no
@@ -512,7 +512,7 @@ CONFIG_OPTIONS_LIST: List[ConfigOption] = [
     ConfigOption('notification_seconds',
                  'How long should a desktop notification remain visible ({}..{} seconds)', (1, 60)),
     ConfigOption('journal_history_max',
-                 'How many journal entries should be retained in the Recently Notified panel ({}..{}).', (1, 200)),
+                 'How many journal entries should be retained in the Recently Notified panel.', None),
     ConfigOption('system_tray_enabled', 'Jouno should start minimised in the system-tray.'),
     ConfigOption('start_with_notifications_enabled', 'Jouno should start with desktop notifications enabled.'),
     ConfigOption('list_all_enabled', 'The Recent notifications panel should show all entries, including non-notified.'),
@@ -2052,36 +2052,37 @@ class JournalPanel(DockableWidget):
     def search_select_journal(self, text: str, regexp_search: bool = False):
         save_triggers = self.table_view.editTriggers()
         self.table_view.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.table_view.clearSelection()
-
-        model = self.table_view.model()
         match_count = 0
-        if text != '':
-            if len(text) < 3:
-                self.journal_status_bar.showMessage(
-                    tr("Enter at least 3 characters to initiate an incremental search."), 1000)
-            else:
-                regexp = re.compile(text if regexp_search else re.escape(text))
-                self.table_view.blockSignals(True)
-                for row_num, journal_entry in enumerate(model.journal_entries):
-                    #journal_entry = model.get_journal_entry(row_num)
-                    # Assume case insensitive if all text is in lower case.
-                    # Use an easy a format that is easy to pattern match: "'key=value', 'key=value'"
-                    fields_str = journal_entry['___JOURNO_FULL_TEXT___']
-                    if regexp.search(fields_str) is not None:
-                        self.table_view.selectRow(row_num)
-                        match_count += 1
-                        if self.scrolled_to_selected is None:
-                            self.scrolled_to_selected = model.index(row_num, 0)
-                self.table_view.blockSignals(False)
-                if self.scrolled_to_selected is not None:
-                    self.table_view.scrollTo(self.scrolled_to_selected)
-                self.table_view.setEditTriggers(save_triggers)
-                if match_count == 0:
-                    self.journal_status_bar.showMessage(tr("Nothing matches"), 2000)
+        if len(text) == 0:
+            self.table_view.clearSelection()
+        else:
+            model = self.table_view.model()
+            # TODO Assume case insensitive if all text is in lower case? Think about it.
+            regexp = re.compile(text if regexp_search else re.escape(text))
+            selection = QItemSelection()
+            for row_num, journal_entry in enumerate(model.journal_entries):
+                # Use an easy a format that is easy to pattern match: "'key=value', 'key=value'"
+                fields_str = journal_entry['___JOURNO_FULL_TEXT___']
+                if regexp.search(fields_str) is not None:
+                    selection.merge(
+                        QItemSelection(model.index(row_num, 0), model.index(row_num, 4)),
+                        QItemSelectionModel.SelectCurrent)
+                    match_count += 1
+                    if self.scrolled_to_selected is None:
+                        self.scrolled_to_selected = model.index(row_num, 0)
                 else:
-                    self.journal_status_bar.showMessage(
-                        "Matched {match_count} entries.".format(match_count=match_count), 4000)
+                    selection.merge(
+                        QItemSelection(model.index(row_num, 0), model.index(row_num, 4)),
+                        QItemSelectionModel.Clear)
+            self.table_view.selectionModel().select(selection, QItemSelectionModel.SelectCurrent)
+            if self.scrolled_to_selected is not None:
+                self.table_view.scrollTo(self.scrolled_to_selected)
+            self.table_view.setEditTriggers(save_triggers)
+            if match_count == 0:
+                self.journal_status_bar.showMessage(tr("Nothing matches"), 2000)
+            else:
+                self.journal_status_bar.showMessage(
+                    "Matched {match_count} entries.".format(match_count=match_count), 4000)
 
     def scroll_selected(self, direction: int):
         all_indexes = self.table_view.selectedIndexes()
