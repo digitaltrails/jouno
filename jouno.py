@@ -52,7 +52,7 @@ DBUS Notifications as popup messages). Jouno's feature set includes:
    + If Config INI files are externally edited, the changes are automatically reloaded without requiring a restart.
 
 
-``jouno`` is a tool designed to improve awareness of background activity by monitoring
+``jouno`` is a tool designed to increase awareness of background activity by monitoring
 the journal and raising interesting journal-entries as desktop notifications.  Possibilities for
 it use include:
 
@@ -1318,6 +1318,13 @@ class FilterTableModel(QStandardItemModel):
         # use spaces to force a wider column - seems to be no other EASY way to do this.
         self.setHorizontalHeaderLabels(
             [tr("Rule-ID (enabled/disabled)"), tr("Pattern (regexp/text)")])
+        self.horizontalHeaderItem(0).setToolTip(
+            tr("Rule ID: a letter followed by letters, digits, underscores and hyphens") + "\n" +
+            tr("Tick/untick the Rule-ID's checkbox to enable/disable this rule."))
+        self.horizontalHeaderItem(1).setToolTip(
+            tr("Pattern: Text or regexp to partially match in the journal entry") + "\n" +
+            tr("Tick the Pattern's checkbox if this pattern is a regular expression.")
+        )
 
 
 class FilterValidationException(Exception):
@@ -1355,22 +1362,6 @@ class FilterTableView(QTableView):
 
     def __init__(self, config_section: Mapping[str, str], tooltip: str, config_panel: ConfigPanel = None):
         super().__init__()
-        self.rule_id_tooltip_1 = \
-            tr("Rule ID: a letter followed by letters, digits, underscores and hyphens")
-        self.rule_id_tooltip_2 = \
-            tr("Tick/untick the checkbox to enable/disable this rule.")
-        self.pattern_tooltip_1 = \
-            tr("Pattern: Text or regexp to partially match in the journal entry")
-        self.pattern_tooltip_2 = \
-            tr("Tick the checkbox if this pattern is a regular expression")
-
-        tooltip += "\n\n" + tr("Columns:") + "\n" + \
-                   f"    {self.rule_id_tooltip_1}\n" + \
-                   f"          {self.rule_id_tooltip_2}\n" + \
-                   f"    {self.pattern_tooltip_1}\n" + \
-                   f"          {self.pattern_tooltip_2}\n"
-
-        self.setToolTip(tooltip)
         self.setModel(FilterTableModel(len(config_section)))
         self.copy_from_config(config_section)
         self.setEditTriggers(QAbstractItemView.AllEditTriggers)
@@ -1409,7 +1400,7 @@ class FilterTableView(QTableView):
         rule_id_item.setCheckable(True)
         rule_id_item.setCheckState(Qt.Checked)
         rule_id_item.setEditable(True)
-        rule_id_item.setToolTip(tr(self.rule_id_tooltip_1 + "\n" + self.rule_id_tooltip_2))
+        rule_id_item.setToolTip(self.model().horizontalHeaderItem(0).toolTip())
         return rule_id_item
 
     def create_pattern_item(self, pattern: str):
@@ -1417,7 +1408,7 @@ class FilterTableView(QTableView):
         pattern_item.setCheckable(True)
         pattern_item.setCheckState(Qt.Unchecked)
         pattern_item.setEditable(True)
-        pattern_item.setToolTip(self.pattern_tooltip_1 + "\n" + self.pattern_tooltip_2)
+        pattern_item.setToolTip(self.model().horizontalHeaderItem(1).toolTip())
         return pattern_item
 
     def is_valid(self) -> bool:
@@ -1606,7 +1597,7 @@ class MainToolBar(QToolBar):
         self.addSeparator()
 
         self.notifier_action = self.addAction(self.icon_notifier_enabled, "notify", notify_func)
-        self.notifier_action.setToolTip(tr("Enable/disable desktop notifications."))
+        self.notifier_action.setToolTip(tr("Enable/disable desktop-notification forwarding."))
         # Stylesheets prevent theme changes for the widget - cannot be used.
         # self.widgetForAction(self.notifier_action).setStyleSheet("QToolButton { width: 130px; }")
 
@@ -1616,34 +1607,24 @@ class MainToolBar(QToolBar):
         self.add_filter_action.setObjectName("add_button")
         self.add_filter_action.setIconText(tr("New filter"))
         self.add_filter_action.setToolTip(
-            tr("Add a new filter above the selected filter or at the end if no filter is selected.") + "\n" +
-            tr("Select a filter tab and optionally click in its left margin to select an insertion point."))
+            tr("Add a new filter.") + "\n" +
+            tr("  1. Select the Ignore-Filters or Match-Filters tab.") + "\n" +
+            tr("     a) Optionally select a journal-entry as a basis for the new filter.") + "\n" +
+            tr("     b) Optionally click on an existing filter to select an insertion point.") + "\n" +
+            tr("  2. Press the New-filter button to begin editing the new filter.") + "\n" +
+            tr("  3. Press the Apply button to save and apply the changes.")
+        )
 
         self.del_filter_action = self.addAction(self.icon_del_filter, "del", del_func)
         self.del_filter_action.setObjectName("del_button")
         self.del_filter_action.setIconText(tr("Delete filter"))
         self.del_filter_action.setToolTip(
             tr("Delete selected filter.") + "\n" +
-            tr("Select a filter tab and click in its left margin to select a filter to delete."))
-
-        # self.addSeparator()
-        # def test_filters_func():
-        #     pass
-        #
-        # self.test_filters_action = self.addAction(self.icon_test_filters, "test_filters", test_filters_func)
-        # self.test_filters_action.setObjectName("test_filters_button")
-        # self.test_filters_action.setIconText(tr("Test filters."))
-        # self.test_filters_action.setToolTip(tr("Test enabled filters against the recently notified table."))
-
-        # self.addSeparator()
-        #
-        # def clear_all_func():
-        #     pass
-        #
-        # self.clear_all_action = self.addAction(get_icon(ICON_CLEAR_RECENTS), "clear_all", clear_all_func)
-        # self.clear_all_action.setObjectName("clear_all_button")
-        # self.clear_all_action.setIconText(tr("Clear all."))
-        # self.clear_all_action.setToolTip(tr("Clear all recent journal entries."))
+            tr("  1. Select the Ignore-Filters or Match-Filters tab.") + "\n" +
+            tr("  2. Click on a filter to select it for deletion.") + "\n" +
+            tr("  3. Press the Delete-filter button.") + "\n" +
+            tr("  4. Press the Apply button to save and apply the changes.")
+        )
 
         spacer = QWidget()
         spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
