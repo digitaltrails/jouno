@@ -1094,17 +1094,19 @@ class ConfigPanel(DockableWidget):
             config_panel=self)
 
         button_box = QWidget()
-        button_box_layout = QGridLayout()
+        button_box_layout = QHBoxLayout()
         button_box.setLayout(button_box_layout)
         apply_button = QPushButton(tr("Apply"))
         apply_button.setIcon(get_icon(ICON_APPLY))
         revert_button = QPushButton(tr("Revert"))
         revert_button.setIcon(get_icon(ICON_REVERT))
-        spacer = QWidget()
-        spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        button_box_layout.addWidget(revert_button, 0, 1)
-        button_box_layout.addWidget(spacer, 0, 2)
-        button_box_layout.addWidget(apply_button, 0, 3)
+        button_box_layout.addWidget(revert_button)
+        spacer = QLabel('          ')
+        button_box_layout.addWidget(spacer)
+        button_box_layout.addWidget(apply_button)
+
+        self.status_bar = QStatusBar()
+        self.status_bar.addPermanentWidget(button_box)
 
         def save_action():
             debug("save action") if debugging else None
@@ -1183,7 +1185,7 @@ class ConfigPanel(DockableWidget):
         layout.addWidget(title_container)
 
         layout.addWidget(tabs)
-        layout.addWidget(button_box)
+        layout.addWidget(self.status_bar)
 
         tabs.currentChanged.connect(tab_change)
 
@@ -1353,9 +1355,8 @@ class FilterPatternEntryDelegate(QStyledItemDelegate):
                 if pattern_is_regexp:
                     re.compile(pattern)
                 self.config_panel.signal_editing_filter_pattern.emit(pattern, pattern_is_regexp)
-            except re.error:
-                # Incomplete/illegal regular expression, only signal for valid regular expressions (or plain text)
-                pass
+            except re.error as e:
+                self.config_panel.status_bar.showMessage(str(e), 10000)
 
         self.line_edit.textEdited.connect(text_changed)
         return self.line_edit
@@ -1833,8 +1834,8 @@ class MainWindow(QMainWindow):
             journal_panel.set_max_entries(config_panel.get_config().getint('options', 'journal_history_max'))
             global debugging
             debugging = config_panel.get_config().getboolean('options', 'debug_enabled')
-            self.status_bar.showMessage(tr("Applying configuration changes."), 3000)
-            self.static_status_label.setText("")
+            self.config_panel.status_bar.showMessage(tr("Applying configuration changes."), 3000)
+            self.journal_panel.static_status_label.setText("")
             if config_panel.get_config().getboolean('options', 'system_tray_enabled'):
                 if not tray.isVisible():
                     tray.setVisible(True)
@@ -1860,9 +1861,6 @@ class MainWindow(QMainWindow):
             max_entries=config_panel.get_config().getint('options', 'journal_history_max'))
         self.journal_dock_container = DockContainer(
             dockable_widget=journal_panel, home_window=self, home_dock_area=Qt.DockWidgetArea.TopDockWidgetArea)
-
-        self.status_bar = journal_panel.journal_status_bar
-        self.static_status_label = journal_panel.static_status_label
 
         self.config_panel.signal_editing_filter_pattern.connect(journal_panel.search_select_journal)
 
@@ -1986,6 +1984,7 @@ class JournalPanel(DockableWidget):
                 try:
                     re.compile(text)
                 except re.error as e:
+                    self.journal_status_bar.showMessage(str(e))
                     return
             self.search_select_journal(text, regexp_search=self.re_search_enabled)
             go_next_button.setEnabled(self.scrolled_to_selected is not None)
@@ -1996,16 +1995,17 @@ class JournalPanel(DockableWidget):
         search_input.addAction(get_icon(ICON_SEARCH_JOURNAL), QLineEdit.LeadingPosition)
         re_action = search_input.addAction(get_icon('insert-text'), QLineEdit.TrailingPosition)
         re_action.setCheckable(True)
+        search_tip = tr("Incrementally search journal entries.\nSearches all fields.")
 
         def re_search_toggle(enable: bool):
             self.re_search_enabled = enable
-            # preferences-desktop-font insert-text
             re_action.setIcon(get_icon('list-add' if enable else 'insert-text'))
-            self.journal_status_bar.showMessage(
-                "Regular expression matching enabled." if enable else "Plain-text matching enabled.", 10000)
+            tip = tr("Regular expression matching enabled.") if enable else tr("Plain-text matching enabled.")
+            self.journal_status_bar.showMessage(tip)
+            search_input.setToolTip(search_tip + "\n" + tip)
 
         re_action.toggled.connect(re_search_toggle)
-        search_input.setToolTip(tr("Incrementally search journal entries.\nSearches all fields."))
+        search_input.setToolTip(search_tip)
         search_input.textEdited.connect(search_entries)
         search_input.setClearButtonEnabled(True)
         title_layout.addWidget(search_input)
