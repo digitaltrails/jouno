@@ -2237,7 +2237,8 @@ class JournalEntryDialogPlain(QDialog):
         text_view.setLineWrapMode(QTextEdit.LineWrapMode.NoWrap)
         text = tr("Journal Entry {entry}\n\n").format(entry=journal_entry['__REALTIME_TIMESTAMP'])
         for row, (k, v) in enumerate(sorted(list(journal_entry.items()))):
-            text += f"{k:25}: {str(v)}\n"
+            if k != '___JOURNO_FULL_TEXT___':
+                text += f"{k:25}: {str(v)}\n"
         text_view.setText(text)
 
         layout.addWidget(text_view)
