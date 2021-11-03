@@ -2051,38 +2051,34 @@ class JournalPanel(DockableWidget):
 
     def search_select_journal(self, text: str, regexp_search: bool = False):
         save_triggers = self.table_view.editTriggers()
-        self.table_view.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        match_count = 0
-        if len(text) == 0:
-            self.table_view.clearSelection()
-        else:
-            model = self.table_view.model()
-            # TODO Assume case insensitive if all text is in lower case? Think about it.
-            regexp = re.compile(text if regexp_search else re.escape(text))
-            selection = QItemSelection()
-            for row_num, journal_entry in enumerate(model.journal_entries):
-                # Use an easy a format that is easy to pattern match: "'key=value', 'key=value'"
-                fields_str = journal_entry['___JOURNO_FULL_TEXT___']
-                if regexp.search(fields_str) is not None:
-                    selection.merge(
-                        QItemSelection(model.index(row_num, 0), model.index(row_num, 4)),
-                        QItemSelectionModel.SelectCurrent)
-                    match_count += 1
-                    if self.scrolled_to_selected is None:
-                        self.scrolled_to_selected = model.index(row_num, 0)
-                else:
-                    selection.merge(
-                        QItemSelection(model.index(row_num, 0), model.index(row_num, 4)),
-                        QItemSelectionModel.Clear)
-            self.table_view.selectionModel().select(selection, QItemSelectionModel.SelectCurrent)
-            if self.scrolled_to_selected is not None:
-                self.table_view.scrollTo(self.scrolled_to_selected)
-            self.table_view.setEditTriggers(save_triggers)
-            if match_count == 0:
-                self.journal_status_bar.showMessage(tr("Nothing matches"), 2000)
+        try:
+            self.table_view.setEditTriggers(QAbstractItemView.NoEditTriggers)
+            if len(text) == 0:
+                self.table_view.clearSelection()
             else:
-                self.journal_status_bar.showMessage(
-                    "Matched {match_count} entries.".format(match_count=match_count), 4000)
+                matched_row_count = 0
+                model = self.table_view.model()
+                last_column = self.table_view.model().columnCount() - 1
+                # TODO Assume case insensitive if all text is in lower case? Think about it.
+                regexp = re.compile(text if regexp_search else re.escape(text))
+                matching_rows_selection = QItemSelection()
+                for row_n, journal_entry in enumerate(model.journal_entries):
+                    row_n_selection = QItemSelection(model.index(row_n, 0), model.index(row_n, last_column))
+                    # Use an easy a format that is easy to pattern match: "'key=value', 'key=value'"
+                    fields_str = journal_entry['___JOURNO_FULL_TEXT___']
+                    if regexp.search(fields_str) is not None:
+                        matched_row_count += 1
+                        matching_rows_selection.merge(row_n_selection, QItemSelectionModel.SelectCurrent)
+                self.table_view.selectionModel().select(matching_rows_selection, QItemSelectionModel.SelectCurrent)
+                if len(matching_rows_selection.indexes()) == 0:
+                    self.journal_status_bar.showMessage(tr("Nothing matches"), 2000)
+                else:
+                    self.scrolled_to_selected = model.index(matching_rows_selection.indexes()[0].row(), 0)
+                    self.table_view.scrollTo(self.scrolled_to_selected)
+                    self.journal_status_bar.showMessage(
+                        tr("Matched {match_count} entries.").format(match_count=matched_row_count), 4000)
+        finally:
+            self.table_view.setEditTriggers(save_triggers)
 
     def scroll_selected(self, direction: int):
         all_indexes = self.table_view.selectedIndexes()
