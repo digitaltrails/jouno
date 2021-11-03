@@ -29,7 +29,8 @@ forwarding to the desktop as standard *Freedesktop DBUS Notifications* (most lin
 DBUS Notifications as popup messages). Jouno's feature set includes:
 
  * Journal live-view.
-   + Overview table with live view incremental-search and select.
+   + Overview table with live view.
+   + Plain-text or regular-expression incremental-search and select.
    + Double-click access to the all 50+ journal entry fields, including easy cut and paste the text.
    + Configurable history length, configurable full or filtered view.
  * Journal forwarding.
@@ -279,7 +280,7 @@ from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QMessageBox, QLi
     QHBoxLayout, QStyleFactory, QToolButton, QScrollArea, QLayout, QStatusBar
 from systemd import journal
 
-JOUNO_VERSION = '1.0.1'
+JOUNO_VERSION = '1.0.2'
 
 # The icons can either be:
 #   1) str: named icons from the freedesktop theme which should all be available on most Linux desktops.

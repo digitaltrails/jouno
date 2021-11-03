@@ -81,6 +81,8 @@ install -m644 %{name}.png %{buildroot}/%{_datadir}/icons
 %changelog
 
 * Tue Nov 02 2021 Michael Hamilton <michael@actrix.gen.nz>
+- Faster incremental search. More reexp search options: jouno 1.0.2
+* Tue Nov 02 2021 Michael Hamilton <michael@actrix.gen.nz>
 - Fixes for first time installation and use: jouno 1.0.1
 * Sun Oct 25 2021 Michael Hamilton <michael@actrix.gen.nz>
 - Packaged for rpm jouno 1.0.0
