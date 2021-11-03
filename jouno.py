@@ -1978,15 +1978,33 @@ class JournalPanel(DockableWidget):
         spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         title_layout.addWidget(spacer)
 
+        self.re_search_enabled = False
+
         def search_entries(text: str) -> None:
             self.scrolled_to_selected = None
-            self.search_select_journal(text)
+            if self.re_search_enabled:
+                try:
+                    re.compile(text)
+                except re.error as e:
+                    return
+            self.search_select_journal(text, regexp_search=self.re_search_enabled)
             go_next_button.setEnabled(self.scrolled_to_selected is not None)
             go_previous_button.setEnabled(self.scrolled_to_selected is not None)
 
         search_input = QLineEdit()
         search_input.setFixedWidth(350)
         search_input.addAction(get_icon(ICON_SEARCH_JOURNAL), QLineEdit.LeadingPosition)
+        re_action = search_input.addAction(get_icon('insert-text'), QLineEdit.TrailingPosition)
+        re_action.setCheckable(True)
+
+        def re_search_toggle(enable: bool):
+            self.re_search_enabled = enable
+            # preferences-desktop-font insert-text
+            re_action.setIcon(get_icon('list-add' if enable else 'insert-text'))
+            self.journal_status_bar.showMessage(
+                "Regular expression matching enabled." if enable else "Plain-text matching enabled.", 10000)
+
+        re_action.toggled.connect(re_search_toggle)
         search_input.setToolTip(tr("Incrementally search journal entries.\nSearches all fields."))
         search_input.textEdited.connect(search_entries)
         search_input.setClearButtonEnabled(True)
