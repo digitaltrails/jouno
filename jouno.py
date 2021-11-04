@@ -261,7 +261,6 @@ import sys
 import textwrap
 import time
 import traceback
-from datetime import datetime
 from enum import Enum
 from functools import partial
 from pathlib import Path
@@ -269,7 +268,7 @@ from typing import Mapping, Any, List, Type, Callable, Tuple
 
 import dbus
 from PyQt5.QtCore import QCoreApplication, QProcess, Qt, pyqtSignal, QThread, QModelIndex, QItemSelectionModel, QSize, \
-    QEvent, QSettings, QObject, QItemSelection
+    QEvent, QSettings, QObject, QItemSelection, QPoint
 from PyQt5.QtGui import QPixmap, QIcon, QImage, QPainter, QStandardItemModel, QStandardItem, QIntValidator, \
     QFontDatabase, QGuiApplication, QCloseEvent, QPalette, QTextCursor
 from PyQt5.QtSvg import QSvgRenderer
@@ -282,7 +281,7 @@ from systemd import journal
 
 JOUNO_CONSOLIDATED_TEXT_KEY = '___JOURNO_FULL_TEXT___'
 
-JOUNO_VERSION = '1.0.3'
+JOUNO_VERSION = '1.0.4'
 
 # The icons can either be:
 #   1) str: named icons from the freedesktop theme which should all be available on most Linux desktops.
@@ -556,7 +555,7 @@ def debug(*arg):
         print('DEBUG:', *arg)
 
 
-def info(message: str, millis: int = 15000):
+def info(message: str):
     print('INFO:', message)
 
 
@@ -2063,6 +2062,67 @@ class JournalPanel(DockableWidget):
 
         journal_watcher_task.signal_new_entry.connect(new_journal_entry)
 
+        def view_journal_entry_at_row_number(row: int):
+            if row < 0 and (self.table_view.model().rowCount() > 0):
+                row = self.table_view.model().rowCount() - 1
+                self.journal_status_bar.showMessage(tr("Viewing last entry."), 5000)
+            if row >= 0:
+                entry_dialog = JournalEntryDialogPlain(self, self.table_view.model().get_journal_entry(row))
+                entry_dialog.show()
+                self.journal_status_bar.showMessage(tr("Viewing entry {}.").format(row + 1), 5000)
+            else:
+                self.journal_status_bar.showMessage(tr("No entries available."), 5000)
+
+        def view_journal_entry_at_index(index: QModelIndex):
+            view_journal_entry_at_row_number(index.row())
+
+        def view_journal_entry():
+            view_journal_entry_at_row_number(self.context_menu_index.row())
+
+        self.table_view.doubleClicked.connect(view_journal_entry_at_index)
+        self.table_view.verticalHeader().sectionDoubleClicked.connect(view_journal_entry_at_row_number)
+
+        def copy_selected():
+            selected = self.table_view.selectionModel().selectedRows()
+            text = ''
+            if len(selected) == 0:
+                if self.context_menu_index is not None and self.context_menu_index.row() >= 0:
+                    row = self.context_menu_index.row()
+                    print('copy a row', row)
+                    text = format_journal_entry(self.table_view.model().get_journal_entry(row))
+                    self.journal_status_bar.showMessage(tr("Copied the entry {} to the clipboard.").format(row + 1), 5000)
+                else:
+                    if self.table_view.model().rowCount() > 0:
+                        row = self.table_view.model().rowCount() - 1
+                        text = format_journal_entry(self.table_view.model().get_journal_entry(row))
+                        self.journal_status_bar.showMessage(tr("Copied last entry."), 5000)
+                    else:
+                        self.journal_status_bar.showMessage(tr("No entries available."), 5000)
+                        text = ''
+            else:
+                for index in selected:
+                    text += format_journal_entry(self.table_view.model().get_journal_entry(index.row())) + '\n'
+                self.journal_status_bar.showMessage(
+                    tr("Copied {} entries to the clipboard.").format(len(selected)), 5000)
+            QApplication.clipboard().setText(text)
+
+        context_menu = QMenu(tr("Journal Entry Menu"), parent=self)
+        context_menu.addAction(get_icon('view-fullscreen'), tr('View entry'), view_journal_entry)
+        context_menu.addAction(get_icon('edit-copy'), tr('Copy selected'), copy_selected)
+        context_menu.addAction(get_icon('edit-undo'), tr('Clear selection'), self.table_view.clearSelection)
+
+        self.context_menu_index = None
+
+        def table_context_menu(pos: QPoint):
+            self.journal_status_bar.clearMessage()
+            self.context_menu_index = self.table_view.indexAt(pos)
+            context_menu.exec(self.table_view.mapToGlobal(pos))
+
+        self.table_view.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.table_view.verticalHeader().setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.table_view.customContextMenuRequested.connect(table_context_menu)
+        self.table_view.verticalHeader().customContextMenuRequested.connect(table_context_menu)
+
     def add_dock_control(self, dock_button: QPushButton):
         self.title_layout.addWidget(dock_button)
 
@@ -2139,7 +2199,7 @@ class JournalTableView(QTableView):
 
     def __init__(self):
         super().__init__()
-        self.setToolTip(tr("Double click the row-number or message-icon to view the row's complete journal entry."))
+        self.setToolTip(tr("Double click to view the row's complete journal entry.\nRight-mouse for other options."))
         self.setModel(JournalTableModel())
         self.setDragDropOverwriteMode(False)
         self.resizeColumnsToContents()
@@ -2152,37 +2212,18 @@ class JournalTableView(QTableView):
         self.setColumnWidth(4, 8 * 14)
         self.horizontalHeader().setSectionResizeMode(4, QHeaderView.Stretch)
         self.horizontalHeader().setDefaultAlignment(Qt.AlignLeft)
-        self.setItemDelegate(JournalEntryDelegate(self.model()))
+        #self.setItemDelegate(JournalEntryDelegate(self.model()))
         # Cannot use xor!
-        self.setEditTriggers(
-            QAbstractItemView.AnyKeyPressed | QAbstractItemView.SelectedClicked | QAbstractItemView.CurrentChanged)
+        #self.setEditTriggers(
+        #    QAbstractItemView.AnyKeyPressed | QAbstractItemView.SelectedClicked | QAbstractItemView.CurrentChanged)
+        self.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.setShowGrid(False)
         self.setIconSize(QSize(30, 30))
-
-
-        def view_journal_entry(index: QModelIndex):
-            entry_dialog = JournalEntryDialogPlain(self, self.model().get_journal_entry(index.row()))
-            entry_dialog.show()
-
-        def view_journal_entry_from_header(row: int):
-            entry_dialog = JournalEntryDialogPlain(self, self.model().get_journal_entry(row))
-            entry_dialog.show()
-
-
-        self.doubleClicked.connect(view_journal_entry)
-        self.verticalHeader().sectionDoubleClicked.connect(view_journal_entry_from_header)
-
-        def table_context_menu():
-            print('foo', datetime.now())
-
-        self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self.verticalHeader().setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self.customContextMenuRequested.connect(table_context_menu)
-        self.verticalHeader().customContextMenuRequested.connect(table_context_menu)
 
     def new_journal_entry(self, journal_entry, notable):
         self.model().new_journal_entry(journal_entry, notable)
         self.scrollToBottom()
+
 
 
 class JournalTableModel(QStandardItemModel):
@@ -2248,6 +2289,14 @@ class JournalTableModel(QStandardItemModel):
 
     def get_max_entries(self) -> int:
         return self.max_entries
+
+
+def format_journal_entry(journal_entry):
+    text = tr("Journal Entry {entry}\n\n").format(entry=journal_entry['__REALTIME_TIMESTAMP'])
+    for row, (k, v) in enumerate(sorted(list(journal_entry.items()))):
+        if k != JOUNO_CONSOLIDATED_TEXT_KEY:
+            text += f"{k:25}: {str(v)}\n"
+    return text
 
 
 class JournalEntryDialogPlain(QDialog):
@@ -2332,10 +2381,7 @@ class JournalEntryDialogPlain(QDialog):
         text_view.setFont(QFontDatabase.systemFont(QFontDatabase.FixedFont))
         text_view.setReadOnly(True)
         text_view.setLineWrapMode(QTextEdit.LineWrapMode.NoWrap)
-        text = tr("Journal Entry {entry}\n\n").format(entry=journal_entry['__REALTIME_TIMESTAMP'])
-        for row, (k, v) in enumerate(sorted(list(journal_entry.items()))):
-            if k != JOUNO_CONSOLIDATED_TEXT_KEY:
-                text += f"{k:25}: {str(v)}\n"
+        text = format_journal_entry(journal_entry)
         text_view.setText(text)
 
         layout.addWidget(text_view)
