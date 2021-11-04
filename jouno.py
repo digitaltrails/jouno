@@ -555,8 +555,8 @@ def debug(*arg):
         print('DEBUG:', *arg)
 
 
-def info(message: str):
-    print('INFO:', message)
+def info(*arg):
+    print('INFO:', *arg)
 
 
 def warning(*arg):
