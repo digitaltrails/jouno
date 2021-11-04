@@ -17,7 +17,7 @@
 #
 
 Name: jouno
-Version: 1.0.2
+Version: 1.0.3
 Release: 0
 License: GPL-3.0-or-later
 BuildArch: noarch
@@ -80,6 +80,8 @@ install -m644 %{name}.png %{buildroot}/%{_datadir}/icons
 
 %changelog
 
+* Thu Nov 04 2021 Michael Hamilton <michael@actrix.gen.nz>
+- Added search to the Journal-Entry full-text panel: jouno 1.0.3
 * Tue Nov 02 2021 Michael Hamilton <michael@actrix.gen.nz>
 - Faster incremental search. More reexp search options: jouno 1.0.2
 * Tue Nov 02 2021 Michael Hamilton <michael@actrix.gen.nz>
