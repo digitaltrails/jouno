@@ -271,7 +271,7 @@ import dbus
 from PyQt5.QtCore import QCoreApplication, QProcess, Qt, pyqtSignal, QThread, QModelIndex, QItemSelectionModel, QSize, \
     QEvent, QSettings, QObject, QItemSelection
 from PyQt5.QtGui import QPixmap, QIcon, QImage, QPainter, QStandardItemModel, QStandardItem, QIntValidator, \
-    QFontDatabase, QGuiApplication, QCloseEvent, QPalette
+    QFontDatabase, QGuiApplication, QCloseEvent, QPalette, QTextCursor
 from PyQt5.QtSvg import QSvgRenderer
 from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QMessageBox, QLineEdit, QLabel, \
     QPushButton, QSystemTrayIcon, QMenu, QTextEdit, QDialog, QTabWidget, \
@@ -593,7 +593,12 @@ class NotifyFreeDesktop:
         action_requests = []
         # extra_hints = {"urgency": 1, "sound-name": "dialog-warning", }
         extra_hints = {}
-        self.notify_interface.Notify(app_name, replace_id, notification_icon, summary, message, action_requests,
+        self.notify_interface.Notify(app_name,
+                                     replace_id,
+                                     notification_icon,
+                                     summary.encode('UTF-8'),
+                                     message.encode('UTF-8'),
+                                     action_requests,
                                      extra_hints,
                                      timeout)
 
@@ -2226,9 +2231,82 @@ class JournalEntryDialogPlain(QDialog):
     def __init__(self, parent, journal_entry):
         super().__init__(parent)
 
-        self.setWindowTitle(tr("Journal Entry {journal_entry['__REALTIME_TIMESTAMP']}"))
-        self.setWindowTitle(tr("Journal Entry {entry}").format(entry=journal_entry['__REALTIME_TIMESTAMP']))
+        window_title = tr("Journal Entry {entry}").format(entry=journal_entry['__REALTIME_TIMESTAMP'])
+        self.setWindowTitle(window_title)
+
+        title_container = QWidget(self)
+        title_layout = QHBoxLayout()
+        title_container.setLayout(title_layout)
+        title_label = big_label(QLabel(tr("Complete text: {entry}").format(entry=journal_entry['__REALTIME_TIMESTAMP'])))
+        title_layout.addWidget(title_label)
+
+        spacer = QWidget()
+        spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        title_layout.addWidget(spacer)
+        #title_layout.addWidget(QLabel(tr("Search")))
+
+        self.re_search_enabled = False
+
+        def search_entries(text_to_find: str) -> None:
+            self.scrolled_to_selected = None
+            if self.re_search_enabled:
+                try:
+                    matcher = re.compile(text_to_find)
+                except re.error as e:
+                    status_bar.showMessage(str(e))
+                    return
+            else:
+                matcher = re.compile(re.escape(text_to_find))
+            matches = matcher.search(text_view.toPlainText())
+            if matches is not None:
+                cursor = text_view.textCursor()
+                cursor.setPosition(matches.start())
+                cursor.setPosition(matches.end(), QTextCursor.KeepAnchor);
+                text_view.setTextCursor(cursor)
+                status_bar.showMessage(tr("Matched '{}'").format(text_to_find))
+            else:
+                status_bar.showMessage(tr("No matches."))
+
+        search_input = QLineEdit()
+        search_input.setFixedWidth(350)
+        search_input.addAction(get_icon(ICON_SEARCH_JOURNAL), QLineEdit.LeadingPosition)
+        re_action = search_input.addAction(get_icon('insert-text'), QLineEdit.TrailingPosition)
+        re_action.setCheckable(True)
+
+        def re_search_toggle(enable: bool):
+            self.re_search_enabled = enable
+            re_action.setIcon(get_icon('list-add' if enable else 'insert-text'))
+            tip = tr("Search journal entry.\nRegular expression search.") if enable else tr("Search journal entry.\nPlain text search.")
+            search_input.setToolTip(tip)
+            status_bar.showMessage(tip, 10000)
+
+        re_action.toggled.connect(re_search_toggle)
+        search_input.setToolTip(tr("Search journal entry.\nPlain text search."))
+        search_input.textEdited.connect(search_entries)
+        search_input.setClearButtonEnabled(True)
+        title_layout.addWidget(search_input)
+
+        def copy_to_clipboard():
+            nonlocal feedback_flip
+            QGuiApplication.clipboard().setText(text_view.toPlainText())
+            copy_button.clearFocus()
+            status_bar.showMessage(tr("Copied all text to the clipboard"), 5000)
+
+        feedback_flip = True
+        copy_button = transparent_button(QPushButton(get_icon(ICON_COPY_TO_CLIPBOARD), '', self))
+        #copy_button.setGeometry(self.width() - 75, 25, 40, 40)
+        #copy_button.setIconSize(QSize(48, 48))
+        copy_button.setToolTip(tr("Copy entire text to clipboard"))
+        copy_button.show()
+        copy_button.clicked.connect(copy_to_clipboard)
+        title_layout.addWidget(QLabel(' '))
+        title_layout.addWidget(copy_button)
+
         layout = QVBoxLayout()
+        layout.addWidget(title_container)
+        status_bar = QStatusBar()
+
+
 
         text_view = QTextEdit()
         text_view.setFont(QFontDatabase.systemFont(QFontDatabase.FixedFont))
@@ -2241,30 +2319,31 @@ class JournalEntryDialogPlain(QDialog):
         text_view.setText(text)
 
         layout.addWidget(text_view)
+        layout.addWidget(status_bar)
 
         self.setLayout(layout)
-        self.setMinimumWidth(1000)
-        self.setMinimumHeight(800)
+        self.setMinimumWidth(1200)
+        self.setMinimumHeight(950)
         self.adjustSize()
 
         # .show() is non-modal, .exec() is modal
         self.show()
 
-        def copy_to_clipboard():
-            nonlocal floating_feedback_flip
-            QGuiApplication.clipboard().setText(text_view.toPlainText())
-            floating_copy_button.clearFocus()
-            floating_copy_button.setIconSize(QSize(50, 50) if floating_feedback_flip else QSize(48, 48))
-            floating_feedback_flip = not floating_feedback_flip
-            floating_copy_button.repaint()
-
-        floating_feedback_flip = True
-        floating_copy_button = transparent_button(QPushButton(get_icon(ICON_COPY_TO_CLIPBOARD), '', self))
-        floating_copy_button.setGeometry(self.width() - 75, 25, 40, 40)
-        floating_copy_button.setIconSize(QSize(48, 48))
-        floating_copy_button.setToolTip(tr("Copy to clipboard"))
-        floating_copy_button.show()
-        floating_copy_button.clicked.connect(copy_to_clipboard)
+        # def copy_to_clipboard():
+        #     nonlocal floating_feedback_flip
+        #     QGuiApplication.clipboard().setText(text_view.toPlainText())
+        #     floating_copy_button.clearFocus()
+        #     floating_copy_button.setIconSize(QSize(50, 50) if floating_feedback_flip else QSize(48, 48))
+        #     floating_feedback_flip = not floating_feedback_flip
+        #     floating_copy_button.repaint()
+        #
+        # floating_feedback_flip = True
+        # floating_copy_button = transparent_button(QPushButton(get_icon(ICON_COPY_TO_CLIPBOARD), '', self))
+        # floating_copy_button.setGeometry(self.width() - 75, 25, 40, 40)
+        # floating_copy_button.setIconSize(QSize(48, 48))
+        # floating_copy_button.setToolTip(tr("Copy to clipboard"))
+        # floating_copy_button.show()
+        # floating_copy_button.clicked.connect(copy_to_clipboard)
 
 
 class DialogSingletonMixin:
