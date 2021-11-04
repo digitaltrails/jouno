@@ -89,7 +89,9 @@ Dependency installation on ``OpenSUSE``::
 Installing
 ----------
 
-As previously stated, the ``jouno.py`` script is only file required beyond the prerequisites. 
+As previously stated, the ``jouno.py`` script is only file required beyond the prerequisites. There
+are also **OpenSUSE** and **Fedora** rpm's available at: [https://software.opensuse.org/package/jouno](https://software.opensuse.org/package/jouno)
+
 
 The current options for installation are the following:
 
@@ -102,7 +104,20 @@ The current options for installation are the following:
    ```
     % python3 jouno.py --install
    ```
-      Depending on which desktop you're running menu changes may require logout before they become visible.
+   Depending on which desktop you're running menu changes may require logout before they become visible.
+
+3. A system-wide installation:
+   ```
+   sudo rpm --install vdu_controls-1.5.0-17.1.noarch.rpm
+   ```
+   The rpm will install the following files:
+   ```
+    /usr/bin/jouno
+    /usr/share/applications/jouno.desktop
+    /usr/share/icons/jouno.png
+    /usr/share/licenses/jouno
+    /usr/share/licenses/jouno/LICENSE.md
+   ```
 
 
 Executing the program
