@@ -2072,9 +2072,8 @@ class JournalPanel(DockableWidget):
         save_triggers = self.table_view.editTriggers()
         try:
             self.table_view.setEditTriggers(QAbstractItemView.NoEditTriggers)
-            if len(text) == 0:
-                self.table_view.clearSelection()
-            else:
+            self.table_view.clearSelection()
+            if len(text) != 0:
                 matched_row_count = 0
                 model = self.table_view.model()
                 last_column = self.table_view.model().columnCount() - 1
