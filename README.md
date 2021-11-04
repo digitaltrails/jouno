@@ -106,9 +106,9 @@ The current options for installation are the following:
    ```
    Depending on which desktop you're running menu changes may require logout before they become visible.
 
-3. A system-wide installation:
+3. A system-wide installation, download the RPM from the above link, then use rpm to install it:
    ```
-   sudo rpm --install vdu_controls-1.5.0-17.1.noarch.rpm
+   sudo rpm --install jouno-1.0.3-3.1.noarch.rpm
    ```
    The rpm will install the following files:
    ```
