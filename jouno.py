@@ -280,6 +280,8 @@ from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QMessageBox, QLi
     QHBoxLayout, QStyleFactory, QToolButton, QScrollArea, QLayout, QStatusBar
 from systemd import journal
 
+JOUNO_CONSOLIDATED_TEXT_KEY = '___JOURNO_FULL_TEXT___'
+
 JOUNO_VERSION = '1.0.3'
 
 # The icons can either be:
@@ -777,7 +779,7 @@ class JournalWatcher:
         # Is a list comprehension slower than a for-loop for string construction?
         # Use an easy a format that is easy to pattern match
         fields_str = ', '.join((f"'{key}={str(value)}'" for key, value in journal_entry.items()))
-        journal_entry['___JOURNO_FULL_TEXT___'] = fields_str
+        journal_entry[JOUNO_CONSOLIDATED_TEXT_KEY] = fields_str
         # debug(fields_str) if debugging else None
         notable = len(self.match_regexp) == 0
         if not notable:
@@ -2088,7 +2090,7 @@ class JournalPanel(DockableWidget):
                 for row_n, journal_entry in enumerate(model.journal_entries):
                     row_n_selection = QItemSelection(model.index(row_n, 0), model.index(row_n, last_column))
                     # Use an easy a format that is easy to pattern match: "'key=value', 'key=value'"
-                    fields_str = journal_entry['___JOURNO_FULL_TEXT___']
+                    fields_str = journal_entry[JOUNO_CONSOLIDATED_TEXT_KEY]
                     if regexp.search(fields_str) is not None:
                         matched_row_count += 1
                         matching_rows_selection.merge(row_n_selection, QItemSelectionModel.SelectCurrent)
@@ -2143,6 +2145,7 @@ class JournalTableView(QTableView):
         self.setColumnWidth(1, 10 * 14)
         self.setColumnWidth(2, 10 * 14)
         self.setColumnWidth(3, 5 * 14)
+        self.setColumnWidth(4, 8 * 14)
         self.horizontalHeader().setSectionResizeMode(4, QHeaderView.Stretch)
         self.horizontalHeader().setDefaultAlignment(Qt.AlignLeft)
         self.setItemDelegate(JournalEntryDelegate(self.model()))
@@ -2171,7 +2174,7 @@ class JournalTableModel(QStandardItemModel):
         self.icon_cache = {}
         self.journal_entries = []
         self.setHorizontalHeaderLabels(
-            [tr("Time"), tr("Host"), tr("Source"), tr("PID"), tr("Message")])
+            [tr("Time"), tr("Host"), tr("Source"), tr("PID"), tr("Message"), tr("Size (kB)")])
 
     def get_journal_entry(self, row: int):
         return self.journal_entries[row]
@@ -2216,7 +2219,9 @@ class JournalTableModel(QStandardItemModel):
                 selectable(QStandardItem(journal_entry['_COMM'] if '_COMM' in journal_entry else 'unknown')),
                 # TODO smarter choice when _PID is not present.
                 selectable(align_right(QStandardItem(str(journal_entry['_PID'] if '_PID' in journal_entry else '')))),
-                set_icon(selectable(QStandardItem(journal_entry['MESSAGE'])))
+                set_icon(selectable(QStandardItem(journal_entry['MESSAGE']))),
+                selectable(
+                    align_right(QStandardItem(f"{len(journal_entry[JOUNO_CONSOLIDATED_TEXT_KEY]) / 1024.0:.2f}"))),
             ])
 
     def set_max_entries(self, max_entries: int) -> None:
@@ -2243,7 +2248,6 @@ class JournalEntryDialogPlain(QDialog):
         spacer = QWidget()
         spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         title_layout.addWidget(spacer)
-        #title_layout.addWidget(QLabel(tr("Search")))
 
         self.re_search_enabled = False
 
@@ -2276,7 +2280,8 @@ class JournalEntryDialogPlain(QDialog):
         def re_search_toggle(enable: bool):
             self.re_search_enabled = enable
             re_action.setIcon(get_icon('list-add' if enable else 'insert-text'))
-            tip = tr("Search journal entry.\nRegular expression search.") if enable else tr("Search journal entry.\nPlain text search.")
+            tip = tr("Search journal entry.\nRegular expression search.") \
+                if enable else tr("Search journal entry.\nPlain text search.")
             search_input.setToolTip(tip)
             status_bar.showMessage(tip, 10000)
 
@@ -2287,17 +2292,11 @@ class JournalEntryDialogPlain(QDialog):
         title_layout.addWidget(search_input)
 
         def copy_to_clipboard():
-            nonlocal feedback_flip
             QGuiApplication.clipboard().setText(text_view.toPlainText())
-            copy_button.clearFocus()
             status_bar.showMessage(tr("Copied all text to the clipboard"), 5000)
 
-        feedback_flip = True
         copy_button = transparent_button(QPushButton(get_icon(ICON_COPY_TO_CLIPBOARD), '', self))
-        #copy_button.setGeometry(self.width() - 75, 25, 40, 40)
-        #copy_button.setIconSize(QSize(48, 48))
         copy_button.setToolTip(tr("Copy entire text to clipboard"))
-        copy_button.show()
         copy_button.clicked.connect(copy_to_clipboard)
         title_layout.addWidget(QLabel(' '))
         title_layout.addWidget(copy_button)
@@ -2306,15 +2305,13 @@ class JournalEntryDialogPlain(QDialog):
         layout.addWidget(title_container)
         status_bar = QStatusBar()
 
-
-
         text_view = QTextEdit()
         text_view.setFont(QFontDatabase.systemFont(QFontDatabase.FixedFont))
         text_view.setReadOnly(True)
         text_view.setLineWrapMode(QTextEdit.LineWrapMode.NoWrap)
         text = tr("Journal Entry {entry}\n\n").format(entry=journal_entry['__REALTIME_TIMESTAMP'])
         for row, (k, v) in enumerate(sorted(list(journal_entry.items()))):
-            if k != '___JOURNO_FULL_TEXT___':
+            if k != JOUNO_CONSOLIDATED_TEXT_KEY:
                 text += f"{k:25}: {str(v)}\n"
         text_view.setText(text)
 
@@ -2325,6 +2322,9 @@ class JournalEntryDialogPlain(QDialog):
         self.setMinimumWidth(1200)
         self.setMinimumHeight(950)
         self.adjustSize()
+
+        status_bar.addPermanentWidget(
+            QLabel(tr("{kb:.2f} kbytes").format(kb=len(journal_entry[JOUNO_CONSOLIDATED_TEXT_KEY]) / 1024.0)))
 
         # .show() is non-modal, .exec() is modal
         self.show()
