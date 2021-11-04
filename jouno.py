@@ -2139,7 +2139,7 @@ class JournalTableView(QTableView):
 
     def __init__(self):
         super().__init__()
-        self.setToolTip(tr("Double click the row's message icon to view the complete journal entry."))
+        self.setToolTip(tr("Double click the row-number or message-icon to view the row's complete journal entry."))
         self.setModel(JournalTableModel())
         self.setDragDropOverwriteMode(False)
         self.resizeColumnsToContents()
@@ -2159,11 +2159,26 @@ class JournalTableView(QTableView):
         self.setShowGrid(False)
         self.setIconSize(QSize(30, 30))
 
+
         def view_journal_entry(index: QModelIndex):
             entry_dialog = JournalEntryDialogPlain(self, self.model().get_journal_entry(index.row()))
             entry_dialog.show()
 
+        def view_journal_entry_from_header(row: int):
+            entry_dialog = JournalEntryDialogPlain(self, self.model().get_journal_entry(row))
+            entry_dialog.show()
+
+
         self.doubleClicked.connect(view_journal_entry)
+        self.verticalHeader().sectionDoubleClicked.connect(view_journal_entry_from_header)
+
+        def table_context_menu():
+            print('foo', datetime.now())
+
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.verticalHeader().setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.customContextMenuRequested.connect(table_context_menu)
+        self.verticalHeader().customContextMenuRequested.connect(table_context_menu)
 
     def new_journal_entry(self, journal_entry, notable):
         self.model().new_journal_entry(journal_entry, notable)
