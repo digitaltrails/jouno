@@ -2003,7 +2003,9 @@ class JournalPanel(DockableWidget):
         search_input.addAction(get_icon(ICON_SEARCH_JOURNAL), QLineEdit.LeadingPosition)
         re_action = search_input.addAction(get_icon('insert-text'), QLineEdit.TrailingPosition)
         re_action.setCheckable(True)
-        search_tip = tr("Incrementally search journal entries.\nSearches all fields.")
+        search_tip = tr(
+            "Incrementally search journal entries.\nSearches all fields.\n"
+            "Click the icon in the right margin\nto toggle regexp/plain-text matching.")
 
         def re_search_toggle(enable: bool):
             self.re_search_enabled = enable
@@ -2280,13 +2282,14 @@ class JournalEntryDialogPlain(QDialog):
         def re_search_toggle(enable: bool):
             self.re_search_enabled = enable
             re_action.setIcon(get_icon('list-add' if enable else 'insert-text'))
-            tip = tr("Search journal entry.\nRegular expression search.") \
-                if enable else tr("Search journal entry.\nPlain text search.")
-            search_input.setToolTip(tip)
+            tip = tr("Regular expression search.") if enable else tr("Plain text search.")
+            #search_input.setToolTip(tip)
             status_bar.showMessage(tip, 10000)
 
         re_action.toggled.connect(re_search_toggle)
-        search_input.setToolTip(tr("Search journal entry.\nPlain text search."))
+        search_input.setToolTip(tr(
+            "Search journal entry.\n"
+            "Click the icon in the right margin\nto toggle regexp/plain-text matching."))
         search_input.textEdited.connect(search_entries)
         search_input.setClearButtonEnabled(True)
         title_layout.addWidget(search_input)
