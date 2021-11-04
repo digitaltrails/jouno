@@ -2082,7 +2082,9 @@ class JournalPanel(DockableWidget):
         try:
             self.table_view.setEditTriggers(QAbstractItemView.NoEditTriggers)
             self.table_view.clearSelection()
-            if len(text) != 0:
+            if len(text) == 0:
+                self.journal_status_bar.showMessage('')
+            else:
                 matched_row_count = 0
                 model = self.table_view.model()
                 last_column = self.table_view.model().columnCount() - 1
@@ -2254,24 +2256,27 @@ class JournalEntryDialogPlain(QDialog):
         self.re_search_enabled = False
 
         def search_entries(text_to_find: str) -> None:
-            self.scrolled_to_selected = None
-            if self.re_search_enabled:
-                try:
-                    matcher = re.compile(text_to_find)
-                except re.error as e:
-                    status_bar.showMessage(str(e))
-                    return
+            if text_to_find == '':
+                status_bar.showMessage('')
             else:
-                matcher = re.compile(re.escape(text_to_find))
-            matches = matcher.search(text_view.toPlainText())
-            if matches is not None:
-                cursor = text_view.textCursor()
-                cursor.setPosition(matches.start())
-                cursor.setPosition(matches.end(), QTextCursor.KeepAnchor);
-                text_view.setTextCursor(cursor)
-                status_bar.showMessage(tr("Matched '{}'").format(text_to_find))
-            else:
-                status_bar.showMessage(tr("No matches."))
+                self.scrolled_to_selected = None
+                if self.re_search_enabled:
+                    try:
+                        matcher = re.compile(text_to_find)
+                    except re.error as e:
+                        status_bar.showMessage(str(e))
+                        return
+                else:
+                    matcher = re.compile(re.escape(text_to_find))
+                matches = matcher.search(text_view.toPlainText())
+                if matches is not None:
+                    cursor = text_view.textCursor()
+                    cursor.setPosition(matches.start())
+                    cursor.setPosition(matches.end(), QTextCursor.KeepAnchor);
+                    text_view.setTextCursor(cursor)
+                    status_bar.showMessage(tr("Matched '{}'").format(text_to_find))
+                else:
+                    status_bar.showMessage(tr("No matches."))
 
         search_input = QLineEdit()
         search_input.setFixedWidth(350)
