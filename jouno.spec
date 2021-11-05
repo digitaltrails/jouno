@@ -17,7 +17,7 @@
 #
 
 Name: jouno
-Version: 1.0.4
+Version: 1.0.5
 Release: 0
 License: GPL-3.0-or-later
 BuildArch: noarch
@@ -80,6 +80,8 @@ install -m644 %{name}.png %{buildroot}/%{_datadir}/icons
 
 %changelog
 
+* Thu Nov 05 2021 Michael Hamilton <michael@actrix.gen.nz>
+- Minor fixes and improvements: jouno 1.0.5
 * Thu Nov 05 2021 Michael Hamilton <michael@actrix.gen.nz>
 - Abandon Qt table edit-mode in favour of read-only+context-menu: jouno 1.0.4
 * Thu Nov 04 2021 Michael Hamilton <michael@actrix.gen.nz>
