@@ -2067,7 +2067,7 @@ class JournalPanel(DockableWidget):
                 row = self.table_view.model().rowCount() - 1
                 self.journal_status_bar.showMessage(tr("Viewing last entry."), 5000)
             if row >= 0:
-                entry_dialog = JournalEntryDialogPlain(self, self.table_view.model().get_journal_entry(row))
+                entry_dialog = JournalEntryDialogPlain(self, self.table_view.model().get_journal_entry(row), row)
                 entry_dialog.show()
                 self.journal_status_bar.showMessage(tr("Viewing entry {}.").format(row + 1), 5000)
             else:
@@ -2108,6 +2108,7 @@ class JournalPanel(DockableWidget):
 
         context_menu = QMenu(tr("Journal Entry Menu"), parent=self)
         context_menu.addAction(get_icon('view-fullscreen'), tr('View entry'), view_journal_entry)
+        context_menu.addSeparator()
         context_menu.addAction(get_icon('edit-copy'), tr('Copy selected'), copy_selected)
         context_menu.addAction(get_icon('edit-undo'), tr('Clear selection'), self.table_view.clearSelection)
 
@@ -2301,16 +2302,19 @@ def format_journal_entry(journal_entry):
 
 class JournalEntryDialogPlain(QDialog):
 
-    def __init__(self, parent, journal_entry):
+    def __init__(self, parent, journal_entry, row: int):
         super().__init__(parent)
 
-        window_title = tr("Journal Entry {entry}").format(entry=journal_entry['__REALTIME_TIMESTAMP'])
+        window_title = tr("Recent Entry #{row} \u2014 {entry}").format(
+            row=row + 1,
+            entry=journal_entry['__REALTIME_TIMESTAMP'])
+
         self.setWindowTitle(window_title)
 
         title_container = QWidget(self)
         title_layout = QHBoxLayout()
         title_container.setLayout(title_layout)
-        title_label = big_label(QLabel(tr("Complete text: {entry}").format(entry=journal_entry['__REALTIME_TIMESTAMP'])))
+        title_label = big_label(QLabel(window_title))
         title_layout.addWidget(title_label)
 
         spacer = QWidget()
@@ -2351,9 +2355,7 @@ class JournalEntryDialogPlain(QDialog):
         def re_search_toggle(enable: bool):
             self.re_search_enabled = enable
             re_action.setIcon(get_icon('list-add' if enable else 'insert-text'))
-            tip = tr("Regular expression search.") if enable else tr("Plain text search.")
-            #search_input.setToolTip(tip)
-            status_bar.showMessage(tip, 10000)
+            status_bar.showMessage(tr("Regular expression search.") if enable else tr("Plain text search."), 10000)
 
         re_action.toggled.connect(re_search_toggle)
         search_input.setToolTip(tr(
