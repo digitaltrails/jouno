@@ -263,6 +263,7 @@ import time
 import traceback
 from enum import Enum
 from functools import partial
+from io import StringIO
 from pathlib import Path
 from typing import Mapping, Any, List, Type, Callable, Tuple
 
@@ -279,9 +280,10 @@ from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QMessageBox, QLi
     QHBoxLayout, QStyleFactory, QToolButton, QScrollArea, QLayout, QStatusBar
 from systemd import journal
 
+JOUNO_VERSION = '1.0.5'
+
 JOUNO_CONSOLIDATED_TEXT_KEY = '___JOURNO_FULL_TEXT___'
 
-JOUNO_VERSION = '1.0.4'
 
 # The icons can either be:
 #   1) str: named icons from the freedesktop theme which should all be available on most Linux desktops.
@@ -307,9 +309,14 @@ ICON_CLEAR_RECENTS = "edit-clear-all"
 ICON_REVERT = 'edit-undo'
 # This might only be KDE/Linux icons - not in Freedesktop Standard.
 ICON_APPLY = "dialog-ok-apply"
+ICON_VIEW_JOURNAL_ENTRY = 'view-fullscreen'
+ICON_CLEAR_SELECTION = 'edit-undo'
+ICON_COPY_SELECTED = 'edit-copy'
+ICON_PLAIN_TEXT_SEARCH = 'insert-text'
+ICON_REGEXP_SEARCH = 'list-add'
 
-ICON_BLACK_COLOR = b"#232629"
-ICON_WHITE_COLOR = b"#f3f3f3"
+SVG_LIGHT_THEME_COLOR = b"#232629"
+SVG_DARK_THEME_COLOR = b"#f3f3f3"
 
 SVG_JOUNO = b"""
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">
@@ -324,7 +331,7 @@ SVG_JOUNO = b"""
 
 </svg>
 """
-SVG_JOUNO_LIGHT = SVG_JOUNO.replace(ICON_BLACK_COLOR, b'#bbbbbb')
+SVG_JOUNO_LIGHT = SVG_JOUNO.replace(SVG_LIGHT_THEME_COLOR, b'#bbbbbb')
 
 SVG_TOOLBAR_RUN_DISABLED = b"""
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 22 22">
@@ -646,6 +653,17 @@ class Config(configparser.ConfigParser):
             self.modified_time = 0.0
         return False
 
+    def is_different(self, other: 'Config'):
+        try:
+            io1 = StringIO()
+            self.write(io1)
+            io2 = StringIO()
+            other.write(io2)
+            return io1.getvalue() != io2.getvalue()
+        finally:
+            io1.close()
+            io2.close()
+
 
 class JournalWatcher:
 
@@ -858,7 +876,7 @@ def is_dark_theme():
 def create_image_from_svg_bytes(svg_str: bytes) -> QImage:
     """There is no QIcon option for loading QImage from a string, only from a SVG file, so roll our own."""
     if is_dark_theme():
-        svg_str = svg_str.replace(ICON_BLACK_COLOR, ICON_WHITE_COLOR)
+        svg_str = svg_str.replace(SVG_LIGHT_THEME_COLOR, SVG_DARK_THEME_COLOR)
     renderer = QSvgRenderer(svg_str)
     image = QImage(64, 64, QImage.Format_ARGB32)
     image.fill(0x0)
@@ -901,12 +919,12 @@ def get_icon(source) -> QIcon:
     raise ValueError(f"get_icon parameter has unsupported type {type(source)} = {str(source)}")
 
 
-def big_label(widget: QLabel) -> QLabel:
+def big_label(label: QLabel) -> QLabel:
     # Setting the style breaks theme changes, use HTML instead
     # widget.setStyleSheet("QLabel { font-weight: normal;font-size: 12pt; }")
-    widget.setTextFormat(Qt.TextFormat.AutoText)
-    widget.setText(f"<b>{widget.text()}</b>")
-    return widget
+    label.setTextFormat(Qt.TextFormat.AutoText)
+    label.setText(f"<b>{label.text()}</b>")
+    return label
 
 
 def transparent_button(button: QPushButton) -> QPushButton:
@@ -1119,19 +1137,24 @@ class ConfigPanel(DockableWidget):
             debug("save action") if debugging else None
             try:
                 if match_panel.is_valid() and ignore_panel.is_valid():
+                    tmp = Config()
+                    options_panel.copy_to_config(tmp['options'])
+                    match_panel.copy_to_config(tmp['match'])
+                    ignore_panel.copy_to_config(tmp['ignore'])
+                    if not self.config.is_different(tmp):
+                        apply_message = QMessageBox(self)
+                        apply_message.setText(tr('There are no changes to apply. Apply and save anyway?'))
+                        apply_message.setIcon(QMessageBox.Question)
+                        apply_message.setStandardButtons(QMessageBox.Ok | QMessageBox.Cancel)
+                        if apply_message.exec() == QMessageBox.Cancel:
+                            return
                     options_panel.copy_to_config(self.config['options'])
                     match_panel.copy_to_config(self.config['match'])
                     ignore_panel.copy_to_config(self.config['ignore'])
                     self.config.save()
                     match_panel.clear_selection()
                     ignore_panel.clear_selection()
-                    message = QMessageBox(self)
-                    message.setWindowTitle(tr('Applied'))
-                    message.setText(tr('Changes are now active.'))
-                    message.setIcon(QMessageBox.Information)
-                    message.setStandardButtons(QMessageBox.Ok)
-                    # message.setDetailedText()
-                    message.exec()
+                    self.status_bar.showMessage("All changes have been saved.", 5000)
                     debug(f'config saved ok') if debugging else None
             except FilterValidationException as e:
                 e_title, summary, text = e.args
@@ -1147,27 +1170,27 @@ class ConfigPanel(DockableWidget):
 
         def revert_action():
             debug("revert") if debugging else None
-            before = pickle.dumps(self.config)
-            tmp = pickle.loads(before)
+            tmp = Config()
             options_panel.copy_to_config(tmp['options'])
             match_panel.copy_to_config(tmp['match'])
             ignore_panel.copy_to_config(tmp['ignore'])
-            after = pickle.dumps(tmp)
-            if before == after:
+            if not self.config.is_different(tmp):
                 revert_message = QMessageBox(self)
-                revert_message.setText(tr('There are no unapplied changes, there is nothing to revert.'))
+                revert_message.setText(tr('There are no unapplied changes. There is nothing to revert.'))
                 revert_message.setIcon(QMessageBox.Warning)
                 revert_message.setStandardButtons(QMessageBox.Ok)
                 revert_message.exec()
                 return
             else:
                 revert_message = QMessageBox(self)
-                revert_message.setText(tr('There are unapplied changes, revert and loose all changes?'))
+                revert_message.setText(
+                    tr("There are changes that haven't been applied. Revert and loose those changes?"))
                 revert_message.setIcon(QMessageBox.Question)
                 revert_message.setStandardButtons(QMessageBox.Ok | QMessageBox.Cancel)
                 if revert_message.exec() == QMessageBox.Cancel:
                     return
             info("Reverting unsaved changes.")
+            self.status_bar.showMessage("Unapplied changes have been reverted.", 5000)
             reload_from_config()
 
         def reload_from_config():
@@ -1426,23 +1449,24 @@ class FilterTableView(QTableView):
         model = self.model()
         seen = []
         for row_num in self.item_view_order():
+            row_id = row_num + 1
             key = model.item(row_num, 0).text()
             if key.endswith('_enabled'):
                 raise FilterValidationException(
                     self.__class__.__name__,
-                    tr("Invalid ID '{key}'").format(key=key),
+                    tr("Row {row}.  Invalid ID '{key}'").format(row=row_id, key=key),
                     tr("ID ends in reserved suffix '_enabled'"))
             value = model.item(row_num, 1).text()
             value_is_regexp = model.item(row_num, 1).checkState()
             if re.fullmatch("[a-zA-Z]([a-zA-Z0-9_-])*", key) is None:
                 raise FilterValidationException(
                     self.__class__.__name__,
-                    tr("Invalid ID '{key}'").format(key=key),
+                    tr("Row {row}.  Invalid ID '{key}'").format(row=row_id, key=key),
                     tr("ID's should start with a letter and consist of letters, digits, underscores and hypens only."))
             elif key in seen:
                 raise FilterValidationException(
                     self.__class__.__name__,
-                    tr("Invalid ID '{key}'").format(key=key),
+                    tr("Row {row}.  Invalid ID '{key}'").format(row=row_id, key=key),
                     tr("ID's in must be unique within their own filter-tab."))
             elif value_is_regexp:
                 try:
@@ -1450,7 +1474,8 @@ class FilterTableView(QTableView):
                 except re.error as e:
                     raise FilterValidationException(
                         self.__class__.__name__,
-                        tr("Invalid Regular Expression\nID='{key}'\nRegexp='{value}'").format(key=key, value=value),
+                        tr("Row {row}.  Invalid Regular Expression\nID='{key}'\nRegexp='{value}'").format(
+                            row=row_id, key=key, value=value),
                         f"{str(e)}")
             seen.append(key)
         return True
@@ -2000,7 +2025,7 @@ class JournalPanel(DockableWidget):
         search_input = QLineEdit()
         search_input.setFixedWidth(350)
         search_input.addAction(get_icon(ICON_SEARCH_JOURNAL), QLineEdit.LeadingPosition)
-        re_action = search_input.addAction(get_icon('insert-text'), QLineEdit.TrailingPosition)
+        re_action = search_input.addAction(get_icon(ICON_PLAIN_TEXT_SEARCH), QLineEdit.TrailingPosition)
         re_action.setCheckable(True)
         search_tip = tr(
             "Incrementally search journal entries.\nSearches all fields.\n"
@@ -2008,7 +2033,7 @@ class JournalPanel(DockableWidget):
 
         def re_search_toggle(enable: bool):
             self.re_search_enabled = enable
-            re_action.setIcon(get_icon('list-add' if enable else 'insert-text'))
+            re_action.setIcon(get_icon(ICON_REGEXP_SEARCH if enable else ICON_PLAIN_TEXT_SEARCH))
             tip = tr("Regular expression matching enabled.") if enable else tr("Plain-text matching enabled.")
             self.journal_status_bar.showMessage(tip)
             search_input.setToolTip(search_tip + "\n" + tip)
@@ -2107,10 +2132,10 @@ class JournalPanel(DockableWidget):
             QApplication.clipboard().setText(text)
 
         context_menu = QMenu(tr("Journal Entry Menu"), parent=self)
-        context_menu.addAction(get_icon('view-fullscreen'), tr('View entry'), view_journal_entry)
+        context_menu.addAction(get_icon(ICON_VIEW_JOURNAL_ENTRY), tr('View entry'), view_journal_entry)
         context_menu.addSeparator()
-        context_menu.addAction(get_icon('edit-copy'), tr('Copy selected'), copy_selected)
-        context_menu.addAction(get_icon('edit-undo'), tr('Clear selection'), self.table_view.clearSelection)
+        context_menu.addAction(get_icon(ICON_COPY_SELECTED), tr('Copy selected'), copy_selected)
+        context_menu.addAction(get_icon(ICON_CLEAR_SELECTION), tr('Clear selection'), self.table_view.clearSelection)
 
         self.context_menu_index = None
 
@@ -2349,12 +2374,12 @@ class JournalEntryDialogPlain(QDialog):
         search_input = QLineEdit()
         search_input.setFixedWidth(350)
         search_input.addAction(get_icon(ICON_SEARCH_JOURNAL), QLineEdit.LeadingPosition)
-        re_action = search_input.addAction(get_icon('insert-text'), QLineEdit.TrailingPosition)
+        re_action = search_input.addAction(get_icon(ICON_PLAIN_TEXT_SEARCH), QLineEdit.TrailingPosition)
         re_action.setCheckable(True)
 
         def re_search_toggle(enable: bool):
             self.re_search_enabled = enable
-            re_action.setIcon(get_icon('list-add' if enable else 'insert-text'))
+            re_action.setIcon(get_icon(ICON_REGEXP_SEARCH if enable else ICON_PLAIN_TEXT_SEARCH))
             status_bar.showMessage(tr("Regular expression search.") if enable else tr("Plain text search."), 10000)
 
         re_action.toggled.connect(re_search_toggle)
