@@ -131,9 +131,9 @@ Executing the program
   % jouno
   ```
 * If the script has not been installed, it can still be run on the command line via the python interpreter, 
-  for example:\
+  for example:
   ```
-  % python3 jouno.py``
+  % python3 jouno.py
   ```
 
 Help
