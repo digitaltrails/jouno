@@ -519,7 +519,7 @@ CONFIG_OPTIONS_LIST: List[ConfigOption] = [
                  'How many messages from a burst should be bundled into its desktop notification ({}..{} messages).',
                  (1, 50)),
     ConfigOption('notification_seconds',
-                 'How long should a desktop notification remain visible ({}..{} seconds)', (1, 60)),
+                 'How long should a desktop notification remain visible, zero for no timeout ({}..{} seconds)', (0, 60)),
     ConfigOption('journal_history_max',
                  'How many journal entries should be retained in the Recently Notified panel.', None),
     ConfigOption('system_tray_enabled', 'Jouno should start minimised in the system-tray.'),
