@@ -263,6 +263,7 @@ import time
 import traceback
 from enum import Enum
 from functools import partial
+from html import escape
 from io import StringIO
 from pathlib import Path
 from typing import Mapping, Any, List, Type, Callable, Tuple
@@ -280,7 +281,7 @@ from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QMessageBox, QLi
     QHBoxLayout, QStyleFactory, QToolButton, QScrollArea, QLayout, QStatusBar
 from systemd import journal
 
-JOUNO_VERSION = '1.0.5'
+JOUNO_VERSION = '1.0.6'
 
 JOUNO_CONSOLIDATED_TEXT_KEY = '___JOURNO_FULL_TEXT___'
 
@@ -574,19 +575,6 @@ def error(*arg):
     print('ERROR:', *arg)
 
 
-xml_escape_table = str.maketrans({
-    "<": "&lt;",
-    ">": "&gt;",
-    "&": "&amp;",
-    "'": "&apos;",
-    '"': "&quot;",
-})
-
-
-def xmlesc(txt: str):
-    return txt.translate(xml_escape_table)
-
-
 class NotifyFreeDesktop:
 
     def __init__(self):
@@ -604,8 +592,8 @@ class NotifyFreeDesktop:
         self.notify_interface.Notify(app_name,
                                      replace_id,
                                      notification_icon,
-                                     summary.encode('UTF-8'),
-                                     message.encode('UTF-8'),
+                                     escape(summary).encode('UTF-8'),
+                                     escape(message).encode('UTF-8'),
                                      action_requests,
                                      extra_hints,
                                      timeout)
