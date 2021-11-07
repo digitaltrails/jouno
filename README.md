@@ -143,7 +143,13 @@ Detailed help can be accessed by using the right mouse-button to bring up a cont
 command line.  Access to the context-menu is available via a right-mouse click in both the application-window 
 and the system-tray icon.
 
-The configuration file is saved to `$HOME/.config/jouno/jouno.conf`
+Accessories
+-----------
+
+A suggested accessory is [KDE Connect](https://kdeconnect.kde.org/).  If you enabled the appropriate permissions on 
+your phone, KDE Connect can forward desktop notifications to the phone.  Use Jouno to forward Systemd-Journal 
+messages to Desktop-Notifications, and use KDE Connect to forward them to your phone.
+
 
 Issues
 ------

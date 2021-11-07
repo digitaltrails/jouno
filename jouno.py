@@ -222,6 +222,13 @@ Dependency installation on ``OpenSUSE``:
 
         zypper install python38-QtPy python38-systemd python38-dbus
 
+Optional Accessories
+====================
+
+A suggested accessory is [KDE Connect](https://kdeconnect.kde.org/).  If you enabled the appropriate permissions on
+your phone, KDE Connect can forward desktop notifications to the phone.  Use Jouno to forward Systemd-Journal
+messages to Desktop-Notifications, and use KDE Connect to forward them to your phone.
+
 
 jouno Copyright (C) 2021 Michael Hamilton
 ===========================================
