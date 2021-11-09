@@ -17,7 +17,7 @@
 #
 
 Name: jouno
-Version: 1.0.5
+Version: 1.0.6
 Release: 0
 License: GPL-3.0-or-later
 BuildArch: noarch
@@ -80,6 +80,8 @@ install -m644 %{name}.png %{buildroot}/%{_datadir}/icons
 
 %changelog
 
+* Thu Nov 09 2021 Michael Hamilton <michael@actrix.gen.nz>
+- Show position when moving to the next/previous match: jouno 1.0.6
 * Thu Nov 05 2021 Michael Hamilton <michael@actrix.gen.nz>
 - Escape HTML before forwarding. Minor fixes and improvements: jouno 1.0.5
 * Thu Nov 05 2021 Michael Hamilton <michael@actrix.gen.nz>
