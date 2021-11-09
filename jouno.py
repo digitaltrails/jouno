@@ -2191,17 +2191,22 @@ class JournalPanel(DockableWidget):
             self.table_view.setEditTriggers(save_triggers)
 
     def scroll_selected(self, direction: int):
-        all_indexes = self.table_view.selectedIndexes()
-        if len(all_indexes) == 0:
+        matched_indexes = self.table_view.selectedIndexes()
+        if len(matched_indexes) == 0:
             return
         # Reduce the list of all selected row,col items to a list of one item for each row.
-        row_start_selections = list({index.row(): index for index in all_indexes}.values())
-        if self.scrolled_to_selected is None or self.scrolled_to_selected not in row_start_selections:
-            self.scrolled_to_selected = row_start_selections[0]
+        matched_rows = list({index.row(): index for index in matched_indexes}.values())
+        matched_count = len(matched_rows)
+        if self.scrolled_to_selected is None or self.scrolled_to_selected not in matched_rows:
+            self.scrolled_to_selected = matched_rows[0]
         else:
-            new_pos = (row_start_selections.index(self.scrolled_to_selected) + direction) % len(row_start_selections)
-            self.scrolled_to_selected = row_start_selections[new_pos]
+            new_pos = (matched_rows.index(self.scrolled_to_selected) + direction) % matched_count
+            self.scrolled_to_selected = matched_rows[new_pos]
+            self.journal_status_bar.showMessage(
+                tr("Row {}, match {}/{}.").format(self.scrolled_to_selected.row() + 1, new_pos + 1, matched_count),
+                2000)
         self.table_view.scrollTo(self.scrolled_to_selected, QAbstractItemView.PositionAtCenter)
+
 
     def set_max_entries(self, max_entries: int) -> None:
         self.table_view.model().set_max_entries(max_entries)
