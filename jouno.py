@@ -2203,8 +2203,8 @@ class JournalPanel(DockableWidget):
             new_pos = (matched_rows.index(self.scrolled_to_selected) + direction) % matched_count
             self.scrolled_to_selected = matched_rows[new_pos]
             self.journal_status_bar.showMessage(
-                tr("Row {}, match {}/{}.").format(self.scrolled_to_selected.row() + 1, new_pos + 1, matched_count),
-                2000)
+                tr("Match {}/{}, row {}.").format(new_pos + 1, matched_count, self.scrolled_to_selected.row() + 1),
+                10000)
         self.table_view.scrollTo(self.scrolled_to_selected, QAbstractItemView.PositionAtCenter)
 
 
