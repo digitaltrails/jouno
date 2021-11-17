@@ -1927,6 +1927,7 @@ class MainWindow(QMainWindow):
         rc = app.exec_()
         if rc == 999:  # EXIT_CODE_FOR_RESTART:
             QProcess.startDetached(app.arguments()[0], app.arguments()[1:])
+        sys.exit(rc)
 
     def event(self, event: 'QEvent') -> bool:
         super().event(event)
@@ -2668,6 +2669,7 @@ def parse_args():
 def main():
     signal.signal(signal.SIGINT, signal.SIG_DFL)
     sys.excepthook = exception_handler
+    # Call QApplication before parsing arguments, it will parse and remove Qt session restoration arguments.
     app = QApplication(sys.argv)
     parse_args()
     MainWindow(app)
