@@ -287,7 +287,7 @@ from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QMessageBox, QLi
     QHBoxLayout, QStyleFactory, QToolButton, QScrollArea, QLayout, QStatusBar
 from systemd import journal
 
-JOUNO_VERSION = '1.0.6'
+JOUNO_VERSION = '1.0.7'
 
 JOUNO_CONSOLIDATED_TEXT_KEY = '___JOURNO_FULL_TEXT___'
 
