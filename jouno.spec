@@ -17,7 +17,7 @@
 #
 
 Name: jouno
-Version: 1.0.7
+Version: 1.1.0
 Release: 0
 License: GPL-3.0-or-later
 BuildArch: noarch
@@ -80,6 +80,8 @@ install -m644 %{name}.png %{buildroot}/%{_datadir}/icons
 
 %changelog
 
+* Thu Nov 18 2021 Michael Hamilton <michael@actrix.gen.nz>
+- Add the ability to show past messages, ether n, or from last boot: jouno 1.1.0
 * Thu Nov 18 2021 Michael Hamilton <michael@actrix.gen.nz>
 - Default system-tray-enabled to false - some systems lack a system tray: jouno 1.0.7
 * Thu Nov 09 2021 Michael Hamilton <michael@actrix.gen.nz>

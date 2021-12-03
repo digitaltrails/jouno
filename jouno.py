@@ -182,6 +182,8 @@ The config file is in INI-format divided into a number of sections as outlined b
         start_with_notifications_enabled = yes
         # List all messages in the "Recently notified" table, not just the ones that passed the filters.
         list_all_enabled = yes
+        # Show older messages from boot onward
+        from_boot_enabled = no
         # For debugging the application
         debug_enabled = yes
 
@@ -213,7 +215,7 @@ Prerequisites
 All the following runtime dependencies are likely to be available pre-packaged on any modern Linux distribution
 (``jouno`` was originally developed on OpenSUSE Tumbleweed).
 
-* python 3.8: ``journo`` is written in python and may depend on some features present only in 3.8 onward.
+* python 3.8: ``jouno`` is written in python and may depend on some features present only in 3.8 onward.
 * python 3.8 QtPy: the python GUI library used by ``jouno``.
 * python 3.8 systemd: python module for native access to the systemd facilities.
 * python 3.8 dbus: python module for dbus used for issuing notifications
@@ -287,7 +289,7 @@ from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QMessageBox, QLi
     QHBoxLayout, QStyleFactory, QToolButton, QScrollArea, QLayout, QStatusBar
 from systemd import journal
 
-JOUNO_VERSION = '1.0.7'
+JOUNO_VERSION = '1.1.0'
 
 JOUNO_CONSOLIDATED_TEXT_KEY = '___JOURNO_FULL_TEXT___'
 
@@ -528,10 +530,11 @@ CONFIG_OPTIONS_LIST: List[ConfigOption] = [
     ConfigOption('notification_seconds',
                  'How long should a desktop notification remain visible, zero for no timeout ({}..{} seconds)', (0, 60)),
     ConfigOption('journal_history_max',
-                 'How many journal entries should be retained in the Recently Notified panel.', None),
+                 'How many journal entries should be shown in the Recently Notified panel.', None),
     ConfigOption('system_tray_enabled', 'Jouno should start minimised in the system-tray.'),
     ConfigOption('start_with_notifications_enabled', 'Jouno should start with desktop notifications enabled.'),
     ConfigOption('list_all_enabled', 'The Recent notifications panel should show all entries, including non-notified.'),
+    ConfigOption('from_boot_enabled', 'Show old journal entries from boot onward.'),
     ConfigOption('debug_enabled', 'Enable extra debugging output to standard-out.'),
 ]
 
@@ -662,7 +665,6 @@ class Config(configparser.ConfigParser):
 class JournalWatcher:
 
     def __init__(self, supervisor=None):
-        self.config = Config()
         self.burst_truncate: int = 3
         self.polling_millis: int = 2_000
         self.notification_timeout_millis: int = 60_000
@@ -670,6 +672,10 @@ class JournalWatcher:
         self.ignore_regexp: Mapping[str, re] = {}
         self.match_regexp: Mapping[str, re] = {}
         self.forward_all = False
+        self.max_historical_entries = 500
+        self.from_boot_enabled = False
+        self.config = Config()
+        self.config.refresh()
         self.update_settings_from_config()
         self._stop = False
         self.supervisor = supervisor
@@ -696,6 +702,10 @@ class JournalWatcher:
             self.notification_timeout_millis = 1_000 * self.config.getint('options', 'notification_seconds')
         if 'list_all_enabled' in self.config['options']:
             self.forward_all = self.config.getboolean('options', 'list_all_enabled')
+        if 'journal_history_max' in self.config['options']:
+            self.max_historical_entries = self.config.getint('options', 'journal_history_max')
+        if 'from_boot_enabled' in self.config['options']:
+            self.from_boot_enabled = self.config.getboolean('options', 'from_boot_enabled')
         if 'debug' in self.config['options']:
             global debugging
             debugging = self.config.getboolean('options', 'debug')
@@ -718,18 +728,23 @@ class JournalWatcher:
                     else:
                         patterns_map[rule_id] = re.compile(re.escape(rule_text))
 
-    def determine_app_name(self, journal_entries: List[Mapping[str, Any]]):
+    def determine_source(self, journal_entry):
+        for key in ['_COMM', '_EXE', '_CMDLINE', '_KERNEL_SUBSYSTEM', 'SYSLOG_IDENTIFIER',]:
+            if key in journal_entry:
+                value = str(journal_entry[key])
+                if key == '_KERNEL_SUBSYSTEM':
+                    value = 'kern: ' + value
+                return value
+        return 'unknown'
+
+    def determine_app_names(self, journal_entries: List[Mapping[str, Any]]):
         app_name_info = ''
         sep = '\u25b3'
         for journal_entry in journal_entries:
-            for key, prefix in {'_CMDLINE': '', '_EXE': '', '_COMM': '', 'SYSLOG_IDENTIFIER': '',
-                                '_KERNEL_SUBSYSTEM': 'kernel ',
-                                }.items():
-                if key in journal_entry:
-                    value = str(journal_entry[key])
-                    if app_name_info.find(value) < 0:
-                        app_name_info += sep + prefix + value
-                        sep = '; '
+            source = self.determine_source(journal_entry)
+            if app_name_info.find(source) < 0:
+                app_name_info += sep + source
+                sep = '; '
         if app_name_info == '':
             app_name_info = sep + 'unknown'
         return app_name_info
@@ -786,11 +801,7 @@ class JournalWatcher:
                     current_level = Priority(priority)
         return current_level
 
-    def is_notable(self, journal_entry: Mapping[str, Any]):
-        # Is a list comprehension slower than a for-loop for string construction?
-        # Use an easy a format that is easy to pattern match
-        fields_str = ', '.join((f"'{key}={str(value)}'" for key, value in journal_entry.items()))
-        journal_entry[JOUNO_CONSOLIDATED_TEXT_KEY] = fields_str
+    def is_notable(self, fields_str: str):
         # debug(fields_str) if debugging else None
         notable = len(self.match_regexp) == 0
         if not notable:
@@ -815,7 +826,11 @@ class JournalWatcher:
         notify = NotifyFreeDesktop()
 
         journal_reader = journal.Reader()
+
+        self.load_past_entries(journal_reader)
+
         journal_reader.seek_tail()
+
         journal_reader.get_previous()
 
         journal_reader_poll = select.poll()
@@ -837,16 +852,49 @@ class JournalWatcher:
                         if self.is_stop_requested():
                             return
                         burst_count += 1
-                        notable = self.is_notable(journal_entry)
+                        notable = self.is_notable(self.consolidate_text(journal_entry))
                         notable_list.append(journal_entry) if notable else None
                         if notable or self.forward_all:
                             self.supervisor.new_journal_entry(journal_entry, notable)
             if self.notifications_enabled and len(notable_list):
-                notify.notify_desktop(app_name=self.determine_app_name(notable_list),
+                notify.notify_desktop(app_name=self.determine_app_names(notable_list),
                                       summary=self.determine_summary(notable_list),
                                       message=self.determine_message(notable_list),
                                       priority=self.determine_priority(notable_list),
                                       timeout=self.notification_timeout_millis)
+
+    def determine_source(self, journal_entry):
+        for key in ['_COMM', '_EXE', '_CMDLINE', '_KERNEL_SUBSYSTEM', 'SYSLOG_IDENTIFIER',]:
+            if key in journal_entry:
+                value = str(journal_entry[key])
+                if key == '_KERNEL_SUBSYSTEM':
+                    value = 'kernel: ' + value
+                return value
+        return 'unknown'
+
+    def consolidate_text(self, journal_entry):
+        # Is a list comprehension slower than a for-loop for string construction?
+        # Use an easy a format that is easy to pattern match
+        fields_str = ', '.join((f"'{key}={str(value)}'" for key, value in journal_entry.items()))
+        # Prepend the source, so it's searchable by entering what is seen in the UI
+        journal_entry[JOUNO_CONSOLIDATED_TEXT_KEY] = f"source={self.determine_source(journal_entry)}, " + fields_str
+        return fields_str
+
+    def load_past_entries(self, journal_reader):
+        if self.from_boot_enabled:
+            journal_reader.this_boot()
+        else:
+            journal_reader.add_match()
+            journal_reader.seek_tail()
+            journal_reader.get_next(-self.max_historical_entries - 1)
+        for journal_entry in journal_reader:
+            notable = self.is_notable(self.consolidate_text(journal_entry))
+            if notable or self.forward_all:
+                self.supervisor.new_journal_entry(journal_entry, notable)
+
+
+def extract_source_from_considated_text(consolidated_text: str):
+    return consolidated_text[len('source='):consolidated_text.index(',')]
 
 
 def tr(source_text: str):
@@ -2071,14 +2119,12 @@ class JournalPanel(DockableWidget):
         layout.addWidget(self.journal_status_bar)
         self.static_status_label.setText(tr("{n}/{m}").format(n=0, m=max_entries))
 
-        self.counter = 0
-
         def new_journal_entry(journal_entry, notable):
-            self.counter += 1
             self.table_view.new_journal_entry(journal_entry, notable)
             # self.journal_status_bar.showMessage(tr("New journal entry."), 1000)
             self.static_status_label.setText(
-                tr("{n}/{m}").format(n=self.counter, m=self.table_view.model().get_max_entries()))
+                tr("{n}/{m}").format(n=self.table_view.model().get_num_entries(),
+                                     m=self.table_view.model().get_max_entries()))
 
         journal_watcher_task.signal_new_entry.connect(new_journal_entry)
 
@@ -2207,7 +2253,6 @@ class JournalPanel(DockableWidget):
                 10000)
         self.table_view.scrollTo(self.scrolled_to_selected, QAbstractItemView.PositionAtCenter)
 
-
     def set_max_entries(self, max_entries: int) -> None:
         self.table_view.model().set_max_entries(max_entries)
 
@@ -2297,17 +2342,19 @@ class JournalTableModel(QStandardItemModel):
 
         self.journal_entries.append(journal_entry)
 
+        consolidated_text = journal_entry[JOUNO_CONSOLIDATED_TEXT_KEY]
+        source = extract_source_from_considated_text(consolidated_text)
+        size_k = f"{len(consolidated_text) / 1024.0:.2f}"
+
         self.appendRow(
             [
                 selectable(align_right(QStandardItem(f"{journal_entry['__REALTIME_TIMESTAMP']:%H:%M:%S}"))),
                 selectable(QStandardItem(journal_entry['_HOSTNAME'])),
-                # TODO smarter choice of source value
-                selectable(QStandardItem(journal_entry['_COMM'] if '_COMM' in journal_entry else 'unknown')),
+                selectable(QStandardItem(source)),
                 # TODO smarter choice when _PID is not present.
                 selectable(align_right(QStandardItem(str(journal_entry['_PID'] if '_PID' in journal_entry else '')))),
                 set_icon(selectable(QStandardItem(journal_entry['MESSAGE']))),
-                selectable(
-                    align_right(QStandardItem(f"{len(journal_entry[JOUNO_CONSOLIDATED_TEXT_KEY]) / 1024.0:.2f}"))),
+                selectable(align_right(QStandardItem(size_k))),
             ])
 
     def set_max_entries(self, max_entries: int) -> None:
@@ -2315,6 +2362,9 @@ class JournalTableModel(QStandardItemModel):
 
     def get_max_entries(self) -> int:
         return self.max_entries
+
+    def get_num_entries(self) -> int:
+        return len(self.journal_entries)
 
 
 def format_journal_entry(journal_entry):
