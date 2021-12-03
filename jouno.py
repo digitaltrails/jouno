@@ -289,7 +289,7 @@ from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QMessageBox, QLi
     QHBoxLayout, QStyleFactory, QToolButton, QScrollArea, QLayout, QStatusBar
 from systemd import journal
 
-JOUNO_VERSION = '1.1.0'
+JOUNO_VERSION = '1.1.1'
 
 JOUNO_CONSOLIDATED_TEXT_KEY = '___JOURNO_FULL_TEXT___'
 
@@ -881,6 +881,7 @@ class JournalWatcher:
         return fields_str
 
     def load_past_entries(self, journal_reader):
+        data = []
         if self.from_boot_enabled:
             journal_reader.this_boot()
         else:
@@ -891,6 +892,7 @@ class JournalWatcher:
             notable = self.is_notable(self.consolidate_text(journal_entry))
             if notable or self.forward_all:
                 self.supervisor.new_journal_entry(journal_entry, notable)
+        self.supervisor.listening_for_new_entries()
 
 
 def extract_source_from_considated_text(consolidated_text: str):
@@ -1616,6 +1618,7 @@ class ConfigWatcherTask(QThread):
 
 class JournalWatcherTask(QThread):
     signal_new_entry = pyqtSignal(dict, bool)
+    signal_listening = pyqtSignal()
 
     def __init__(self) -> None:
         super().__init__()
@@ -1635,6 +1638,9 @@ class JournalWatcherTask(QThread):
 
     def new_journal_entry(self, journal_entry: Mapping, notable: bool):
         self.signal_new_entry.emit(journal_entry, notable)
+
+    def listening_for_new_entries(self):
+        self.signal_listening.emit()
 
 
 class MainToolBar(QToolBar):
@@ -2037,6 +2043,8 @@ class JournalPanel(DockableWidget):
         self.table_view = JournalTableView()
         self.table_view.model().set_max_entries(max_entries)
 
+        self.listening_for_new_entries = False
+
         container = self
         layout = QVBoxLayout()
         container.setLayout(layout)
@@ -2121,12 +2129,21 @@ class JournalPanel(DockableWidget):
 
         def new_journal_entry(journal_entry, notable):
             self.table_view.new_journal_entry(journal_entry, notable)
+            if self.listening_for_new_entries:
+                self.table_view.scrollToBottom()
             # self.journal_status_bar.showMessage(tr("New journal entry."), 1000)
             self.static_status_label.setText(
                 tr("{n}/{m}").format(n=self.table_view.model().get_num_entries(),
                                      m=self.table_view.model().get_max_entries()))
 
+        def now_listening():
+            # Initialising old historic entries has finished.
+            self.listening_for_new_entries = True
+            self.table_view.scrollToBottom()
+
         journal_watcher_task.signal_new_entry.connect(new_journal_entry)
+
+        journal_watcher_task.signal_listening.connect(now_listening)
 
         def view_journal_entry_at_row_number(row: int):
             if row < 0 and (self.table_view.model().rowCount() > 0):
@@ -2293,8 +2310,6 @@ class JournalTableView(QTableView):
 
     def new_journal_entry(self, journal_entry, notable):
         self.model().new_journal_entry(journal_entry, notable)
-        self.scrollToBottom()
-
 
 
 class JournalTableModel(QStandardItemModel):
