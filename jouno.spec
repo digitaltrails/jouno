@@ -80,9 +80,9 @@ install -m644 %{name}.png %{buildroot}/%{_datadir}/icons
 
 %changelog
 
-* Thu Dec 03 2021 Michael Hamilton <michael@actrix.gen.nz>
+* Sat Dec 04 2021 Michael Hamilton <michael@actrix.gen.nz>
 - Detect if system tray is present, if not, ignore system_tray_enabled: jouno 1.1.2
-* Thu Dec 03 2021 Michael Hamilton <michael@actrix.gen.nz>
+* Fri Dec 03 2021 Michael Hamilton <michael@actrix.gen.nz>
 - Faster startup by deferring UI scroll-to-bottom until old entries are read: jouno 1.1.1
 * Thu Dec 03 2021 Michael Hamilton <michael@actrix.gen.nz>
 - Add the ability to show past messages, ether n, or from last boot: jouno 1.1.0
