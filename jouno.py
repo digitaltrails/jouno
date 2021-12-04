@@ -289,7 +289,7 @@ from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QMessageBox, QLi
     QHBoxLayout, QStyleFactory, QToolButton, QScrollArea, QLayout, QStatusBar
 from systemd import journal
 
-JOUNO_VERSION = '1.1.1'
+JOUNO_VERSION = '1.1.2'
 
 JOUNO_CONSOLIDATED_TEXT_KEY = '___JOURNO_FULL_TEXT___'
 
@@ -1916,7 +1916,8 @@ class MainWindow(QMainWindow):
             debugging = config_panel.get_config().getboolean('options', 'debug_enabled')
             self.config_panel.status_bar.showMessage(tr("Applying configuration changes."), 3000)
             self.journal_panel.static_status_label.setText("")
-            if config_panel.get_config().getboolean('options', 'system_tray_enabled'):
+
+            if self.use_system_tray():
                 if not tray.isVisible():
                     tray.setVisible(True)
             else:
@@ -1960,7 +1961,7 @@ class MainWindow(QMainWindow):
         self.signal_theme_change.connect(update_title_and_tray_indicators)
 
         tray.activated.connect(self.tray_activate_window)
-        if config_panel.get_config().getboolean('options', 'system_tray_enabled'):
+        if self.use_system_tray():
             tray.setVisible(True)
         else:
             self.show()
@@ -1993,7 +1994,7 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event: QCloseEvent) -> None:
         debug("closeEvent") if debugging else None
-        if self.config_panel.get_config().getboolean('options', 'system_tray_enabled'):
+        if self.use_system_tray():
             self.tray_activate_window()
         else:
             self.app_save_state()
@@ -2014,6 +2015,10 @@ class MainWindow(QMainWindow):
             self.journal_dock_container.activate_dock_window()
             self.config_dock_container.activate_dock_window()
 
+    def use_system_tray(self):
+        return QSystemTrayIcon.isSystemTrayAvailable() and \
+               self.config_panel.get_config().getboolean('options', 'system_tray_enabled')
+
     def app_save_state(self):
         debug(f"app_save_state {self.geometry_key} {self.state_key}") if debugging else None
         self.settings.setValue(self.geometry_key, self.saveGeometry())
@@ -2029,7 +2034,7 @@ class MainWindow(QMainWindow):
             self.restoreGeometry(geometry)
             window_state = self.settings.value(self.state_key, None)
             self.restoreState(window_state)
-        system_tray_in_use = self.config_panel.get_config().getboolean('options', 'system_tray_enabled')
+        system_tray_in_use = self.use_system_tray()
         self.journal_dock_container.app_restore_state(from_settings=self.settings, show=not system_tray_in_use)
         self.config_dock_container.app_restore_state(from_settings=self.settings, show=not system_tray_in_use)
 

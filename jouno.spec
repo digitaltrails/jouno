@@ -17,7 +17,7 @@
 #
 
 Name: jouno
-Version: 1.1.1
+Version: 1.1.2
 Release: 0
 License: GPL-3.0-or-later
 BuildArch: noarch
@@ -80,6 +80,8 @@ install -m644 %{name}.png %{buildroot}/%{_datadir}/icons
 
 %changelog
 
+* Thu Dec 03 2021 Michael Hamilton <michael@actrix.gen.nz>
+- Detect if system tray is present, if not, ignore system_tray_enabled: jouno 1.1.2
 * Thu Dec 03 2021 Michael Hamilton <michael@actrix.gen.nz>
 - Faster startup by deferring UI scroll-to-bottom until old entries are read: jouno 1.1.1
 * Thu Dec 03 2021 Michael Hamilton <michael@actrix.gen.nz>
