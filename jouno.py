@@ -289,7 +289,7 @@ from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QMessageBox, QLi
     QHBoxLayout, QStyleFactory, QToolButton, QScrollArea, QLayout, QStatusBar
 from systemd import journal
 
-JOUNO_VERSION = '1.1.2'
+JOUNO_VERSION = '1.1.3'
 
 JOUNO_CONSOLIDATED_TEXT_KEY = '___JOURNO_FULL_TEXT___'
 
@@ -2237,24 +2237,26 @@ class JournalPanel(DockableWidget):
                 matched_row_count = 0
                 model = self.table_view.model()
                 last_column = self.table_view.model().columnCount() - 1
-                # TODO Assume case insensitive if all text is in lower case? Think about it.
-                regexp = re.compile(text if regexp_search else re.escape(text))
+                # Assume case-insensitive if all text is in lower case.
+                regexp = re.compile(text if regexp_search else re.escape(text),
+                                    flags=re.IGNORECASE if text == text.lower() else 0)
                 matching_rows_selection = QItemSelection()
-                for row_n, journal_entry in enumerate(model.journal_entries):
-                    row_n_selection = QItemSelection(model.index(row_n, 0), model.index(row_n, last_column))
-                    # Use an easy a format that is easy to pattern match: "'key=value', 'key=value'"
-                    fields_str = journal_entry[JOUNO_CONSOLIDATED_TEXT_KEY]
-                    if regexp.search(fields_str) is not None:
-                        matched_row_count += 1
-                        matching_rows_selection.merge(row_n_selection, QItemSelectionModel.SelectCurrent)
-                self.table_view.selectionModel().select(matching_rows_selection, QItemSelectionModel.SelectCurrent)
-                if len(matching_rows_selection.indexes()) == 0:
+                matched_row_numbers = [row_num for row_num, journal_entry in enumerate(model.journal_entries)
+                                       if regexp.search(journal_entry[JOUNO_CONSOLIDATED_TEXT_KEY]) is not None]
+                match_count = len(matched_row_numbers)
+                if match_count == 0:
                     self.journal_status_bar.showMessage(tr("Nothing matches"), 2000)
+                elif match_count == len(model.journal_entries):
+                    self.journal_status_bar.showMessage(tr("Everything matches."), 2000)
                 else:
+                    for row_n in matched_row_numbers:
+                        row_n_selection = QItemSelection(model.index(row_n, 0), model.index(row_n, last_column))
+                        matching_rows_selection.merge(row_n_selection, QItemSelectionModel.SelectCurrent)
                     self.scrolled_to_selected = model.index(matching_rows_selection.indexes()[0].row(), 0)
                     self.table_view.scrollTo(self.scrolled_to_selected)
                     self.journal_status_bar.showMessage(
-                        tr("Matched {match_count} entries.").format(match_count=matched_row_count), 4000)
+                        tr("Matched {match_count} entries.").format(match_count=match_count), 4000)
+                self.table_view.selectionModel().select(matching_rows_selection, QItemSelectionModel.SelectCurrent)
         finally:
             self.table_view.setEditTriggers(save_triggers)
 
@@ -2422,15 +2424,17 @@ class JournalEntryDialogPlain(QDialog):
             if text_to_find == '':
                 status_bar.showMessage('')
             else:
+                # Case-insensitive search if text_to_find is all lowercase.
+                re_flags = re.IGNORECASE if text_to_find == text_to_find.lower() else 0
                 self.scrolled_to_selected = None
                 if self.re_search_enabled:
                     try:
-                        matcher = re.compile(text_to_find)
+                        matcher = re.compile(text_to_find, flags=re_flags)
                     except re.error as e:
                         status_bar.showMessage(str(e))
                         return
                 else:
-                    matcher = re.compile(re.escape(text_to_find))
+                    matcher = re.compile(re.escape(text_to_find), flags=re_flags)
                 matches = matcher.search(text_view.toPlainText())
                 if matches is not None:
                     cursor = text_view.textCursor()

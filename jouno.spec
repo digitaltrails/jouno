@@ -17,7 +17,7 @@
 #
 
 Name: jouno
-Version: 1.1.2
+Version: 1.1.3
 Release: 0
 License: GPL-3.0-or-later
 BuildArch: noarch
@@ -80,6 +80,8 @@ install -m644 %{name}.png %{buildroot}/%{_datadir}/icons
 
 %changelog
 
+* Sun Dec 05 2021 Michael Hamilton <michael@actrix.gen.nz>
+- Faster, more efficient, text matching; Case-insensitive search for lowercase patterns: jouno 1.1.3
 * Sat Dec 04 2021 Michael Hamilton <michael@actrix.gen.nz>
 - Detect if system tray is present, if not, ignore system_tray_enabled: jouno 1.1.2
 * Fri Dec 03 2021 Michael Hamilton <michael@actrix.gen.nz>
