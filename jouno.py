@@ -290,7 +290,7 @@ from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QMessageBox, QLi
     QCheckBox, QGridLayout, QTableView, \
     QAbstractItemView, QHeaderView, QMainWindow, QSizePolicy, QStyledItemDelegate, QToolBar, QDockWidget, \
     QHBoxLayout, QStyleFactory, QToolButton, QScrollArea, QLayout, QStatusBar, QDateTimeEdit, QCalendarWidget, \
-    QFormLayout, QGroupBox
+    QFormLayout, QGroupBox, QSpacerItem
 from systemd import journal
 
 JOUNO_VERSION = '1.2.0'
@@ -2560,24 +2560,38 @@ class QueryWindow(QMainWindow):
         self.title_layout = QHBoxLayout()
         title_widget.setLayout(self.title_layout)
         self.title_layout.addWidget((big_label(QLabel(tr("Journal Query")))))
-        spacer = QWidget()
-        spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        self.title_layout.addWidget(spacer)
+        spacer = QSpacerItem(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        #spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        self.title_layout.addItem(spacer)
         layout.addRow(title_widget)
         self.query_results = []
 
+        self.query_desc_label = QLabel()
+        layout.addRow(tr("Query:"), self.query_desc_label)
+
+        def row_limit_func(text: str):
+            try:
+                self.row_limit = int(text)
+                self.query_desc_label.setText(self.query_description())
+            except ValueError:
+                pass
+
+        self.row_limit = 0
         self.limit_rows_widget = QLineEdit()
         self.limit_rows_widget.setText("0")
         self.limit_rows_widget.setMaximumWidth(150)
         self.limit_rows_widget.setValidator(QIntValidator())
+        self.limit_rows_widget.textChanged.connect(row_limit_func)
         layout.addRow(tr("&Row Limit"), self.limit_rows_widget)
 
         def from_date_func(datetime: QDateTime):
             self.from_date_time = datetime.toPyDateTime()
+            self.query_desc_label.setText(self.query_description())
             # to_date_widget.setMinimumDate(datetime)
 
         def to_date_func(datetime: QDateTime):
             self.to_date_time = datetime.toPyDateTime()
+            self.query_desc_label.setText(self.query_description())
 
         with journal.Reader() as reader:
             start_date_time = reader.get_next()['__REALTIME_TIMESTAMP']
@@ -2596,33 +2610,54 @@ class QueryWindow(QMainWindow):
         layout.addRow(tr("&From"), from_date_widget)
         layout.addRow(tr("&To"), to_date_widget)
 
+        tab_widget = QTabWidget()
+        layout.addWidget(tab_widget)
+
+        def value_checked_func():
+            self.query_desc_label.setText(self.query_description())
+
         self.field_query_widget_list = []
 
         for field_name in ['_UID', '_GID', 'QT_CATEGORY', 'PRIORITY', 'SYSLOG_IDENTIFIER', '_COM', '_EXE', ]:
             with journal.Reader() as reader:
                 values_set = reader.query_unique(field_name)
             if len(values_set) > 0:
-                field_query_widget = QueryFieldWidget(field_name, values_set, self)
-                layout.addWidget(field_query_widget)
+                field_query_widget = QueryFieldWidget(field_name, values_set, value_checked_func, self)
+                tab_widget.addTab(field_query_widget, field_name)
                 self.field_query_widget_list.append(field_query_widget)
 
         query_button = QPushButton(tr("Run Query"))
         query_button.clicked.connect(self.perform_query)
         layout.addRow(query_button)
 
+        self.query_desc_label.setText(self.query_description())
         self.setCentralWidget(central)
         self.show()
+
+    def query_description(self):
+        time_desc = tr("interval {:%y.%m.%d %H:%M} .. {:%y.%m.%d %H:%M}").format(self.from_date_time, self.to_date_time)
+        row_limit_desc = " and row_count <= {}".format(self.row_limit) if self.row_limit > 0 else ''
+        field_map = {}
+        for field_query_widget in self.field_query_widget_list:
+            for value in field_query_widget.get_checked_values():
+                field_name = field_query_widget.field_name
+                if field_name in field_map:
+                    field_map[field_name].append(value)
+                else:
+                    field_map[field_name] = [value]
+        field_desc = ''
+        for key, value in field_map.items():
+            field_desc += f" and {key} in {value}" if len(value) > 1 else f" and {key}={value[0]}"
+        return time_desc + row_limit_desc + field_desc
 
     def perform_query(self):
         query_result = QWidget()
         query_layout = QVBoxLayout()
         query_result.setLayout(query_layout)
         journal_panel = JournalPanel(max_entries=0)
+        title = tr("Query: {}").format(self.query_description())
+        journal_panel.title_label.setText(title)
         query_layout.addWidget(journal_panel)
-        row_limit = int(self.limit_rows_widget.text())
-        title = tr("Query: time between ({:%y.%m.%d %H:%M}, {:%y.%m.%d %H:%M})").format(self.from_date_time, self.to_date_time)
-        if row_limit > 0:
-            title += tr(" AND row_count <= {}").format(row_limit)
         number_of_matches = 0
         with journal.Reader() as query_reader:
             query_reader.seek_realtime(self.from_date_time)
@@ -2630,7 +2665,6 @@ class QueryWindow(QMainWindow):
                 for value in field_query_widget.get_checked_values():
                     match_str = "{}={}".format(field_query_widget.field_name, value)
                     query_reader.add_match(match_str)
-                    title += f" and {match_str}"
             while True:
                 journal_entry = query_reader.get_next()
                 # at end of journal returns {} an empty dictionary
@@ -2642,9 +2676,8 @@ class QueryWindow(QMainWindow):
                 number_of_matches += 1
                 consolidate_text(journal_entry)
                 journal_panel.add_journal_entry(journal_entry, True)
-                if row_limit > 0 and number_of_matches == row_limit:
+                if self.row_limit > 0 and number_of_matches == self.row_limit:
                     break
-        journal_panel.title_label.setText(title)
         journal_panel.static_status_label.setText(tr("Retrieved {} entries.".format(number_of_matches)))
         result_geometry = self.main_window.geometry()
         result_geometry.translate(50, 50)
@@ -2665,8 +2698,8 @@ class QueryWindow(QMainWindow):
 
 class QueryFieldWidget(QGroupBox):
 
-    def __init__(self, field_name: str, values_set: set, parent: QueryWindow):
-        super().__init__(field_name, parent=parent)
+    def __init__(self, field_name: str, values_set: set, value_checked_func: Callable, parent: QueryWindow):
+        super().__init__('', parent=parent)
         self.field_name = field_name
         self.setAlignment(Qt.AlignLeft)
         layout = QVBoxLayout()
@@ -2680,7 +2713,8 @@ class QueryFieldWidget(QGroupBox):
         grid_layout.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
         layout.addWidget(scroll_area)
         # self.setFlat(True)
-        num_cols = 100 // max(len(str(v)) for v in values_set)
+        max_str_len = max(len(str(v)) for v in values_set)
+        num_cols = 5 if max_str_len < 20 else (100 // max_str_len)
         self.checkbox_list = []
         for i, value in enumerate(sorted(values_set)):
             if field_name == '_UID':
@@ -2692,8 +2726,15 @@ class QueryFieldWidget(QGroupBox):
             tooltip = "{}={}".format(field_name, value)
             checkbox = QCheckBox(str_value)
             checkbox.setToolTip(tooltip)
+            if value_checked_func is not None:
+                checkbox.stateChanged.connect(value_checked_func)
             self.checkbox_list.append(checkbox)
-            grid_layout.addWidget(checkbox, i / num_cols, i % num_cols, Qt.AlignLeft)
+            grid_layout.addWidget(checkbox, i // num_cols, i % num_cols, Qt.AlignLeft)
+        # Stop the inter-cell spacing from expanding by consuming it with spacers
+        v_spacer = QSpacerItem(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        grid_layout.addItem(v_spacer, grid_layout.rowCount(), 0, 1, -1)
+        h_spacer = QSpacerItem(QSizePolicy.Expanding, QSizePolicy.Minimum)
+        grid_layout.addItem(h_spacer, 0, grid_layout.columnCount(), -1, 1)
 
     def get_checked_values(self):
         if self.field_name == '_UID':
