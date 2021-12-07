@@ -269,6 +269,7 @@ import sys
 import textwrap
 import time
 import traceback
+from datetime import datetime
 from enum import Enum
 from functools import partial
 from html import escape
@@ -278,21 +279,21 @@ from typing import Mapping, Any, List, Type, Callable, Tuple
 
 import dbus
 from PyQt5.QtCore import QCoreApplication, QProcess, Qt, pyqtSignal, QThread, QModelIndex, QItemSelectionModel, QSize, \
-    QEvent, QSettings, QObject, QItemSelection, QPoint
+    QEvent, QSettings, QObject, QItemSelection, QPoint, QDateTime
 from PyQt5.QtGui import QPixmap, QIcon, QImage, QPainter, QStandardItemModel, QStandardItem, QIntValidator, \
-    QFontDatabase, QGuiApplication, QCloseEvent, QPalette, QTextCursor
+    QFontDatabase, QGuiApplication, QCloseEvent, QPalette, QTextCursor, QResizeEvent
 from PyQt5.QtSvg import QSvgRenderer
 from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QMessageBox, QLineEdit, QLabel, \
     QPushButton, QSystemTrayIcon, QMenu, QTextEdit, QDialog, QTabWidget, \
     QCheckBox, QGridLayout, QTableView, \
     QAbstractItemView, QHeaderView, QMainWindow, QSizePolicy, QStyledItemDelegate, QToolBar, QDockWidget, \
-    QHBoxLayout, QStyleFactory, QToolButton, QScrollArea, QLayout, QStatusBar
+    QHBoxLayout, QStyleFactory, QToolButton, QScrollArea, QLayout, QStatusBar, QDateTimeEdit, QCalendarWidget, \
+    QFormLayout, QGroupBox
 from systemd import journal
 
-JOUNO_VERSION = '1.1.3'
+JOUNO_VERSION = '1.2.0'
 
 JOUNO_CONSOLIDATED_TEXT_KEY = '___JOURNO_FULL_TEXT___'
-
 
 # The icons can either be:
 #   1) str: named icons from the freedesktop theme which should all be available on most Linux desktops.
@@ -439,6 +440,21 @@ SVG_TOOLBAR_TEST_FILTERS = b"""
 </svg>
 """
 
+SVG_TOOLBAR_JOURNAL_QUERY = b"""
+<!DOCTYPE svg>
+<svg xmlns="http://www.w3.org/2000/svg" version="1.1" viewBox="0 0 22 22">
+    <defs>
+        <style id="current-color-scheme" type="text/css">
+            .ColorScheme-Text {
+                color:#232629;
+            }
+        </style>
+    </defs>
+    <path style="fill:currentColor; fill-opacity:1; stroke:none" class="ColorScheme-Text" d="M 6 3 C 4.929 3 3.93784 3.57249 3.40234 4.5 C 3.13459 4.96375 3 5.48188 3 6 L 3 16 C 3 16.5181 3.1346 17.0362 3.40234 17.5 C 3.93784 18.4275 4.929 19 6 19 L 16 19 L 16 18 L 6 18 C 5.28467 18 4.62524 17.6195 4.26758 17 C 3.90991 16.3805 3.90991 15.6195 4.26758 15 C 4.62524 14.3805 5.28467 14 6 14 L 7 14 L 7 7 L 17 7 L 17 15 L 18 15 L 18 6 L 7 6 L 7 3 L 6 3 Z M 6 4 L 6 6 L 6 7 L 6 13 C 5.24975 13 4.5427 13.2863 4 13.7734 L 4 6 C 4 5.65487 4.08874 5.30975 4.26758 5 C 4.62524 4.3805 5.28467 4 6 4 Z"/>
+    <path style="fill:currentColor; fill-opacity:1; stroke:none" class="ColorScheme-Text" d="M 12 8 C 9.79086 8 8 9.79086 8 12 C 8 14.2091 9.79086 16 12 16 C 12.8874 15.9982 13.749 15.7014 14.4492 15.1563 L 18.293 19 L 19 18.293 L 15.1582 14.4512 C 15.7031 13.7502 15.9992 12.8878 16 12 C 16 9.79086 14.2091 8 12 8 Z M 12 9 C 13.6569 9 15 10.3431 15 12 C 15 13.6569 13.6569 15 12 15 C 10.3431 15 9 13.6569 9 12 C 9 10.3431 10.3431 9 12 9 Z"/>
+</svg>
+"""
+
 SVG_TOOLBAR_HAMBURGER_MENU = b"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 22 22">
   <defs id="defs3051">
     <style type="text/css" id="current-color-scheme">
@@ -518,7 +534,7 @@ class ConfigOption:
 
     def tooltip(self):
         fmt = tr(self._tooltip)
-        return fmt.format(self.int_range[0],self.int_range[1]) if self.int_range is not None else fmt
+        return fmt.format(self.int_range[0], self.int_range[1]) if self.int_range is not None else fmt
 
 
 CONFIG_OPTIONS_LIST: List[ConfigOption] = [
@@ -528,7 +544,8 @@ CONFIG_OPTIONS_LIST: List[ConfigOption] = [
                  'How many messages from a burst should be bundled into its desktop notification ({}..{} messages).',
                  (1, 50)),
     ConfigOption('notification_seconds',
-                 'How long should a desktop notification remain visible, zero for no timeout ({}..{} seconds)', (0, 60)),
+                 'How long should a desktop notification remain visible, zero for no timeout ({}..{} seconds)',
+                 (0, 60)),
     ConfigOption('journal_history_max',
                  'How many journal entries should be shown in the Recently Notified panel.', None),
     ConfigOption('system_tray_enabled', 'Jouno should start minimised in the system-tray.'),
@@ -662,6 +679,35 @@ class Config(configparser.ConfigParser):
             io2.close()
 
 
+def determine_source(journal_entry):
+    for key in ['_COMM', '_EXE', '_CMDLINE', '_KERNEL_SUBSYSTEM', 'SYSLOG_IDENTIFIER', ]:
+        if key in journal_entry:
+            value = str(journal_entry[key])
+            if key == '_KERNEL_SUBSYSTEM':
+                value = 'kernel: ' + value
+            return value
+    return 'unknown'
+
+
+def consolidate_text(journal_entry):
+    # Is a list comprehension slower than a for-loop for string construction?
+    # Use an easy a format that is easy to pattern match
+    fields_str = ', '.join((f"'{key}={str(value)}'" for key, value in journal_entry.items()))
+    # Prepend the source, so it's searchable by entering what is seen in the UI
+    journal_entry[JOUNO_CONSOLIDATED_TEXT_KEY] = f"source={determine_source(journal_entry)}, " + fields_str
+    return fields_str
+
+
+def determine_priority(journal_entries: List[Mapping[str, Any]]) -> Priority:
+    current_level = Priority.NOTICE
+    for journal_entry in journal_entries:
+        if 'PRIORITY' in journal_entry:
+            priority = journal_entry['PRIORITY']
+            if priority < current_level.value and (Priority.EMERGENCY.value <= priority <= Priority.DEBUG.value):
+                current_level = Priority(priority)
+    return current_level
+
+
 class JournalWatcher:
 
     def __init__(self, supervisor=None):
@@ -729,7 +775,7 @@ class JournalWatcher:
                         patterns_map[rule_id] = re.compile(re.escape(rule_text))
 
     def determine_source(self, journal_entry):
-        for key in ['_COMM', '_EXE', '_CMDLINE', '_KERNEL_SUBSYSTEM', 'SYSLOG_IDENTIFIER',]:
+        for key in ['_COMM', '_EXE', '_CMDLINE', '_KERNEL_SUBSYSTEM', 'SYSLOG_IDENTIFIER', ]:
             if key in journal_entry:
                 value = str(journal_entry[key])
                 if key == '_KERNEL_SUBSYSTEM':
@@ -741,7 +787,7 @@ class JournalWatcher:
         app_name_info = ''
         sep = '\u25b3'
         for journal_entry in journal_entries:
-            source = self.determine_source(journal_entry)
+            source = determine_source(journal_entry)
             if app_name_info.find(source) < 0:
                 app_name_info += sep + source
                 sep = '; '
@@ -792,15 +838,6 @@ class JournalWatcher:
         # debug(f'message={message}') if debugging else None
         return message
 
-    def determine_priority(self, journal_entries: List[Mapping[str, Any]]) -> Priority:
-        current_level = Priority.NOTICE
-        for journal_entry in journal_entries:
-            if 'PRIORITY' in journal_entry:
-                priority = journal_entry['PRIORITY']
-                if priority < current_level.value and (Priority.EMERGENCY.value <= priority <= Priority.DEBUG.value):
-                    current_level = Priority(priority)
-        return current_level
-
     def is_notable(self, fields_str: str):
         # debug(fields_str) if debugging else None
         notable = len(self.match_regexp) == 0
@@ -825,60 +862,43 @@ class JournalWatcher:
         self._stop = False
         notify = NotifyFreeDesktop()
 
-        journal_reader = journal.Reader()
+        with journal.Reader() as journal_reader:
 
-        self.load_past_entries(journal_reader)
+            self.load_past_entries(journal_reader)
 
-        journal_reader.seek_tail()
+            journal_reader.seek_tail()
 
-        journal_reader.get_previous()
+            journal_reader.get_previous()
 
-        journal_reader_poll = select.poll()
-        journal_reader_poll.register(journal_reader, journal_reader.get_events())
-        journal_reader.add_match()
-        while True:
-            if self.is_stop_requested():
-                return
-            if self.config.refresh():
-                self.update_settings_from_config()
-            burst_count = 0
-            notable_list = []
-            limit_time_ns = self.burst_max_millis * 1_000_000 + time.time_ns()
-            while journal_reader_poll.poll(self.polling_millis) and time.time_ns() < limit_time_ns:
+            journal_reader_poll = select.poll()
+            journal_reader_poll.register(journal_reader, journal_reader.get_events())
+            journal_reader.add_match()
+            while True:
                 if self.is_stop_requested():
                     return
-                if journal_reader.process() == journal.APPEND:
-                    for journal_entry in journal_reader:
-                        if self.is_stop_requested():
-                            return
-                        burst_count += 1
-                        notable = self.is_notable(self.consolidate_text(journal_entry))
-                        notable_list.append(journal_entry) if notable else None
-                        if notable or self.forward_all:
-                            self.supervisor.new_journal_entry(journal_entry, notable)
-            if self.notifications_enabled and len(notable_list):
-                notify.notify_desktop(app_name=self.determine_app_names(notable_list),
-                                      summary=self.determine_summary(notable_list),
-                                      message=self.determine_message(notable_list),
-                                      priority=self.determine_priority(notable_list),
-                                      timeout=self.notification_timeout_millis)
-
-    def determine_source(self, journal_entry):
-        for key in ['_COMM', '_EXE', '_CMDLINE', '_KERNEL_SUBSYSTEM', 'SYSLOG_IDENTIFIER',]:
-            if key in journal_entry:
-                value = str(journal_entry[key])
-                if key == '_KERNEL_SUBSYSTEM':
-                    value = 'kernel: ' + value
-                return value
-        return 'unknown'
-
-    def consolidate_text(self, journal_entry):
-        # Is a list comprehension slower than a for-loop for string construction?
-        # Use an easy a format that is easy to pattern match
-        fields_str = ', '.join((f"'{key}={str(value)}'" for key, value in journal_entry.items()))
-        # Prepend the source, so it's searchable by entering what is seen in the UI
-        journal_entry[JOUNO_CONSOLIDATED_TEXT_KEY] = f"source={self.determine_source(journal_entry)}, " + fields_str
-        return fields_str
+                if self.config.refresh():
+                    self.update_settings_from_config()
+                burst_count = 0
+                notable_list = []
+                limit_time_ns = self.burst_max_millis * 1_000_000 + time.time_ns()
+                while journal_reader_poll.poll(self.polling_millis) and time.time_ns() < limit_time_ns:
+                    if self.is_stop_requested():
+                        return
+                    if journal_reader.process() == journal.APPEND:
+                        for journal_entry in journal_reader:
+                            if self.is_stop_requested():
+                                return
+                            burst_count += 1
+                            notable = self.is_notable(consolidate_text(journal_entry))
+                            notable_list.append(journal_entry) if notable else None
+                            if notable or self.forward_all:
+                                self.supervisor.new_journal_entry(journal_entry, notable)
+                if self.notifications_enabled and len(notable_list):
+                    notify.notify_desktop(app_name=self.determine_app_names(notable_list),
+                                          summary=self.determine_summary(notable_list),
+                                          message=self.determine_message(notable_list),
+                                          priority=determine_priority(notable_list),
+                                          timeout=self.notification_timeout_millis)
 
     def load_past_entries(self, journal_reader):
         data = []
@@ -889,7 +909,7 @@ class JournalWatcher:
             journal_reader.seek_tail()
             journal_reader.get_next(-self.max_historical_entries - 1)
         for journal_entry in journal_reader:
-            notable = self.is_notable(self.consolidate_text(journal_entry))
+            notable = self.is_notable(consolidate_text(journal_entry))
             if notable or self.forward_all:
                 self.supervisor.new_journal_entry(journal_entry, notable)
         self.supervisor.listening_for_new_entries()
@@ -1130,9 +1150,8 @@ class ConfigPanel(DockableWidget):
         super().__init__(parent=None, flags=Qt.WindowFlags(Qt.WindowStaysOnTopHint))
         self.setObjectName('config-panel-new')
 
-        container = self
         layout = QVBoxLayout()
-        container.setLayout(layout)
+        self.setLayout(layout)
 
         title_container = QWidget(self)
         title_layout = QHBoxLayout()
@@ -1648,6 +1667,7 @@ class MainToolBar(QToolBar):
     def __init__(self,
                  run_func: Callable, notify_func: Callable,
                  add_func: Callable, del_func: Callable,
+                 journal_viewer_func: Callable,
                  menu: QMenu,
                  parent: QMainWindow):
         super().__init__(parent=parent)
@@ -1666,7 +1686,7 @@ class MainToolBar(QToolBar):
         self.icon_run_stop = get_icon(SVG_TOOLBAR_STOP)
         self.icon_add_filter = get_icon(SVG_TOOLBAR_ADD_FILTER)
         self.icon_del_filter = get_icon(SVG_TOOLBAR_DEL_FILTER)
-        self.icon_test_filters = get_icon(SVG_TOOLBAR_TEST_FILTERS)
+        self.icon_journal_viewer = get_icon(SVG_TOOLBAR_JOURNAL_QUERY)
         self.icon_menu = get_icon(SVG_TOOLBAR_HAMBURGER_MENU)
 
         self.run_action = self.addAction(self.icon_run_enabled, "run", run_func)
@@ -1713,6 +1733,14 @@ class MainToolBar(QToolBar):
         spacer = QWidget()
         spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         self.addWidget(spacer)
+
+        self.journal_viewer_action = self.addAction(self.icon_journal_viewer, "del", journal_viewer_func)
+        self.journal_viewer_action.setObjectName("journal_button")
+        self.journal_viewer_action.setIconText(tr("Journal"))
+        self.journal_viewer_action.setToolTip(tr("View/search entire journal."))
+
+        self.addSeparator()
+
         self.addAction(get_icon(ICON_HELP_CONTENTS), tr('Help'), HelpDialog.invoke)
         self.addAction(get_icon(ICON_HELP_ABOUT), tr('About'), AboutDialog.invoke)
         self.menu_button = QToolButton(self)
@@ -1730,7 +1758,7 @@ class MainToolBar(QToolBar):
         self.icon_run_stop = get_icon(SVG_TOOLBAR_STOP)
         self.icon_add_filter = get_icon(SVG_TOOLBAR_ADD_FILTER)
         self.icon_del_filter = get_icon(SVG_TOOLBAR_DEL_FILTER)
-        self.icon_test_filters = get_icon(SVG_TOOLBAR_TEST_FILTERS)
+        self.icon_journal_viewer = get_icon(SVG_TOOLBAR_JOURNAL_QUERY)
         self.icon_menu = get_icon(SVG_TOOLBAR_HAMBURGER_MENU)
 
     def eventFilter(self, target: QObject, event: QEvent) -> bool:
@@ -1931,6 +1959,9 @@ class MainWindow(QMainWindow):
         def delete_filter() -> None:
             config_panel.delete_filter()
 
+        def view_entire_journal() -> None:
+            journal_viewer = QueryWindow(parent=self)
+
         self.config_panel = config_panel = ConfigPanel(tab_change=tab_change, config_change_func=config_change)
         self.config_dock_container = DockContainer(
             dockable_widget=config_panel, home_window=self, home_dock_area=Qt.DockWidgetArea.BottomDockWidgetArea)
@@ -1938,10 +1969,27 @@ class MainWindow(QMainWindow):
         debugging = config_panel.get_config().getboolean('options', 'debug_enabled')
 
         self.journal_panel = journal_panel = JournalPanel(
-            journal_watcher_task=journal_watcher_task,
             max_entries=config_panel.get_config().getint('options', 'journal_history_max'))
         self.journal_dock_container = DockContainer(
             dockable_widget=journal_panel, home_window=self, home_dock_area=Qt.DockWidgetArea.TopDockWidgetArea)
+
+        self.listening = False
+
+        def new_journal_entry(entry, notable: bool):
+            if self.listening:
+                self.journal_panel.new_journal_entry(entry, notable)
+            else:
+                # Old journal entry - either during initialization or as a result of a query.
+                self.journal_panel.add_journal_entry(entry, notable)
+
+        def now_listening():
+            # Now listening for new journal entries.
+            self.listening = True
+            # Scroll to bottom to await new entries
+            self.journal_panel.new_journal_entry(None, False)
+
+        journal_watcher_task.signal_new_entry.connect(new_journal_entry)
+        journal_watcher_task.signal_listening.connect(now_listening)
 
         self.config_panel.signal_editing_filter_pattern.connect(journal_panel.search_select_journal)
 
@@ -1950,7 +1998,7 @@ class MainWindow(QMainWindow):
 
         tool_bar = MainToolBar(
             run_func=toggle_listener, notify_func=toggle_notifier,
-            add_func=add_filter, del_func=delete_filter,
+            add_func=add_filter, del_func=delete_filter, journal_viewer_func=view_entire_journal,
             menu=app_context_menu,
             parent=self)
         self.addToolBar(tool_bar)
@@ -2041,7 +2089,7 @@ class MainWindow(QMainWindow):
 
 class JournalPanel(DockableWidget):
 
-    def __init__(self, journal_watcher_task: JournalWatcherTask, max_entries: int):
+    def __init__(self, max_entries: int):
         super().__init__(parent=None, flags=Qt.WindowFlags(Qt.WindowStaysOnTopHint))
         self.setObjectName("journal-panel")
 
@@ -2050,14 +2098,14 @@ class JournalPanel(DockableWidget):
 
         self.listening_for_new_entries = False
 
-        container = self
         layout = QVBoxLayout()
-        container.setLayout(layout)
+        self.setLayout(layout)
 
         title_container = QWidget(self)
         title_layout = QHBoxLayout()
         title_container.setLayout(title_layout)
-        title_label = big_label(QLabel(tr("Recently notified")))
+        self.title_label = QLabel(tr("Recently Notified"))
+        title_label = big_label(self.title_label)
         title_layout.addWidget(title_label)
 
         spacer = QWidget()
@@ -2130,25 +2178,7 @@ class JournalPanel(DockableWidget):
         self.static_status_label = QLabel("")
         self.journal_status_bar.addPermanentWidget(self.static_status_label)
         layout.addWidget(self.journal_status_bar)
-        self.static_status_label.setText(tr("{n}/{m}").format(n=0, m=max_entries))
-
-        def new_journal_entry(journal_entry, notable):
-            self.table_view.new_journal_entry(journal_entry, notable)
-            if self.listening_for_new_entries:
-                self.table_view.scrollToBottom()
-            # self.journal_status_bar.showMessage(tr("New journal entry."), 1000)
-            self.static_status_label.setText(
-                tr("{n}/{m}").format(n=self.table_view.model().get_num_entries(),
-                                     m=self.table_view.model().get_max_entries()))
-
-        def now_listening():
-            # Initialising old historic entries has finished.
-            self.listening_for_new_entries = True
-            self.table_view.scrollToBottom()
-
-        journal_watcher_task.signal_new_entry.connect(new_journal_entry)
-
-        journal_watcher_task.signal_listening.connect(now_listening)
+        self.static_status_label.setText(tr(""))
 
         def view_journal_entry_at_row_number(row: int):
             if row < 0 and (self.table_view.model().rowCount() > 0):
@@ -2178,7 +2208,8 @@ class JournalPanel(DockableWidget):
                     row = self.context_menu_index.row()
                     print('copy a row', row)
                     text = format_journal_entry(self.table_view.model().get_journal_entry(row))
-                    self.journal_status_bar.showMessage(tr("Copied the entry {} to the clipboard.").format(row + 1), 5000)
+                    self.journal_status_bar.showMessage(tr("Copied the entry {} to the clipboard.").format(row + 1),
+                                                        5000)
                 else:
                     if self.table_view.model().rowCount() > 0:
                         row = self.table_view.model().rowCount() - 1
@@ -2214,6 +2245,18 @@ class JournalPanel(DockableWidget):
 
     def add_dock_control(self, dock_button: QPushButton):
         self.title_layout.addWidget(dock_button)
+
+    def add_journal_entry(self, journal_entry, notable):
+        self.table_view.new_journal_entry(journal_entry, notable)
+
+    def new_journal_entry(self, journal_entry, notable):
+        if journal_entry is not None:
+            self.add_journal_entry(journal_entry, notable)
+            self.journal_status_bar.showMessage(tr("New journal entry."), 1000)
+        self.table_view.scrollToBottom()
+        self.static_status_label.setText(
+            tr("{n}/{m}").format(n=self.table_view.model().get_num_entries(),
+                                 m=self.table_view.model().get_max_entries()))
 
     def get_selected_journal_entry(self):
         indexes = self.table_view.selectedIndexes()
@@ -2300,16 +2343,16 @@ class JournalTableView(QTableView):
         self.resizeColumnsToContents()
         self.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.setSelectionMode(QAbstractItemView.MultiSelection)
-        self.setColumnWidth(0, 8 * 14)
+        self.setColumnWidth(0, 15 * 14)
         self.setColumnWidth(1, 10 * 14)
         self.setColumnWidth(2, 10 * 14)
         self.setColumnWidth(3, 5 * 14)
         self.setColumnWidth(4, 8 * 14)
         self.horizontalHeader().setSectionResizeMode(4, QHeaderView.Stretch)
         self.horizontalHeader().setDefaultAlignment(Qt.AlignLeft)
-        #self.setItemDelegate(JournalEntryDelegate(self.model()))
+        # self.setItemDelegate(JournalEntryDelegate(self.model()))
         # Cannot use xor!
-        #self.setEditTriggers(
+        # self.setEditTriggers(
         #    QAbstractItemView.AnyKeyPressed | QAbstractItemView.SelectedClicked | QAbstractItemView.CurrentChanged)
         self.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.setShowGrid(False)
@@ -2334,9 +2377,10 @@ class JournalTableModel(QStandardItemModel):
 
     def new_journal_entry(self, journal_entry, notable):
 
-        while self.rowCount() >= self.max_entries:
-            self.removeRow(0)
-            self.journal_entries.pop(0)
+        if self.max_entries > 0:
+            while self.rowCount() >= self.max_entries:
+                self.removeRow(0)
+                self.journal_entries.pop(0)
 
         def align_right(item: QStandardItem):
             item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
@@ -2370,7 +2414,7 @@ class JournalTableModel(QStandardItemModel):
 
         self.appendRow(
             [
-                selectable(align_right(QStandardItem(f"{journal_entry['__REALTIME_TIMESTAMP']:%H:%M:%S}"))),
+                selectable(align_right(QStandardItem(f"{journal_entry['__REALTIME_TIMESTAMP']:%y.%m.%d %H:%M:%S}"))),
                 selectable(QStandardItem(journal_entry['_HOSTNAME'])),
                 selectable(QStandardItem(source)),
                 # TODO smarter choice when _PID is not present.
@@ -2499,22 +2543,163 @@ class JournalEntryDialogPlain(QDialog):
         # .show() is non-modal, .exec() is modal
         self.show()
 
-        # def copy_to_clipboard():
-        #     nonlocal floating_feedback_flip
-        #     QGuiApplication.clipboard().setText(text_view.toPlainText())
-        #     floating_copy_button.clearFocus()
-        #     floating_copy_button.setIconSize(QSize(50, 50) if floating_feedback_flip else QSize(48, 48))
-        #     floating_feedback_flip = not floating_feedback_flip
-        #     floating_copy_button.repaint()
-        #
-        # floating_feedback_flip = True
-        # floating_copy_button = transparent_button(QPushButton(get_icon(ICON_COPY_TO_CLIPBOARD), '', self))
-        # floating_copy_button.setGeometry(self.width() - 75, 25, 40, 40)
-        # floating_copy_button.setIconSize(QSize(48, 48))
-        # floating_copy_button.setToolTip(tr("Copy to clipboard"))
-        # floating_copy_button.show()
-        # floating_copy_button.clicked.connect(copy_to_clipboard)
 
+class QueryWindow(QMainWindow):
+    def __init__(self, parent: MainWindow):
+        super().__init__(parent=parent)
+        self.main_window = parent
+        self.setObjectName("journal-query")
+
+        central = QWidget()
+        layout = QFormLayout()
+        central.setLayout(layout)
+
+        title_widget = QWidget()
+        self.title_layout = QHBoxLayout()
+        title_widget.setLayout(self.title_layout)
+        self.title_layout.addWidget((big_label(QLabel(tr("Journal Query")))))
+        spacer = QWidget()
+        spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        self.title_layout.addWidget(spacer)
+        layout.addRow(title_widget)
+        self.query_results = []
+
+        self.limit_rows_widget = QLineEdit()
+        self.limit_rows_widget.setText("0")
+        self.limit_rows_widget.setMaximumWidth(150)
+        self.limit_rows_widget.setValidator(QIntValidator())
+        layout.addRow(tr("&Row Limit"), self.limit_rows_widget)
+
+        def from_date_func(datetime: QDateTime):
+            self.from_date_time = datetime.toPyDateTime()
+            # to_date_widget.setMinimumDate(datetime)
+
+        def to_date_func(datetime: QDateTime):
+            self.to_date_time = datetime.toPyDateTime()
+
+        with journal.Reader() as reader:
+            start_date_time = reader.get_next()['__REALTIME_TIMESTAMP']
+        self.from_date_time = start_date_time
+        self.to_date_time = datetime.combine(datetime.now().date(), datetime.max.time())
+        from_date_widget = QDateTimeEdit()
+        from_date_widget.setDateTime(self.from_date_time)
+        from_date_widget.setDisplayFormat("yyyy.MM.dd hh:mm:ss")
+        from_date_widget.setCalendarPopup(True)
+        from_date_widget.dateTimeChanged.connect(from_date_func)
+        to_date_widget = QDateTimeEdit()
+        to_date_widget.setDateTime(self.to_date_time)
+        to_date_widget.setDisplayFormat("yyyy.MM.dd hh:mm:ss")
+        to_date_widget.setCalendarPopup(True)
+        to_date_widget.dateTimeChanged.connect(to_date_func)
+        layout.addRow(tr("&From"), from_date_widget)
+        layout.addRow(tr("&To"), to_date_widget)
+
+        # def text_func(text: str):
+        #     self.match_text = text
+        #
+        # text_widget = QLineEdit()
+        # text_widget.textChanged.connect(text_func)
+        # layout.addRow(tr("&Match text"), text_widget)
+
+        self.field_query_widget_list = []
+
+        for field_name in [ '_UID', '_GID', 'QT_CATEGORY', 'PRIORITY', 'SYSLOG_IDENTIFIER', '_COM', '_EXE', ]:
+            with journal.Reader() as reader:
+                values_set = reader.query_unique(field_name)
+            if len(values_set) > 0:
+                field_query_widget = QueryFieldWidget(field_name, values_set, self)
+                layout.addWidget(field_query_widget)
+                self.field_query_widget_list.append(field_query_widget)
+
+        query_button = QPushButton(tr("Run Query"))
+        query_button.clicked.connect(self.perform_query)
+        layout.addRow(query_button)
+
+        self.setCentralWidget(central)
+        self.show()
+
+    def perform_query(self):
+        query_result = QWidget()
+        query_layout = QVBoxLayout()
+        query_result.setLayout(query_layout)
+        journal_panel = JournalPanel(max_entries=0)
+        query_layout.addWidget(journal_panel)
+        row_limit = int(self.limit_rows_widget.text())
+        title = tr("Query: time between ({:%y.%m.%d %H:%M}, {:%y.%m.%d %H:%M})").format(self.from_date_time, self.to_date_time)
+        if row_limit > 0:
+            title += tr(" AND row_count <= {}").format(row_limit)
+        number_of_matches = 0
+        with journal.Reader() as query_reader:
+            query_reader.seek_realtime(self.from_date_time)
+            for field_query_widget in self.field_query_widget_list:
+                for value in field_query_widget.get_checked_values():
+                    match_str = "{}={}".format(field_query_widget.field_name, value)
+                    query_reader.add_match(match_str)
+                    title += f" and {match_str}"
+            while True:
+                journal_entry = query_reader.get_next()
+                # at end of journal returns {} an empty dictionary
+                if journal_entry is None or len(journal_entry) == 0:
+                    break
+                journal_entry_date_time = journal_entry['__REALTIME_TIMESTAMP']
+                if journal_entry_date_time > self.to_date_time:
+                    break
+                number_of_matches += 1
+                consolidate_text(journal_entry)
+                journal_panel.add_journal_entry(journal_entry, True)
+                if row_limit > 0 and number_of_matches == row_limit:
+                    break
+        journal_panel.title_label.setText(title)
+        journal_panel.static_status_label.setText(tr("Retrieved {} entries.".format(number_of_matches)))
+        result_geometry = self.main_window.geometry()
+        result_geometry.translate(50, 50)
+        query_result.setGeometry(result_geometry)
+        query_result.show()
+        self.query_results.append(query_result)
+
+    def app_restore_state(self):
+        debug("app_restore_state") if debugging else None
+        geometry = self.settings.value(self.geometry_key, None)
+        if geometry is not None:
+            debug(f"Restore {self.geometry_key} {self.state_key}") if debugging else None
+            self.restoreGeometry(geometry)
+            window_state = self.settings.value(self.state_key, None)
+            self.restoreState(window_state)
+        self.search_container.app_restore_state(from_settings=self.settings, show=True)
+
+
+class QueryFieldWidget(QGroupBox):
+
+    def __init__(self, field_name: str, values_set: set, parent: QueryWindow):
+        super().__init__(field_name, parent=parent)
+        self.field_name = field_name
+        self.setAlignment(Qt.AlignLeft)
+        layout = QVBoxLayout()
+        self.setLayout(layout)
+        grid_layout = QGridLayout(self)
+        scroll_area = QScrollArea(self)
+        scroll_area.setWidgetResizable(True)
+        container = QWidget(scroll_area)
+        container.setLayout(grid_layout)
+        scroll_area.setWidget(container)
+        grid_layout.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
+        layout.addWidget(scroll_area)
+        # self.setFlat(True)
+        num_cols = 100 // max(len(str(v)) for v in values_set)
+        self.checkbox_list = []
+        for i, value in enumerate(sorted(values_set)):
+            checkbox = QCheckBox(str(value))
+            self.checkbox_list.append(checkbox)
+            grid_layout.addWidget(checkbox, i / num_cols, i % num_cols, Qt.AlignLeft)
+
+    def get_checked_values(self):
+        return [checkbox.text() for checkbox in self.checkbox_list if checkbox.isChecked()]
+
+    # def resizeEvent(self, a0: QResizeEvent) -> None:
+    #     num_cols = self.width() / 300
+    #     for i, box in enumerate(self.boxes):
+    #         self.grid_layout.removeWidget(box)
+    #         self.grid_layout.addWidget(box, i / num_cols, i % num_cols, Qt.AlignLeft)
 
 class DialogSingletonMixin:
     """

@@ -17,7 +17,7 @@
 #
 
 Name: jouno
-Version: 1.1.3
+Version: 1.2.0
 Release: 0
 License: GPL-3.0-or-later
 BuildArch: noarch
@@ -80,6 +80,8 @@ install -m644 %{name}.png %{buildroot}/%{_datadir}/icons
 
 %changelog
 
+* Mon Dec 06 2021 Michael Hamilton <michael@actrix.gen.nz>
+- Journal query interface: jouno 1.2.0
 * Sun Dec 05 2021 Michael Hamilton <michael@actrix.gen.nz>
 - Faster incremental-search; case-insensitive incremental-search for lowercase patterns: jouno 1.1.3
 * Sat Dec 04 2021 Michael Hamilton <michael@actrix.gen.nz>
