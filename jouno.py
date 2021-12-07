@@ -260,7 +260,9 @@ with this program. If not, see <https://www.gnu.org/licenses/>.
 
 import argparse
 import configparser
+import grp
 import os
+import pwd
 import re
 import select
 import signal
@@ -2594,16 +2596,9 @@ class QueryWindow(QMainWindow):
         layout.addRow(tr("&From"), from_date_widget)
         layout.addRow(tr("&To"), to_date_widget)
 
-        # def text_func(text: str):
-        #     self.match_text = text
-        #
-        # text_widget = QLineEdit()
-        # text_widget.textChanged.connect(text_func)
-        # layout.addRow(tr("&Match text"), text_widget)
-
         self.field_query_widget_list = []
 
-        for field_name in [ '_UID', '_GID', 'QT_CATEGORY', 'PRIORITY', 'SYSLOG_IDENTIFIER', '_COM', '_EXE', ]:
+        for field_name in ['_UID', '_GID', 'QT_CATEGORY', 'PRIORITY', 'SYSLOG_IDENTIFIER', '_COM', '_EXE', ]:
             with journal.Reader() as reader:
                 values_set = reader.query_unique(field_name)
             if len(values_set) > 0:
@@ -2688,11 +2683,23 @@ class QueryFieldWidget(QGroupBox):
         num_cols = 100 // max(len(str(v)) for v in values_set)
         self.checkbox_list = []
         for i, value in enumerate(sorted(values_set)):
-            checkbox = QCheckBox(str(value))
+            if field_name == '_UID':
+                str_value = pwd.getpwuid(value).pw_name
+            elif field_name == '_GID':
+                str_value = grp.getgrgid(value).gr_name
+            else:
+                str_value = str(value)
+            tooltip = "{}={}".format(field_name, value)
+            checkbox = QCheckBox(str_value)
+            checkbox.setToolTip(tooltip)
             self.checkbox_list.append(checkbox)
             grid_layout.addWidget(checkbox, i / num_cols, i % num_cols, Qt.AlignLeft)
 
     def get_checked_values(self):
+        if self.field_name == '_UID':
+            return [pwd.getpwnam(checkbox.text()).pw_uid for checkbox in self.checkbox_list if checkbox.isChecked()]
+        elif self.field_name == '_GID':
+            return [grp.getgrnam(checkbox.text()).gr_gid for checkbox in self.checkbox_list if checkbox.isChecked()]
         return [checkbox.text() for checkbox in self.checkbox_list if checkbox.isChecked()]
 
     # def resizeEvent(self, a0: QResizeEvent) -> None:
