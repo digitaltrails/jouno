@@ -271,7 +271,7 @@ import sys
 import textwrap
 import time
 import traceback
-from datetime import datetime
+from datetime import datetime, date, timedelta
 from enum import Enum
 from functools import partial
 from html import escape
@@ -290,7 +290,7 @@ from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QMessageBox, QLi
     QCheckBox, QGridLayout, QTableView, \
     QAbstractItemView, QHeaderView, QMainWindow, QSizePolicy, QStyledItemDelegate, QToolBar, QDockWidget, \
     QHBoxLayout, QStyleFactory, QToolButton, QScrollArea, QLayout, QStatusBar, QDateTimeEdit, QCalendarWidget, \
-    QFormLayout, QGroupBox, QSpacerItem
+    QFormLayout, QGroupBox, QSpacerItem, QComboBox
 from systemd import journal
 
 JOUNO_VERSION = '1.2.0'
@@ -2618,6 +2618,8 @@ class QueryWindow(QMainWindow):
 
         self.field_query_widget_list = []
 
+        tab_widget.addTab(QueryBootWidget(self), "Boot")
+
         for field_name in ['_UID', '_GID', 'QT_CATEGORY', 'PRIORITY', 'SYSLOG_IDENTIFIER', '_COM', '_EXE', ]:
             with journal.Reader() as reader:
                 values_set = reader.query_unique(field_name)
@@ -2696,8 +2698,56 @@ class QueryWindow(QMainWindow):
         self.search_container.app_restore_state(from_settings=self.settings, show=True)
 
 
-class QueryFieldWidget(QGroupBox):
+class QueryBootWidget(QWidget):
+    def __init__(self, parent: QWidget):
+        super().__init__(parent=parent)
+        layout = QVBoxLayout()
+        self.setLayout(layout)
 
+        def change_year_func(text: str):
+            new_year = int(text)
+            self.change_year(new_year)
+
+        years = [ 2021, 2020 ]
+        year_combo = QComboBox()
+        for year in years:
+            year_combo.addItem(str(year))
+        year_combo.currentTextChanged.connect(change_year_func)
+        layout.addWidget(year_combo)
+        self.grid_layout = QGridLayout(self)
+        scroll_area = QScrollArea(self)
+        scroll_area.setWidgetResizable(True)
+        container = QWidget(scroll_area)
+        container.setLayout(self.grid_layout)
+        scroll_area.setWidget(container)
+        self.grid_layout.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
+        layout.addWidget(scroll_area)
+        year = datetime.now().year
+        self.calendar_list = []
+        for month in range(1, 13):
+            cal_box = QWidget()
+            cal_box_layout = QVBoxLayout()
+            cal_box.setLayout(cal_box_layout)
+            year_label = QLabel()
+            cal_box_layout.addWidget(year_label)
+            calendar = QCalendarWidget()
+            calendar.setSelectionMode(QCalendarWidget.SelectionMode.SingleSelection)
+            calendar.setNavigationBarVisible(False)
+            cal_box_layout.addWidget(calendar)
+            self.grid_layout.addWidget(cal_box, (month - 1) // 3, (month - 1) % 3)
+            self.calendar_list.append((year_label, calendar,))
+        self.change_year(years[0])
+
+    def change_year(self, year: int):
+        for i, (label, calendar) in enumerate(self.calendar_list):
+            month = i + 1
+            start_of_month = date(year, month, 1)
+            label.setText(start_of_month.strftime("%B") + ' ' + str(year))
+            end_of_month = datetime(year, (month % 12) + 1, 1).date() - timedelta(days=1)
+            calendar.setDateRange(start_of_month, end_of_month)
+
+
+class QueryFieldWidget(QGroupBox):
     def __init__(self, field_name: str, values_set: set, value_checked_func: Callable, parent: QueryWindow):
         super().__init__('', parent=parent)
         self.field_name = field_name
