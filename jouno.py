@@ -2613,13 +2613,16 @@ class QueryWindow(QMainWindow):
         tab_widget = QTabWidget()
         layout.addWidget(tab_widget)
 
+        def boot_picked_func():
+            self.query_desc_label.setText(self.query_description())
+
+        self.boot_picker = QueryBootWidget(self.retrieve_boot_list(), boot_picked_func, self)
+        tab_widget.addTab(self.boot_picker, "Boot")
+
         def value_checked_func():
             self.query_desc_label.setText(self.query_description())
 
         self.field_query_widget_list = []
-
-        tab_widget.addTab(QueryBootWidget(self), "Boot")
-
         for field_name in ['_UID', '_GID', 'QT_CATEGORY', 'PRIORITY', 'SYSLOG_IDENTIFIER', '_COM', '_EXE', ]:
             with journal.Reader() as reader:
                 values_set = reader.query_unique(field_name)
@@ -2636,9 +2639,22 @@ class QueryWindow(QMainWindow):
         self.setCentralWidget(central)
         self.show()
 
+    def retrieve_boot_list(self) -> List:
+        boot_list = []
+        with journal.Reader() as reader:
+            boot_id_set = reader.query_unique("_BOOT_ID")
+        for boot_id in boot_id_set:
+            with journal.Reader() as reader:
+                reader.this_boot(boot_id)
+                first = reader.get_next()
+                boot_list.append((first['__REALTIME_TIMESTAMP'], boot_id,))
+        boot_list.sort(key=lambda dt_id: dt_id[0])
+        return boot_list
+
     def query_description(self):
         time_desc = tr("interval {:%y.%m.%d %H:%M} .. {:%y.%m.%d %H:%M}").format(self.from_date_time, self.to_date_time)
         row_limit_desc = " and row_count <= {}".format(self.row_limit) if self.row_limit > 0 else ''
+        boot_desc = f" and _BOOT_ID = {self.boot_picker.boot_id}" if self.boot_picker.boot_id is not None else ''
         field_map = {}
         for field_query_widget in self.field_query_widget_list:
             for value in field_query_widget.get_checked_values():
@@ -2650,7 +2666,7 @@ class QueryWindow(QMainWindow):
         field_desc = ''
         for key, value in field_map.items():
             field_desc += f" and {key} in {value}" if len(value) > 1 else f" and {key}={value[0]}"
-        return time_desc + row_limit_desc + field_desc
+        return time_desc + row_limit_desc + boot_desc + field_desc
 
     def perform_query(self):
         query_result = QWidget()
@@ -2663,6 +2679,8 @@ class QueryWindow(QMainWindow):
         number_of_matches = 0
         with journal.Reader() as query_reader:
             query_reader.seek_realtime(self.from_date_time)
+            if self.boot_picker.boot_id is not None:
+                query_reader.this_boot(self.boot_picker.boot_id)
             for field_query_widget in self.field_query_widget_list:
                 for value in field_query_widget.get_checked_values():
                     match_str = "{}={}".format(field_query_widget.field_name, value)
@@ -2699,8 +2717,16 @@ class QueryWindow(QMainWindow):
 
 
 class QueryBootWidget(QWidget):
-    def __init__(self, parent: QWidget):
+    def __init__(self, boot_list: List, boot_picked_func: Callable, parent: QWidget):
         super().__init__(parent=parent)
+        self.boot_id = None
+        self.boot_date_map = {}
+        for boot_date_and_id in boot_list:
+            if datetime in self.boot_date_map:
+                self.boot_date_map[boot_date_and_id[0].date()].append(boot_date_and_id)
+            else:
+                self.boot_date_map[boot_date_and_id[0].date()] = [ boot_date_and_id ]
+
         layout = QVBoxLayout()
         self.setLayout(layout)
 
@@ -2723,6 +2749,17 @@ class QueryBootWidget(QWidget):
         self.grid_layout.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
         layout.addWidget(scroll_area)
         year = datetime.now().year
+
+        def pick_boot_func():
+            date_selected = self.sender().selectedDate().toPyDate()
+            print(date_selected)
+            if date_selected in self.boot_date_map:
+                boot_id = self.boot_date_map[date_selected][0][1]
+                self.boot_id = None if self.boot_id == boot_id else boot_id
+            else:
+                self.boot_id = None
+            boot_picked_func()
+
         self.calendar_list = []
         for month in range(1, 13):
             cal_box = QWidget()
@@ -2730,13 +2767,21 @@ class QueryBootWidget(QWidget):
             cal_box.setLayout(cal_box_layout)
             year_label = QLabel()
             cal_box_layout.addWidget(year_label)
-            calendar = QCalendarWidget()
+            calendar = BootCalendar(self.boot_date_map)
             calendar.setSelectionMode(QCalendarWidget.SelectionMode.SingleSelection)
             calendar.setNavigationBarVisible(False)
+            calendar.setGeometry(1, 40, 100, 100)
             cal_box_layout.addWidget(calendar)
             self.grid_layout.addWidget(cal_box, (month - 1) // 3, (month - 1) % 3)
             self.calendar_list.append((year_label, calendar,))
+        # Stop the inter-cell spacing from expanding by consuming it with spacers
+        v_spacer = QSpacerItem(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.grid_layout.addItem(v_spacer, self.grid_layout.rowCount(), 0, 1, -1)
+        h_spacer = QSpacerItem(QSizePolicy.Expanding, QSizePolicy.Minimum)
+        self.grid_layout.addItem(h_spacer, 0, self.grid_layout.columnCount(), -1, 1)
         self.change_year(years[0])
+        for _, calendar in self.calendar_list:
+            calendar.clicked.connect(pick_boot_func)
 
     def change_year(self, year: int):
         for i, (label, calendar) in enumerate(self.calendar_list):
@@ -2746,6 +2791,17 @@ class QueryBootWidget(QWidget):
             end_of_month = datetime(year, (month % 12) + 1, 1).date() - timedelta(days=1)
             calendar.setDateRange(start_of_month, end_of_month)
 
+
+class BootCalendar(QCalendarWidget):
+    def __init__(self, boot_date_map: Mapping[datetime, List], parent=None):
+        super().__init__(parent)
+        self.boot_date_map = boot_date_map
+
+    def paintCell(self, painter, rect, date):
+        super().paintCell(painter, rect, date)
+        if date.toPyDate() in self.boot_date_map:
+            painter.setBrush(Qt.red)
+            painter.drawEllipse(rect.topLeft() + QPoint(12, 7), 3, 3)
 
 class QueryFieldWidget(QGroupBox):
     def __init__(self, field_name: str, values_set: set, value_checked_func: Callable, parent: QueryWindow):
