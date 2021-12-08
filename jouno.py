@@ -2616,7 +2616,7 @@ class QueryWindow(QMainWindow):
         def boot_picked_func():
             self.query_desc_label.setText(self.query_description())
 
-        self.boot_picker = QueryBootWidget(self.retrieve_boot_list(), boot_picked_func, self)
+        self.boot_picker = QueryBootWidget(BootIndex(), boot_picked_func, self)
         tab_widget.addTab(self.boot_picker, "Boot")
 
         def value_checked_func():
@@ -2639,17 +2639,17 @@ class QueryWindow(QMainWindow):
         self.setCentralWidget(central)
         self.show()
 
-    def retrieve_boot_list(self) -> List:
-        boot_list = []
-        with journal.Reader() as reader:
-            boot_id_set = reader.query_unique("_BOOT_ID")
-        for boot_id in boot_id_set:
-            with journal.Reader() as reader:
-                reader.this_boot(boot_id)
-                first = reader.get_next()
-                boot_list.append((first['__REALTIME_TIMESTAMP'], boot_id,))
-        boot_list.sort(key=lambda dt_id: dt_id[0])
-        return boot_list
+    # def retrieve_boot_list(self) -> List:
+    #     boot_list = []
+    #     with journal.Reader() as reader:
+    #         boot_id_set = reader.query_unique("_BOOT_ID")
+    #     for boot_id in boot_id_set:
+    #         with journal.Reader() as reader:
+    #             reader.this_boot(boot_id)
+    #             first = reader.get_next()
+    #             boot_list.append((first['__REALTIME_TIMESTAMP'], boot_id,))
+    #     boot_list.sort(key=lambda dt_id: dt_id[0])
+    #     return boot_list
 
     def query_description(self):
         time_desc = tr("interval {:%y.%m.%d %H:%M} .. {:%y.%m.%d %H:%M}").format(self.from_date_time, self.to_date_time)
@@ -2716,17 +2716,54 @@ class QueryWindow(QMainWindow):
         self.search_container.app_restore_state(from_settings=self.settings, show=True)
 
 
+class BootIndex:
+    def __init__(self):
+        self.start_date_map: Mapping[date, BootInfo] = {}
+        self.end_date_map: Mapping[date, BootInfo] = {}
+        self.boot_sequence_list = []
+        self.retrieve_boot_list()
+
+    def retrieve_boot_list(self) -> List:
+        boot_list = []
+        with journal.Reader() as reader:
+            boot_id_set = reader.query_unique("_BOOT_ID")
+        for boot_id in boot_id_set:
+            with journal.Reader() as reader:
+                reader.this_boot(boot_id)
+                first = reader.get_next()
+                print(first)
+                start_datetime = first['__REALTIME_TIMESTAMP']
+                reader.seek_tail()
+                last = reader.get_previous()
+                print(last)
+                end_datetime = last['__REALTIME_TIMESTAMP']
+                crashed = last['MESSAGE'] != "Journal stopped"
+                info = BootInfo(boot_id, start_datetime, end_datetime, crashed)
+                start_date = start_datetime.date()
+                end_date = end_datetime.date()
+                if start_date not in self.start_date_map:
+                    self.start_date_map[start_date] = []
+                if end_date not in self.end_date_map:
+                    self.end_date_map[end_date] = []
+                self.start_date_map[start_datetime.date()].append(info)
+                self.end_date_map[end_datetime.date()].append(info)
+                self.boot_sequence_list.append((start_date, info))
+        self.boot_sequence_list.sort(key=lambda dt_id: dt_id[0])
+
+
+class BootInfo:
+    def __init__(self, boot_id, start_datetime: datetime, end_datetime: datetime, crashed: bool):
+        self.boot_id = boot_id
+        self.start_datetime = start_datetime
+        self.end_datetime = end_datetime
+        self.crashed = crashed
+
+
 class QueryBootWidget(QWidget):
-    def __init__(self, boot_list: List, boot_picked_func: Callable, parent: QWidget):
+    def __init__(self, boot_index: BootIndex, boot_picked_func: Callable, parent: QWidget):
         super().__init__(parent=parent)
         self.boot_id = None
-        self.boot_date_map = {}
-        for boot_date_and_id in boot_list:
-            if datetime in self.boot_date_map:
-                self.boot_date_map[boot_date_and_id[0].date()].append(boot_date_and_id)
-            else:
-                self.boot_date_map[boot_date_and_id[0].date()] = [ boot_date_and_id ]
-
+        self.boot_index = boot_index
         layout = QVBoxLayout()
         self.setLayout(layout)
 
@@ -2753,8 +2790,8 @@ class QueryBootWidget(QWidget):
         def pick_boot_func():
             date_selected = self.sender().selectedDate().toPyDate()
             print(date_selected)
-            if date_selected in self.boot_date_map:
-                boot_id = self.boot_date_map[date_selected][0][1]
+            if date_selected in self.boot_index.start_date_map:
+                boot_id = self.boot_index.start_date_map[date_selected][0].boot_id
                 self.boot_id = None if self.boot_id == boot_id else boot_id
             else:
                 self.boot_id = None
@@ -2767,7 +2804,7 @@ class QueryBootWidget(QWidget):
             cal_box.setLayout(cal_box_layout)
             year_label = QLabel()
             cal_box_layout.addWidget(year_label)
-            calendar = BootCalendar(self.boot_date_map)
+            calendar = BootCalendar(self.boot_index)
             calendar.setSelectionMode(QCalendarWidget.SelectionMode.SingleSelection)
             calendar.setNavigationBarVisible(False)
             calendar.setGeometry(1, 40, 100, 100)
@@ -2793,15 +2830,18 @@ class QueryBootWidget(QWidget):
 
 
 class BootCalendar(QCalendarWidget):
-    def __init__(self, boot_date_map: Mapping[datetime, List], parent=None):
+    def __init__(self, boot_index: BootIndex, parent=None):
         super().__init__(parent)
-        self.boot_date_map = boot_date_map
+        self.boot_index = boot_index
 
     def paintCell(self, painter, rect, date):
         super().paintCell(painter, rect, date)
-        if date.toPyDate() in self.boot_date_map:
-            painter.setBrush(Qt.red)
-            painter.drawEllipse(rect.topLeft() + QPoint(12, 7), 3, 3)
+        if date.toPyDate() in self.boot_index.start_date_map:
+            painter.setBrush(Qt.green)
+            painter.drawEllipse(rect.topLeft() + QPoint(12, 8), 3, 3)
+        if date.toPyDate() in self.boot_index.end_date_map:
+            painter.setBrush(Qt.red if self.boot_index.end_date_map[date.toPyDate()][0].crashed else Qt.black)
+            painter.drawEllipse(rect.topLeft() + QPoint(12, 24), 3, 3)
 
 class QueryFieldWidget(QGroupBox):
     def __init__(self, field_name: str, values_set: set, value_checked_func: Callable, parent: QueryWindow):
