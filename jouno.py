@@ -2679,10 +2679,29 @@ class QueryWindow(QMainWindow):
                 tab_widget.addTab(field_query_widget, field_name)
                 self.field_query_widget_list.append(field_query_widget)
 
+        button_box = QWidget()
+        button_box_layout = QHBoxLayout()
+        button_box.setLayout(button_box_layout)
         query_button = QPushButton(tr("Run Query"))
         query_button.clicked.connect(self.perform_query)
-        layout.addRow(query_button)
+        button_box_layout.addWidget(query_button)
 
+        def reset_func():
+            self.from_date_time = self.boot_index.first_entry_datetime
+            self.to_date_time = self.boot_index.last_entry_datetime
+            from_date_widget.setDateTime(self.from_date_time)
+            to_date_widget.setDateTime(self.to_date_time)
+            self.boot_picker.reset()
+            for field_widget in self.field_query_widget_list:
+                field_widget.reset()
+            self.row_limit = 0
+            self.limit_rows_widget.setText('0')
+            self.query_desc_label.setText(self.query_description())
+
+        reset_button = QPushButton(tr("Reset Query"))
+        reset_button.clicked.connect(reset_func)
+        button_box_layout.addWidget(reset_button)
+        layout.addWidget(button_box)
         self.query_desc_label.setText(self.query_description())
         self.setCentralWidget(central)
         self.show()
@@ -2701,10 +2720,10 @@ class QueryWindow(QMainWindow):
 
     def query_description(self):
         time_desc = tr("interval {:%y.%m.%d %H:%M} .. {:%y.%m.%d %H:%M}").format(self.from_date_time, self.to_date_time)
-        row_limit_desc = " and row_count <= {}".format(self.row_limit) if self.row_limit > 0 else ''
+        row_limit_desc = "\n and row_count <= {}".format(self.row_limit) if self.row_limit > 0 else ''
         boot_desc = ''
         for boot_id in self.boot_picker.boot_list:
-            boot_desc += f" and _BOOT_ID = {boot_id}"
+            boot_desc += f"\n and _BOOT_ID = {boot_id}"
         field_map = {}
         for field_query_widget in self.field_query_widget_list:
             for value in field_query_widget.get_checked_values():
@@ -2715,7 +2734,7 @@ class QueryWindow(QMainWindow):
                     field_map[field_name] = [value]
         field_desc = ''
         for key, value in field_map.items():
-            field_desc += f" and {key} in {value}" if len(value) > 1 else f" and {key}={value[0]}"
+            field_desc += f"\n and {key} in {value}" if len(value) > 1 else f"\n and {key}={value[0]}"
         return time_desc + row_limit_desc + boot_desc + field_desc
 
     def perform_query(self):
@@ -2793,6 +2812,7 @@ class QueryBootWidget(QWidget):
         layout.addWidget(calendar, 0, Qt.AlignTop)
         #calendar.clicked.connect(calendar_changed_func)
         calendar.selectionChanged.connect(calendar_selection_changed_func)
+        self.calendar = calendar
 
         boot_table = QTableWidget(len(boot_index.boot_sequence_list) , 4, self)
         boot_table.setSelectionMode(QTableWidget.SelectionMode.MultiSelection)
@@ -2839,6 +2859,16 @@ class QueryBootWidget(QWidget):
             boot_table.setItem(i, 3, boot_id_item)
         layout.addWidget(boot_table, Qt.AlignTop)
         boot_table.cellChanged.connect(cell_changed_func)
+        self.boot_table = boot_table
+
+    def reset(self):
+        self.calendar.setSelectedDate(date.today())
+        self.boot_table.blockSignals(True)
+        for i in range(0, self.boot_table.rowCount()):
+            self.boot_table.item(i, 0).setCheckState(Qt.Unchecked)
+        self.boot_table.blockSignals(False)
+        self.boot_list = []
+
 
 class QueryYearCalendarWidget(QWidget):
     def __init__(self, years: List[int], boot_picked_func: Callable, parent: QWidget):
@@ -2909,6 +2939,7 @@ class BootCalendar(QCalendarWidget):
             painter.setBrush(Qt.red if self.boot_index.end_date_map[date.toPyDate()][0].crashed else Qt.lightGray)
             painter.drawEllipse(rect.topLeft() + QPoint(12, 24), 3, 3)
 
+
 class QueryFieldWidget(QGroupBox):
     def __init__(self, field_name: str, values_set: set, value_checked_func: Callable, parent: QueryWindow):
         super().__init__('', parent=parent)
@@ -2955,6 +2986,9 @@ class QueryFieldWidget(QGroupBox):
             return [grp.getgrnam(checkbox.text()).gr_gid for checkbox in self.checkbox_list if checkbox.isChecked()]
         return [checkbox.text() for checkbox in self.checkbox_list if checkbox.isChecked()]
 
+    def reset(self):
+        for checkbox in self.checkbox_list:
+            checkbox.setChecked(False)
     # def resizeEvent(self, a0: QResizeEvent) -> None:
     #     num_cols = self.width() / 300
     #     for i, box in enumerate(self.boxes):
