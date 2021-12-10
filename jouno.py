@@ -281,7 +281,7 @@ from typing import Mapping, Any, List, Type, Callable, Tuple
 
 import dbus
 from PyQt5.QtCore import QCoreApplication, QProcess, Qt, pyqtSignal, QThread, QModelIndex, QItemSelectionModel, QSize, \
-    QEvent, QSettings, QObject, QItemSelection, QPoint, QDateTime
+    QEvent, QSettings, QObject, QItemSelection, QPoint, QDateTime, QDate
 from PyQt5.QtGui import QPixmap, QIcon, QImage, QPainter, QStandardItemModel, QStandardItem, QIntValidator, \
     QFontDatabase, QGuiApplication, QCloseEvent, QPalette, QTextCursor, QResizeEvent, QColor
 from PyQt5.QtSvg import QSvgRenderer
@@ -1963,7 +1963,7 @@ class MainWindow(QMainWindow):
             config_panel.delete_filter()
 
         def view_entire_journal() -> None:
-            journal_viewer = QueryWindow(parent=self)
+            journal_viewer = QueryJournal(parent=self)
 
         self.config_panel = config_panel = ConfigPanel(tab_change=tab_change, config_change_func=config_change)
         self.config_dock_container = DockContainer(
@@ -2417,7 +2417,7 @@ class JournalTableModel(QStandardItemModel):
 
         self.appendRow(
             [
-                selectable(align_right(QStandardItem(f"{journal_entry['__REALTIME_TIMESTAMP']:%y.%m.%d %H:%M:%S}"))),
+                selectable(align_right(QStandardItem(f"{journal_entry['__REALTIME_TIMESTAMP']:%y-%m-%d %H:%M:%S}"))),
                 selectable(QStandardItem(journal_entry['_HOSTNAME'])),
                 selectable(QStandardItem(source)),
                 # TODO smarter choice when _PID is not present.
@@ -2588,7 +2588,6 @@ class BootIndex:
             boot_info.boot_number = i
 
 
-
 class BootInfo:
     def __init__(self, boot_id, start_datetime: datetime, end_datetime: datetime, crashed: bool):
         self.boot_id = boot_id
@@ -2598,7 +2597,7 @@ class BootInfo:
         self.boot_number = 0
 
 
-class QueryWindow(QMainWindow):
+class QueryJournal(QMainWindow):
     def __init__(self, parent: MainWindow):
         super().__init__(parent=parent)
         self.main_window = parent
@@ -2704,6 +2703,7 @@ class QueryWindow(QMainWindow):
         layout.addWidget(button_box)
         self.query_desc_label.setText(self.query_description())
         self.setCentralWidget(central)
+        reset_func()
         self.show()
 
     # def retrieve_boot_list(self) -> List:
@@ -2719,11 +2719,12 @@ class QueryWindow(QMainWindow):
     #     return boot_list
 
     def query_description(self):
-        time_desc = tr("interval {:%y.%m.%d %H:%M} .. {:%y.%m.%d %H:%M}").format(self.from_date_time, self.to_date_time)
-        row_limit_desc = "\n and row_count <= {}".format(self.row_limit) if self.row_limit > 0 else ''
+        row_limit_desc = "RESULT_COUNT <= {}\n    and ".format(self.row_limit) if self.row_limit > 0 else ''
+        time_desc = tr("__REALTIME_TIMESTAMP between [{:%y-%m-%d %H:%M}, {:%y-%m-%d %H:%M}]").format(
+            self.from_date_time, self.to_date_time)
         boot_desc = ''
         for boot_id in self.boot_picker.boot_list:
-            boot_desc += f"\n and _BOOT_ID = {boot_id}"
+            boot_desc += f"\n    and _BOOT_ID = {boot_id}"
         field_map = {}
         for field_query_widget in self.field_query_widget_list:
             for value in field_query_widget.get_checked_values():
@@ -2734,8 +2735,8 @@ class QueryWindow(QMainWindow):
                     field_map[field_name] = [value]
         field_desc = ''
         for key, value in field_map.items():
-            field_desc += f"\n and {key} in {value}" if len(value) > 1 else f"\n and {key}={value[0]}"
-        return time_desc + row_limit_desc + boot_desc + field_desc
+            field_desc += f"\n    and {key} in {value}" if len(value) > 1 else f"\n and {key}={value[0]}"
+        return row_limit_desc + time_desc + boot_desc + field_desc
 
     def perform_query(self):
         query_result = QWidget()
@@ -2791,27 +2792,25 @@ class QueryBootWidget(QWidget):
         super().__init__(parent=parent)
         self.boot_list = []
         self.boot_index = boot_index
-        layout = QHBoxLayout()
+        layout = QVBoxLayout()
         self.setLayout(layout)
 
         def calendar_selection_changed_func():
             boot_table.clearSelection()
-            selected_date = calendar.selectedDate().toPyDate()
+            selected_date = calendar.get_selected_date()
             if selected_date in boot_index.start_date_map:
                 row_num = boot_index.start_date_map[selected_date][0].boot_number
-                boot_table.scrollToItem(boot_table.item(row_num, 0), QAbstractItemView.PositionAtCenter)
-                boot_table.clearSelection()
+                boot_table.scrollToItem(boot_table.item(row_num, 0), QAbstractItemView.PositionAtTop)
+                #boot_table.clearSelection()
                 for day_boot in boot_index.start_date_map[selected_date]:
-                    boot_table.selectRow(day_boot.boot_number)
-                    # item = boot_table.item(day_boot.boot_number, 0)
-                    # item.setCheckState(Qt.Checked if item.checkState() != Qt.Checked else Qt.Unchecked)
+                    boot_table.item(day_boot.boot_number,0).setCheckState(Qt.Checked)
 
-        calendar = BootCalendar(boot_index)
-        calendar.setSelectedDate(date.today())
-        calendar.setSizePolicy(QSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed))
+        #calendar = BootCalendar(boot_index)
+        calendar = BootTimelineWidget(boot_index=boot_index, parent=self)
+
+        #calendar.setSizePolicy(QSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed))
         layout.addWidget(calendar, 0, Qt.AlignTop)
-        #calendar.clicked.connect(calendar_changed_func)
-        calendar.selectionChanged.connect(calendar_selection_changed_func)
+        calendar.selection_changed.connect(calendar_selection_changed_func)
         self.calendar = calendar
 
         boot_table = QTableWidget(len(boot_index.boot_sequence_list) , 4, self)
@@ -2820,7 +2819,11 @@ class QueryBootWidget(QWidget):
         boot_table.sizePolicy().setVerticalStretch(10)
 
         def cell_changed_func(row: int, col: int):
-            boot_id = boot_index.boot_sequence_list[row].boot_id
+            cell_boot_info = boot_index.boot_sequence_list[row]
+            boot_id = cell_boot_info.boot_id
+            self.blockSignals(True)
+            calendar.set_selected_date(cell_boot_info.start_datetime.date())
+            self.blockSignals(False)
             item = boot_table.item(row, col)
             if item.checkState() == Qt.Checked:
                 if boot_id not in self.boot_list:
@@ -2842,17 +2845,16 @@ class QueryBootWidget(QWidget):
                 bg = bg2 if bg == bg1 else bg1
                 current_date = boot_info.start_datetime.date()
             row_bg = bg_crash if boot_info.crashed else bg
-            start_datetime_item = QTableWidgetItem(f"{boot_info.start_datetime:%y.%m.%d %H:%M}")
+            start_datetime_item = QTableWidgetItem(f"{boot_info.start_datetime:%y-%m-%d %H:%M}")
             start_datetime_item.setFlags(Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
             start_datetime_item.setCheckState(Qt.Unchecked)
             start_datetime_item.setBackground(row_bg)
-            end_datetime_item = QTableWidgetItem(f"{boot_info.end_datetime:%y.%m.%d %H:%M} ")
+            end_datetime_item = QTableWidgetItem(f"{boot_info.end_datetime:%y-%m-%d %H:%M} ")
             end_datetime_item.setBackground(row_bg)
             crashed_item = QTableWidgetItem("crashed" if boot_info.crashed else '')
             crashed_item.setBackground(row_bg)
             boot_id_item = QTableWidgetItem(f"{boot_info.boot_id}")
             boot_id_item.setBackground(row_bg)
-
             boot_table.setItem(i, 0, start_datetime_item)
             boot_table.setItem(i, 1, end_datetime_item)
             boot_table.setItem(i, 2, crashed_item)
@@ -2860,14 +2862,71 @@ class QueryBootWidget(QWidget):
         layout.addWidget(boot_table, Qt.AlignTop)
         boot_table.cellChanged.connect(cell_changed_func)
         self.boot_table = boot_table
+        self.reset()
 
     def reset(self):
-        self.calendar.setSelectedDate(date.today())
+        self.calendar.set_selected_date(date.today())
         self.boot_table.blockSignals(True)
         for i in range(0, self.boot_table.rowCount()):
             self.boot_table.item(i, 0).setCheckState(Qt.Unchecked)
+        self.boot_table.scrollToBottom()
         self.boot_table.blockSignals(False)
         self.boot_list = []
+
+class BootTimelineWidget(QWidget):
+    selection_changed = pyqtSignal()
+
+    def __init__(self, boot_index: BootIndex, parent: QWidget):
+        super().__init__(parent=parent)
+        start_date = boot_index.first_entry_datetime.date()
+        end_date = boot_index.last_entry_datetime.date()
+        self.selected_date = date.today()
+        layout = QHBoxLayout()
+        self.setLayout(layout)
+
+        calendars_layout = QHBoxLayout(self)
+        scroll_area = QScrollArea(self)
+        scroll_area.setWidgetResizable(True)
+        container = QWidget(scroll_area)
+        container.setLayout(calendars_layout)
+        scroll_area.setWidget(container)
+        calendars_layout.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
+        layout.addWidget(scroll_area)
+        self.scroll_area = scroll_area
+
+        def selection_changed_func():
+            self.selected_date = self.sender().selectedDate().toPyDate()
+            self.selection_changed.emit()
+
+        self.calendar_list = []
+        cal_date = start_date
+        while cal_date <= end_date:
+            calendar = BootCalendar(boot_index)
+            print(cal_date)
+            end_of_month = date(cal_date.year + int(cal_date.month / 12), (cal_date.month % 12) + 1, 1) - timedelta(days=1)
+            calendar.setDateRange(cal_date, end_of_month)
+            calendar.setNavigationBarVisible(False)
+            calendar.selectionChanged.connect(selection_changed_func)
+            cal_box = QWidget()
+            cal_box_layout = QVBoxLayout()
+            cal_box.setLayout(cal_box_layout)
+            cal_title_label = big_label(QLabel(f"{cal_date:%B} {cal_date.year}"))
+            cal_box_layout.addWidget(cal_title_label)
+            cal_box_layout.addWidget(calendar)
+            calendars_layout.addWidget(cal_box)
+            self.calendar_list.append(calendar)
+            cal_date = end_of_month + timedelta(days=1)
+
+    def get_selected_date(self) -> date:
+        return self.selected_date
+
+    def set_selected_date(self, new_date:date) -> None:
+        for calendar in self.calendar_list:
+            cal_start_date = calendar.minimumDate().toPyDate()
+            if new_date.year == cal_start_date.year and new_date.month == cal_start_date.month:
+                self.scroll_area.ensureWidgetVisible(calendar)
+                calendar.set_selected_date(new_date)
+
 
 
 class QueryYearCalendarWidget(QWidget):
@@ -2930,6 +2989,12 @@ class BootCalendar(QCalendarWidget):
         super().__init__(parent)
         self.boot_index = boot_index
 
+    def get_selected_date(self):
+        return self.selectedDate().toPyDate()
+
+    def set_selected_date(self, new_date:date):
+        self.setSelectedDate(new_date)
+
     def paintCell(self, painter, rect, date):
         super().paintCell(painter, rect, date)
         if date.toPyDate() in self.boot_index.start_date_map:
@@ -2941,7 +3006,7 @@ class BootCalendar(QCalendarWidget):
 
 
 class QueryFieldWidget(QGroupBox):
-    def __init__(self, field_name: str, values_set: set, value_checked_func: Callable, parent: QueryWindow):
+    def __init__(self, field_name: str, values_set: set, value_checked_func: Callable, parent: QueryJournal):
         super().__init__('', parent=parent)
         self.field_name = field_name
         self.setAlignment(Qt.AlignLeft)
