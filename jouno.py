@@ -2579,6 +2579,8 @@ class BootIndex:
         for sublist in self.start_date_map.values():
             self.boot_sequence_list.extend(sublist)
         self.boot_sequence_list.sort(key=lambda boot_info: boot_info.start_datetime)
+        # Incomplete because it's still being written to:
+        self.boot_sequence_list[-1].crashed = False
         self.first_entry_datetime = self.boot_sequence_list[0].start_datetime
         self.last_entry_datetime = self.boot_sequence_list[-1].end_datetime
         self.boot_years.sort()
@@ -2932,7 +2934,8 @@ class BootCalendar(QCalendarWidget):
             painter.setBrush(Qt.green)
             painter.drawEllipse(rect.topLeft() + QPoint(12, 8), 3, 3)
         if date.toPyDate() in self.boot_index.end_date_map:
-            painter.setBrush(Qt.red if self.boot_index.end_date_map[date.toPyDate()][0].crashed else Qt.lightGray)
+            crashed = True in [boot_info.crashed for boot_info in self.boot_index.end_date_map[date.toPyDate()]]
+            painter.setBrush(Qt.red if crashed else Qt.lightGray)
             painter.drawEllipse(rect.topLeft() + QPoint(12, 24), 3, 3)
 
 
