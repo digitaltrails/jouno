@@ -2548,22 +2548,6 @@ class JournalEntryDialogPlain(QDialog):
         self.show()
 
 
-class QueryTask(QThread):
-    finished = pyqtSignal()
-
-    def __init__(self, query, parent) -> None:
-        super().__init__()
-        self.query = query
-        self.parent = parent
-
-    def run(self) -> None:
-        self.query.run()
-        self.finished.emit()
-
-    def stop(self):
-        self.query.stop = True
-
-
 class QueryMetaData:
     def __init__(self):
         self.start_date_map: Mapping[DT.date, QueryBootInfo] = {}
@@ -2651,7 +2635,6 @@ class QueryJournalWidget(QMainWindow):
         self.main_window = parent
         self.setObjectName("journal-query")
 
-        self.query = None
         self.query_task = None
 
         central = QWidget()
@@ -2733,9 +2716,9 @@ class QueryJournalWidget(QMainWindow):
         button_box = QWidget()
         button_box_layout = QHBoxLayout()
         button_box.setLayout(button_box_layout)
-        query_button = QPushButton(tr("Run Query"))
-        query_button.clicked.connect(self.perform_query)
-        button_box_layout.addWidget(query_button)
+        self.run_query_button = QPushButton(tr("Run Query"))
+        self.run_query_button.clicked.connect(self.perform_query)
+        button_box_layout.addWidget(self.run_query_button)
 
         def reset_func():
             self.from_date_time = self.journal_meta_data.first_entry_datetime
@@ -2755,6 +2738,8 @@ class QueryJournalWidget(QMainWindow):
         layout.addWidget(button_box)
         self.query_desc_widget.setText(self.query_description())
         self.setCentralWidget(central)
+        self.status_bar = QStatusBar()
+        self.setStatusBar(self.status_bar)
         self.show()
         reset_func()
 
@@ -2779,17 +2764,23 @@ class QueryJournalWidget(QMainWindow):
         return row_limit_desc + time_desc + boot_desc + field_desc
 
     def perform_query(self):
-        self.query = QueryJournal(
+        self.run_query_button.setDisabled(True)
+        self.query_task = QueryJournalTask(
             from_datetime=self.from_date_time, to_datetime=self.to_date_time,
-            boot_list=self.boot_picker.boot_list,
+            boot_list=self.boot_picker.boot_list.copy(),
             field_values_map={f.field_name: f.get_checked_values() for f in self.field_query_widget_list},
             row_limit=self.row_limit)
-        self.query_task = QueryTask(self.query, self)
         self.query_task.finished.connect(self.query_finished)
+
+        def progress_func(count: int):
+            self.status_bar.showMessage(tr("Retrieved {} entries so far, continuing..").format(count), 2000)
+
+        self.query_task.progress.connect(progress_func)
         self.query_task.start()
 
-    def query_finished(self):
-        if not self.query.stop:
+    def query_finished(self, number_of_matches: int):
+        self.status_bar.showMessage(tr("Retrieved {} entries, creating view.."), 5000)
+        if not self.query_task.stopped:
             query_result = QWidget()
             query_layout = QVBoxLayout()
             query_result.setLayout(query_layout)
@@ -2797,15 +2788,16 @@ class QueryJournalWidget(QMainWindow):
             title = tr("Query: {}").format(self.query_description())
             journal_panel.title_label.setText(title)
             query_layout.addWidget(journal_panel)
-            for journal_entry in self.query.results:
+            for journal_entry in self.query_task.results:
                 journal_panel.add_journal_entry(journal_entry, True)
-            journal_panel.static_status_label.setText(tr("Retrieved {} entries.".format(len(self.query.results))))
+            journal_panel.static_status_label.setText(tr("Retrieved {} entries.".format(number_of_matches)))
             result_geometry = self.main_window.geometry()
             result_geometry.translate(50, 50)
             query_result.setGeometry(result_geometry)
             query_result.show()
             self.query_results.append(query_result)
         self.query_task = None
+        self.run_query_button.setEnabled(True)
 
     def app_restore_state(self):
         debug("app_restore_state") if debugging else None
@@ -2818,46 +2810,57 @@ class QueryJournalWidget(QMainWindow):
         self.search_container.app_restore_state(from_settings=self.settings, show=True)
 
 
-class QueryJournal:
+class QueryJournalTask(QThread):
+    finished = pyqtSignal(int)
+    progress = pyqtSignal(int)
+
     def __init__(self,
                  from_datetime: DT.datetime, to_datetime: DT.datetime,
                  boot_list: List[str],
                  field_values_map: Mapping[str, List],
                  row_limit:int):
+        super().__init__()
         self.from_datetime = from_datetime
         self.to_datetime = to_datetime
         self.boot_list = boot_list
         self.field_values_map = field_values_map
         self.row_limit = row_limit
         self.results = []
-        self.stop = False
+        self.stopped = False
 
     def run(self):
-        number_of_matches = 0
-        with journal.Reader() as query_reader:
-            query_reader.seek_realtime(self.from_datetime)
-            for boot_id in self.boot_list:
-                query_reader.this_boot(boot_id)
-            for field_name, field_values in self.field_values_map.items():
-                for value in field_values:
-                    match_str = "{}={}".format(field_name, value)
-                    query_reader.add_match(match_str)
-            while True:
-                if self.stop:
-                    break
-                journal_entry = query_reader.get_next()
-                # at end of journal returns {} an empty dictionary
-                if journal_entry is None or len(journal_entry) == 0:
-                    break
-                journal_entry_date_time = journal_entry['__REALTIME_TIMESTAMP']
-                if journal_entry_date_time > self.to_datetime:
-                    break
-                number_of_matches += 1
-                consolidate_text(journal_entry)
-                self.results.append(journal_entry)
-                if self.row_limit > 0 and number_of_matches == self.row_limit:
-                    break
+        try:
+            number_of_matches = 0
+            with journal.Reader() as query_reader:
+                query_reader.seek_realtime(self.from_datetime)
+                for boot_id in self.boot_list:
+                    query_reader.this_boot(boot_id)
+                for field_name, field_values in self.field_values_map.items():
+                    for value in field_values:
+                        match_str = "{}={}".format(field_name, value)
+                        query_reader.add_match(match_str)
+                while True:
+                    if self.stopped:
+                        break
+                    journal_entry = query_reader.get_next()
+                    # at end of journal returns {} an empty dictionary
+                    if journal_entry is None or len(journal_entry) == 0:
+                        break
+                    journal_entry_date_time = journal_entry['__REALTIME_TIMESTAMP']
+                    if journal_entry_date_time > self.to_datetime:
+                        break
+                    number_of_matches += 1
+                    if number_of_matches % 1000 == 0:
+                        self.progress.emit(number_of_matches)
+                    consolidate_text(journal_entry)
+                    self.results.append(journal_entry)
+                    if self.row_limit > 0 and number_of_matches == self.row_limit:
+                        break
+        finally:
+            self.finished.emit(number_of_matches)
 
+    def stop(self):
+        self.stopped = True
 
 class QueryBootWidget(QWidget):
     def __init__(self, boot_index: QueryMetaData, boot_picked_func: Callable, parent: QWidget):
