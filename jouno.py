@@ -271,7 +271,7 @@ import sys
 import textwrap
 import time
 import traceback
-from datetime import datetime, date, timedelta
+import datetime as DT
 from enum import Enum
 from functools import partial
 from html import escape
@@ -290,7 +290,8 @@ from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QMessageBox, QLi
     QCheckBox, QGridLayout, QTableView, \
     QAbstractItemView, QHeaderView, QMainWindow, QSizePolicy, QStyledItemDelegate, QToolBar, QDockWidget, \
     QHBoxLayout, QStyleFactory, QToolButton, QScrollArea, QLayout, QStatusBar, QDateTimeEdit, QCalendarWidget, \
-    QFormLayout, QGroupBox, QSpacerItem, QComboBox, QListWidget, QListWidgetItem, QTableWidgetItem, QTableWidget
+    QFormLayout, QGroupBox, QSpacerItem, QComboBox, QListWidget, QListWidgetItem, QTableWidgetItem, QTableWidget, \
+    QProgressDialog
 from PyQt5.uic.properties import QtWidgets
 from systemd import journal
 
@@ -1963,7 +1964,7 @@ class MainWindow(QMainWindow):
             config_panel.delete_filter()
 
         def view_entire_journal() -> None:
-            journal_viewer = QueryJournal(parent=self)
+            journal_viewer = QueryJournalWidget(parent=self)
 
         self.config_panel = config_panel = ConfigPanel(tab_change=tab_change, config_change_func=config_change)
         self.config_dock_container = DockContainer(
@@ -2547,16 +2548,39 @@ class JournalEntryDialogPlain(QDialog):
         self.show()
 
 
-class BootIndex:
+class QueryTask(QThread):
+    finished = pyqtSignal()
+
+    def __init__(self, query) -> None:
+        super().__init__()
+        self.query = query
+
+    def run(self) -> None:
+        self.query.run()
+        self.finished.emit()
+
+    def stop(self):
+        self.query.stop = True
+
+
+class QueryMetaData:
     def __init__(self):
-        self.start_date_map: Mapping[date, BootInfo] = {}
-        self.end_date_map: Mapping[date, BootInfo] = {}
+        self.start_date_map: Mapping[DT.date, QueryBootInfo] = {}
+        self.end_date_map: Mapping[DT.date, QueryBootInfo] = {}
+        self.first_entry_datetime = None
+        self.last_entry_datetime = None
         self.boot_sequence_list = []
         self.boot_years = []
+        self.unique_field_values = {}
+        self.stop = False
+
+    def run(self) -> None:
         with journal.Reader() as reader:
             boot_id_set = reader.query_unique("_BOOT_ID")
         for boot_id in boot_id_set:
             with journal.Reader() as reader:
+                if self.stop:
+                    return
                 reader.this_boot(boot_id)
                 first = reader.get_next()
                 start_datetime = first['__REALTIME_TIMESTAMP']
@@ -2564,7 +2588,7 @@ class BootIndex:
                 last = reader.get_previous()
                 end_datetime = last['__REALTIME_TIMESTAMP']
                 crashed = last['MESSAGE'] != "Journal stopped"
-                info = BootInfo(boot_id, start_datetime, end_datetime, crashed)
+                info = QueryBootInfo(boot_id, start_datetime, end_datetime, crashed)
                 start_date = start_datetime.date()
                 end_date = end_datetime.date()
                 if start_date.year not in self.boot_years:
@@ -2575,7 +2599,6 @@ class BootIndex:
                     self.end_date_map[end_date] = []
                 self.start_date_map[start_datetime.date()].append(info)
                 self.end_date_map[end_datetime.date()].append(info)
-        self.boot_sequence_list = []
         for sublist in self.start_date_map.values():
             self.boot_sequence_list.extend(sublist)
         self.boot_sequence_list.sort(key=lambda boot_info: boot_info.start_datetime)
@@ -2586,10 +2609,18 @@ class BootIndex:
         self.boot_years.sort()
         for i, boot_info in enumerate(self.boot_sequence_list):
             boot_info.boot_number = i
+        for field_name in ['_UID', '_GID', 'QT_CATEGORY', 'PRIORITY', 'SYSLOG_IDENTIFIER', '_COM', '_EXE', '_HOSTNAME']:
+            if self.stop:
+                return
+            with journal.Reader() as reader:
+                values_set = reader.query_unique(field_name)
+            values_list = [QueryFieldValue(field_name, v) for v in values_set]
+            values_list.sort(key=lambda v: v.sort_key)
+            self.unique_field_values[field_name] = values_list
 
 
-class BootInfo:
-    def __init__(self, boot_id, start_datetime: datetime, end_datetime: datetime, crashed: bool):
+class QueryBootInfo:
+    def __init__(self, boot_id, start_datetime: DT.datetime, end_datetime: DT.datetime, crashed: bool):
         self.boot_id = boot_id
         self.start_datetime = start_datetime
         self.end_datetime = end_datetime
@@ -2597,7 +2628,23 @@ class BootInfo:
         self.boot_number = 0
 
 
-class QueryJournal(QMainWindow):
+class QueryFieldValue:
+    def __init__(self, field_name: str, value):
+        self.value = value
+        if field_name == '_UID':
+            description = pwd.getpwuid(value).pw_name
+            sort_key = description
+        elif field_name == '_GID':
+            description = grp.getgrgid(value).gr_name
+            sort_key = description
+        else:
+            description = str(value)
+            sort_key = value
+        self.description = str(description)
+        self.sort_key = sort_key
+
+
+class QueryJournalWidget(QMainWindow):
     def __init__(self, parent: MainWindow):
         super().__init__(parent=parent)
         self.main_window = parent
@@ -2636,18 +2683,20 @@ class QueryJournal(QMainWindow):
         self.limit_rows_widget.textChanged.connect(row_limit_func)
         layout.addRow(tr("&Row Limit"), self.limit_rows_widget)
 
-        def picked_from_date_func(datetime: QDateTime):
-            self.from_date_time = datetime.toPyDateTime()
+        def picked_from_date_func(picked_datetime: QDateTime):
+            self.from_date_time = picked_datetime.toPyDateTime()
             self.query_desc_widget.setText(self.query_description())
             # to_date_widget.setMinimumDate(datetime)
 
-        def picked_to_date_func(datetime: QDateTime):
-            self.to_date_time = datetime.toPyDateTime()
+        def picked_to_date_func(picked_datetime: QDateTime):
+            self.to_date_time = picked_datetime.toPyDateTime()
             self.query_desc_widget.setText(self.query_description())
 
-        self.boot_index = BootIndex()
-        self.from_date_time = self.boot_index.first_entry_datetime
-        self.to_date_time = self.boot_index.last_entry_datetime
+        self.journal_meta_data = QueryMetaData()
+        self.journal_meta_data.run()
+
+        self.from_date_time = self.journal_meta_data.first_entry_datetime
+        self.to_date_time = self.journal_meta_data.last_entry_datetime
         from_date_widget = QDateTimeEdit()
         from_date_widget.setDateTime(self.from_date_time)
         from_date_widget.setDisplayFormat("yyyy.MM.dd hh:mm:ss")
@@ -2667,15 +2716,13 @@ class QueryJournal(QMainWindow):
         def value_checked_func():
             self.query_desc_widget.setText(self.query_description())
 
-        self.boot_picker = QueryBootWidget(self.boot_index, value_checked_func, self)
+        self.boot_picker = QueryBootWidget(self.journal_meta_data, value_checked_func, self)
         tab_widget.addTab(self.boot_picker, "Boot")
 
         self.field_query_widget_list = []
-        for field_name in ['_UID', '_GID', 'QT_CATEGORY', 'PRIORITY', 'SYSLOG_IDENTIFIER', '_COM', '_EXE', '_HOSTNAME']:
-            with journal.Reader() as reader:
-                values_set = reader.query_unique(field_name)
-            if len(values_set) > 0:
-                field_query_widget = QueryFieldWidget(field_name, values_set, value_checked_func, self)
+        for field_name, field_values in self.journal_meta_data.unique_field_values.items():
+            if len(field_values) > 0:
+                field_query_widget = QueryFieldWidget(field_name, field_values, value_checked_func, self)
                 tab_widget.addTab(field_query_widget, field_name)
                 self.field_query_widget_list.append(field_query_widget)
 
@@ -2687,8 +2734,8 @@ class QueryJournal(QMainWindow):
         button_box_layout.addWidget(query_button)
 
         def reset_func():
-            self.from_date_time = self.boot_index.first_entry_datetime
-            self.to_date_time = self.boot_index.last_entry_datetime
+            self.from_date_time = self.journal_meta_data.first_entry_datetime
+            self.to_date_time = self.journal_meta_data.last_entry_datetime
             from_date_widget.setDateTime(self.from_date_time)
             to_date_widget.setDateTime(self.to_date_time)
             self.boot_picker.reset()
@@ -2728,6 +2775,12 @@ class QueryJournal(QMainWindow):
         return row_limit_desc + time_desc + boot_desc + field_desc
 
     def perform_query(self):
+        query = QueryJournal(
+            from_datetime=self.from_date_time, to_datetime=self.to_date_time,
+            boot_list=self.boot_picker.boot_list,
+            field_values_map={f.field_name: f.get_checked_values() for f in self.field_query_widget_list},
+            row_limit=self.row_limit)
+        query.run()
         query_result = QWidget()
         query_layout = QVBoxLayout()
         query_result.setLayout(query_layout)
@@ -2735,34 +2788,15 @@ class QueryJournal(QMainWindow):
         title = tr("Query: {}").format(self.query_description())
         journal_panel.title_label.setText(title)
         query_layout.addWidget(journal_panel)
-        number_of_matches = 0
-        with journal.Reader() as query_reader:
-            query_reader.seek_realtime(self.from_date_time)
-            for boot_id in self.boot_picker.boot_list:
-                query_reader.this_boot(boot_id)
-            for field_query_widget in self.field_query_widget_list:
-                for value in field_query_widget.get_checked_values():
-                    match_str = "{}={}".format(field_query_widget.field_name, value)
-                    query_reader.add_match(match_str)
-            while True:
-                journal_entry = query_reader.get_next()
-                # at end of journal returns {} an empty dictionary
-                if journal_entry is None or len(journal_entry) == 0:
-                    break
-                journal_entry_date_time = journal_entry['__REALTIME_TIMESTAMP']
-                if journal_entry_date_time > self.to_date_time:
-                    break
-                number_of_matches += 1
-                consolidate_text(journal_entry)
+        if not query.stop:
+            for journal_entry in query.results:
                 journal_panel.add_journal_entry(journal_entry, True)
-                if self.row_limit > 0 and number_of_matches == self.row_limit:
-                    break
-        journal_panel.static_status_label.setText(tr("Retrieved {} entries.".format(number_of_matches)))
-        result_geometry = self.main_window.geometry()
-        result_geometry.translate(50, 50)
-        query_result.setGeometry(result_geometry)
-        query_result.show()
-        self.query_results.append(query_result)
+            journal_panel.static_status_label.setText(tr("Retrieved {} entries.".format(len(query.results))))
+            result_geometry = self.main_window.geometry()
+            result_geometry.translate(50, 50)
+            query_result.setGeometry(result_geometry)
+            query_result.show()
+            self.query_results.append(query_result)
 
     def app_restore_state(self):
         debug("app_restore_state") if debugging else None
@@ -2775,8 +2809,49 @@ class QueryJournal(QMainWindow):
         self.search_container.app_restore_state(from_settings=self.settings, show=True)
 
 
+class QueryJournal:
+    def __init__(self,
+                 from_datetime: DT.datetime, to_datetime: DT.datetime,
+                 boot_list: List[str],
+                 field_values_map: Mapping[str, List],
+                 row_limit:int):
+        self.from_datetime = from_datetime
+        self.to_datetime = to_datetime
+        self.boot_list = boot_list
+        self.field_values_map = field_values_map
+        self.row_limit = row_limit
+        self.results = []
+        self.stop = False
+
+    def run(self):
+        number_of_matches = 0
+        with journal.Reader() as query_reader:
+            query_reader.seek_realtime(self.from_datetime)
+            for boot_id in self.boot_list:
+                query_reader.this_boot(boot_id)
+            for field_name, field_values in self.field_values_map.items():
+                for value in field_values:
+                    match_str = "{}={}".format(field_name, value)
+                    query_reader.add_match(match_str)
+            while True:
+                if self.stop:
+                    break
+                journal_entry = query_reader.get_next()
+                # at end of journal returns {} an empty dictionary
+                if journal_entry is None or len(journal_entry) == 0:
+                    break
+                journal_entry_date_time = journal_entry['__REALTIME_TIMESTAMP']
+                if journal_entry_date_time > self.to_datetime:
+                    break
+                number_of_matches += 1
+                consolidate_text(journal_entry)
+                self.results.append(journal_entry)
+                if self.row_limit > 0 and number_of_matches == self.row_limit:
+                    break
+
+
 class QueryBootWidget(QWidget):
-    def __init__(self, boot_index: BootIndex, boot_picked_func: Callable, parent: QWidget):
+    def __init__(self, boot_index: QueryMetaData, boot_picked_func: Callable, parent: QWidget):
         super().__init__(parent=parent)
         self.boot_list = []
         self.boot_index = boot_index
@@ -2794,7 +2869,7 @@ class QueryBootWidget(QWidget):
                     boot_table.item(day_boot.boot_number,0).setCheckState(Qt.Checked)
 
         #calendar = BootCalendar(boot_index)
-        calendar = BootTimelineWidget(boot_index=boot_index, parent=self)
+        calendar = QueryBootTimelineWidget(boot_index=boot_index, parent=self)
 
         #calendar.setSizePolicy(QSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed))
         layout.addWidget(calendar, 0, Qt.AlignTop)
@@ -2858,23 +2933,23 @@ class QueryBootWidget(QWidget):
             self.boot_table.item(i, 0).setCheckState(Qt.Unchecked)
         self.boot_table.scrollToBottom()
         self.boot_table.blockSignals(False)
-        self.calendar.set_selected_date(date.today())
+        self.calendar.set_selected_date(DT.date.today())
         self.boot_list = []
 
 
-class BootTimelineWidget(QWidget):
+class QueryBootTimelineWidget(QWidget):
     selection_changed = pyqtSignal()
 
-    def __init__(self, boot_index: BootIndex, parent: QWidget):
+    def __init__(self, boot_index: QueryMetaData, parent: QWidget):
         super().__init__(parent=parent)
         start_date = boot_index.first_entry_datetime.date()
         end_date = boot_index.last_entry_datetime.date()
-        self.selected_date = date.today()
+        self.selected_date = DT.date.today()
         layout = QHBoxLayout()
         self.setLayout(layout)
 
-        timespan_layout = QHBoxLayout(self)
-        scroll_area = QScrollArea(self)
+        timespan_layout = QHBoxLayout()
+        scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
         timespan_widget = QWidget(scroll_area)
         timespan_widget.setLayout(timespan_layout)
@@ -2890,8 +2965,8 @@ class BootTimelineWidget(QWidget):
         self.calendar_list = []
         cal_date = start_date
         while cal_date <= end_date:
-            calendar = BootCalendar(boot_index)
-            end_of_month = date(cal_date.year + int(cal_date.month / 12), (cal_date.month % 12) + 1, 1) - timedelta(days=1)
+            calendar = QueryBootCalendar(boot_index)
+            end_of_month = DT.date(cal_date.year + int(cal_date.month / 12), (cal_date.month % 12) + 1, 1) - DT.timedelta(days=1)
             calendar.setDateRange(cal_date, end_of_month)
             calendar.setNavigationBarVisible(False)
             calendar.selectionChanged.connect(selection_changed_func)
@@ -2903,29 +2978,30 @@ class BootTimelineWidget(QWidget):
             cal_box_layout.addWidget(calendar)
             timespan_layout.addWidget(cal_box)
             self.calendar_list.append(calendar)
-            cal_date = end_of_month + timedelta(days=1)
+            cal_date = end_of_month + DT.timedelta(days=1)
         scroll_area.adjustSize()
         scroll_area.setFixedHeight(scroll_area.height() + 20)
 
-    def get_selected_date(self) -> date:
+    def get_selected_date(self) -> DT.date:
         return self.selected_date
 
-    def set_selected_date(self, new_date: date) -> None:
+    def set_selected_date(self, new_date: DT.date) -> None:
         for calendar in self.calendar_list:
             cal_start_date = calendar.minimumDate().toPyDate()
             if new_date.year == cal_start_date.year and new_date.month == cal_start_date.month:
                 calendar.set_selected_date(new_date)
                 self.scroll_area.ensureWidgetVisible(calendar)
 
-class BootCalendar(QCalendarWidget):
-    def __init__(self, boot_index: BootIndex, parent=None):
+
+class QueryBootCalendar(QCalendarWidget):
+    def __init__(self, boot_index: QueryMetaData, parent=None):
         super().__init__(parent)
         self.boot_index = boot_index
 
     def get_selected_date(self):
         return self.selectedDate().toPyDate()
 
-    def set_selected_date(self, new_date:date):
+    def set_selected_date(self, new_date:DT.date):
         self.setSelectedDate(new_date)
 
     def paintCell(self, painter, rect, date):
@@ -2940,14 +3016,14 @@ class BootCalendar(QCalendarWidget):
 
 
 class QueryFieldWidget(QGroupBox):
-    def __init__(self, field_name: str, values_set: set, value_checked_func: Callable, parent: QueryJournal):
+    def __init__(self, field_name: str, field_values: List, value_checked_func: Callable, parent: QueryJournalWidget):
         super().__init__('', parent=parent)
         self.field_name = field_name
         self.setAlignment(Qt.AlignLeft)
         layout = QVBoxLayout()
         self.setLayout(layout)
-        grid_layout = QGridLayout(self)
-        scroll_area = QScrollArea(self)
+        grid_layout = QGridLayout()
+        scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
         container = QWidget(scroll_area)
         container.setLayout(grid_layout)
@@ -2955,18 +3031,12 @@ class QueryFieldWidget(QGroupBox):
         grid_layout.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
         layout.addWidget(scroll_area)
         # self.setFlat(True)
-        max_str_len = max(len(str(v)) for v in values_set)
+        max_str_len = max(len(str(v.description)) for v in field_values)
         num_cols = 5 if max_str_len < 20 else (100 // max_str_len)
         self.checkbox_list = []
-        for i, value in enumerate(sorted(values_set)):
-            if field_name == '_UID':
-                str_value = pwd.getpwuid(value).pw_name
-            elif field_name == '_GID':
-                str_value = grp.getgrgid(value).gr_name
-            else:
-                str_value = str(value)
-            tooltip = "{}={}".format(field_name, value)
-            checkbox = QCheckBox(str_value)
+        for i, field_value in enumerate(field_values):
+            tooltip = "{}={} ({})".format(field_name, field_value.value, field_value.description)
+            checkbox = QCheckBox(field_value.description)
             checkbox.setToolTip(tooltip)
             if value_checked_func is not None:
                 checkbox.stateChanged.connect(value_checked_func)
