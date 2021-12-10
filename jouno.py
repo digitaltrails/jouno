@@ -2706,18 +2706,6 @@ class QueryJournal(QMainWindow):
         reset_func()
         self.show()
 
-    # def retrieve_boot_list(self) -> List:
-    #     boot_list = []
-    #     with journal.Reader() as reader:
-    #         boot_id_set = reader.query_unique("_BOOT_ID")
-    #     for boot_id in boot_id_set:
-    #         with journal.Reader() as reader:
-    #             reader.this_boot(boot_id)
-    #             first = reader.get_next()
-    #             boot_list.append((first['__REALTIME_TIMESTAMP'], boot_id,))
-    #     boot_list.sort(key=lambda dt_id: dt_id[0])
-    #     return boot_list
-
     def query_description(self):
         row_limit_desc = "RESULT_COUNT <= {}\n    and ".format(self.row_limit) if self.row_limit > 0 else ''
         time_desc = tr("__REALTIME_TIMESTAMP between [{:%y-%m-%d %H:%M}, {:%y-%m-%d %H:%M}]").format(
@@ -2784,7 +2772,6 @@ class QueryJournal(QMainWindow):
             window_state = self.settings.value(self.state_key, None)
             self.restoreState(window_state)
         self.search_container.app_restore_state(from_settings=self.settings, show=True)
-
 
 
 class QueryBootWidget(QWidget):
@@ -2873,6 +2860,7 @@ class QueryBootWidget(QWidget):
         self.boot_table.blockSignals(False)
         self.boot_list = []
 
+
 class BootTimelineWidget(QWidget):
     selection_changed = pyqtSignal()
 
@@ -2926,62 +2914,6 @@ class BootTimelineWidget(QWidget):
             if new_date.year == cal_start_date.year and new_date.month == cal_start_date.month:
                 self.scroll_area.ensureWidgetVisible(calendar)
                 calendar.set_selected_date(new_date)
-
-
-
-class QueryYearCalendarWidget(QWidget):
-    def __init__(self, years: List[int], boot_picked_func: Callable, parent: QWidget):
-        super().__init__(parent=parent)
-        self.selected_date = date.today()
-        layout = QVBoxLayout()
-        self.setLayout(layout)
-
-        def change_year_func(text: str):
-            new_year = int(text)
-            self.change_year(new_year)
-
-        year_combo = QComboBox()
-        for year in years:
-            year_combo.addItem(str(year))
-        year_combo.currentTextChanged.connect(change_year_func)
-        layout.addWidget(year_combo)
-
-        self.calendars_layout = QVBoxLayout(self)
-        scroll_area = QScrollArea(self)
-        scroll_area.setWidgetResizable(True)
-        container = QWidget(scroll_area)
-        container.setLayout(self.calendars_layout)
-        scroll_area.setWidget(container)
-        self.calendars_layout.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
-        layout.addWidget(scroll_area)
-
-        def select_date_func():
-            self.selected_date = self.sender().selectedDate().toPyDate()
-
-        self.calendar_list = []
-        for month in range(1, 13):
-            cal_box = QWidget()
-            cal_box_layout = QVBoxLayout()
-            cal_box.setLayout(cal_box_layout)
-            year_label = QLabel()
-            cal_box_layout.addWidget(year_label)
-            calendar = BootCalendar(self.boot_index)
-            calendar.setSelectionMode(QCalendarWidget.SelectionMode.SingleSelection)
-            calendar.setNavigationBarVisible(False)
-            calendar.setGeometry(1, 40, 100, 100)
-            calendar.clicked.connect(select_date_func())
-            cal_box_layout.addWidget(calendar)
-            self.calendars_layout.addWidget(cal_box)#, (month - 1) // 3, (month - 1) % 3)
-            self.calendar_list.append((year_label, calendar,))
-        self.change_year(years[0])
-
-    def change_year(self, year: int):
-        for i, (label, calendar) in enumerate(self.calendar_list):
-            month = i + 1
-            start_of_month = date(year, month, 1)
-            label.setText(start_of_month.strftime("%B") + ' ' + str(year))
-            end_of_month = datetime(year, (month % 12) + 1, 1).date() - timedelta(days=1)
-            calendar.setDateRange(start_of_month, end_of_month)
 
 
 class BootCalendar(QCalendarWidget):
@@ -3059,6 +2991,7 @@ class QueryFieldWidget(QGroupBox):
     #     for i, box in enumerate(self.boxes):
     #         self.grid_layout.removeWidget(box)
     #         self.grid_layout.addWidget(box, i / num_cols, i % num_cols, Qt.AlignLeft)
+
 
 class DialogSingletonMixin:
     """
