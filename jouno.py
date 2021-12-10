@@ -2669,7 +2669,7 @@ class QueryJournal(QMainWindow):
         tab_widget.addTab(self.boot_picker, "Boot")
 
         self.field_query_widget_list = []
-        for field_name in ['_UID', '_GID', 'QT_CATEGORY', 'PRIORITY', 'SYSLOG_IDENTIFIER', '_COM', '_EXE', ]:
+        for field_name in ['_UID', '_GID', 'QT_CATEGORY', 'PRIORITY', 'SYSLOG_IDENTIFIER', '_COM', '_EXE', '_HOSTNAME']:
             with journal.Reader() as reader:
                 values_set = reader.query_unique(field_name)
             if len(values_set) > 0:
