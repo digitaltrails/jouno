@@ -2551,9 +2551,10 @@ class JournalEntryDialogPlain(QDialog):
 class QueryTask(QThread):
     finished = pyqtSignal()
 
-    def __init__(self, query) -> None:
+    def __init__(self, query, parent) -> None:
         super().__init__()
         self.query = query
+        self.parent = parent
 
     def run(self) -> None:
         self.query.run()
@@ -2587,8 +2588,8 @@ class QueryMetaData:
                 reader.seek_tail()
                 last = reader.get_previous()
                 end_datetime = last['__REALTIME_TIMESTAMP']
-                crashed = last['MESSAGE'] != "Journal stopped"
-                info = QueryBootInfo(boot_id, start_datetime, end_datetime, crashed)
+                journal_incomplete = last['MESSAGE'] != "Journal stopped"
+                info = QueryBootInfo(boot_id, start_datetime, end_datetime, journal_incomplete)
                 start_date = start_datetime.date()
                 end_date = end_datetime.date()
                 if start_date.year not in self.boot_years:
@@ -2603,7 +2604,7 @@ class QueryMetaData:
             self.boot_sequence_list.extend(sublist)
         self.boot_sequence_list.sort(key=lambda boot_info: boot_info.start_datetime)
         # Incomplete because it's still being written to:
-        self.boot_sequence_list[-1].crashed = False
+        self.boot_sequence_list[-1].journal_incomplete = False
         self.first_entry_datetime = self.boot_sequence_list[0].start_datetime
         self.last_entry_datetime = self.boot_sequence_list[-1].end_datetime
         self.boot_years.sort()
@@ -2620,11 +2621,11 @@ class QueryMetaData:
 
 
 class QueryBootInfo:
-    def __init__(self, boot_id, start_datetime: DT.datetime, end_datetime: DT.datetime, crashed: bool):
+    def __init__(self, boot_id, start_datetime: DT.datetime, end_datetime: DT.datetime, journal_incomplete: bool):
         self.boot_id = boot_id
         self.start_datetime = start_datetime
         self.end_datetime = end_datetime
-        self.crashed = crashed
+        self.journal_incomplete = journal_incomplete
         self.boot_number = 0
 
 
@@ -2649,6 +2650,9 @@ class QueryJournalWidget(QMainWindow):
         super().__init__(parent=parent)
         self.main_window = parent
         self.setObjectName("journal-query")
+
+        self.query = None
+        self.query_task = None
 
         central = QWidget()
         layout = QFormLayout()
@@ -2775,28 +2779,33 @@ class QueryJournalWidget(QMainWindow):
         return row_limit_desc + time_desc + boot_desc + field_desc
 
     def perform_query(self):
-        query = QueryJournal(
+        self.query = QueryJournal(
             from_datetime=self.from_date_time, to_datetime=self.to_date_time,
             boot_list=self.boot_picker.boot_list,
             field_values_map={f.field_name: f.get_checked_values() for f in self.field_query_widget_list},
             row_limit=self.row_limit)
-        query.run()
-        query_result = QWidget()
-        query_layout = QVBoxLayout()
-        query_result.setLayout(query_layout)
-        journal_panel = JournalPanel(max_entries=0)
-        title = tr("Query: {}").format(self.query_description())
-        journal_panel.title_label.setText(title)
-        query_layout.addWidget(journal_panel)
-        if not query.stop:
-            for journal_entry in query.results:
+        self.query_task = QueryTask(self.query, self)
+        self.query_task.finished.connect(self.query_finished)
+        self.query_task.start()
+
+    def query_finished(self):
+        if not self.query.stop:
+            query_result = QWidget()
+            query_layout = QVBoxLayout()
+            query_result.setLayout(query_layout)
+            journal_panel = JournalPanel(max_entries=0)
+            title = tr("Query: {}").format(self.query_description())
+            journal_panel.title_label.setText(title)
+            query_layout.addWidget(journal_panel)
+            for journal_entry in self.query.results:
                 journal_panel.add_journal_entry(journal_entry, True)
-            journal_panel.static_status_label.setText(tr("Retrieved {} entries.".format(len(query.results))))
+            journal_panel.static_status_label.setText(tr("Retrieved {} entries.".format(len(self.query.results))))
             result_geometry = self.main_window.geometry()
             result_geometry.translate(50, 50)
             query_result.setGeometry(result_geometry)
             query_result.show()
             self.query_results.append(query_result)
+        self.query_task = None
 
     def app_restore_state(self):
         debug("app_restore_state") if debugging else None
@@ -2907,14 +2916,14 @@ class QueryBootWidget(QWidget):
             if boot_info.start_datetime.date() != current_date:
                 bg = bg2 if bg == bg1 else bg1
                 current_date = boot_info.start_datetime.date()
-            row_bg = bg_crash if boot_info.crashed else bg
+            row_bg = bg_crash if boot_info.journal_incomplete else bg
             start_datetime_item = QTableWidgetItem(f"{boot_info.start_datetime:%y-%m-%d %H:%M}")
             start_datetime_item.setFlags(Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
             start_datetime_item.setCheckState(Qt.Unchecked)
             start_datetime_item.setBackground(row_bg)
             end_datetime_item = QTableWidgetItem(f"{boot_info.end_datetime:%y-%m-%d %H:%M} ")
             end_datetime_item.setBackground(row_bg)
-            crashed_item = QTableWidgetItem("crashed" if boot_info.crashed else '')
+            crashed_item = QTableWidgetItem("incomplete" if boot_info.journal_incomplete else '')
             crashed_item.setBackground(row_bg)
             boot_id_item = QTableWidgetItem(f"{boot_info.boot_id}")
             boot_id_item.setBackground(row_bg)
@@ -3010,7 +3019,7 @@ class QueryBootCalendar(QCalendarWidget):
             painter.setBrush(Qt.green)
             painter.drawEllipse(rect.topLeft() + QPoint(12, 8), 3, 3)
         if date.toPyDate() in self.boot_index.end_date_map:
-            crashed = True in [boot_info.crashed for boot_info in self.boot_index.end_date_map[date.toPyDate()]]
+            crashed = True in [boot_info.journal_incomplete for boot_info in self.boot_index.end_date_map[date.toPyDate()]]
             painter.setBrush(Qt.red if crashed else Qt.lightGray)
             painter.drawEllipse(rect.topLeft() + QPoint(12, 24), 3, 3)
 
