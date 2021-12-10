@@ -2617,13 +2617,14 @@ class QueryJournal(QMainWindow):
         layout.addRow(title_widget)
         self.query_results = []
 
-        self.query_desc_label = QTextEdit()
-        layout.addRow(tr("Query:"), self.query_desc_label)
+        self.query_desc_widget = QTextEdit()
+        self.query_desc_widget.setMaximumHeight(200)
+        layout.addRow(tr("Query:"), self.query_desc_widget)
 
         def row_limit_func(text: str):
             try:
                 self.row_limit = int(text)
-                self.query_desc_label.setText(self.query_description())
+                self.query_desc_widget.setText(self.query_description())
             except ValueError:
                 pass
 
@@ -2637,12 +2638,12 @@ class QueryJournal(QMainWindow):
 
         def picked_from_date_func(datetime: QDateTime):
             self.from_date_time = datetime.toPyDateTime()
-            self.query_desc_label.setText(self.query_description())
+            self.query_desc_widget.setText(self.query_description())
             # to_date_widget.setMinimumDate(datetime)
 
         def picked_to_date_func(datetime: QDateTime):
             self.to_date_time = datetime.toPyDateTime()
-            self.query_desc_label.setText(self.query_description())
+            self.query_desc_widget.setText(self.query_description())
 
         self.boot_index = BootIndex()
         self.from_date_time = self.boot_index.first_entry_datetime
@@ -2664,7 +2665,7 @@ class QueryJournal(QMainWindow):
         layout.addWidget(tab_widget)
 
         def value_checked_func():
-            self.query_desc_label.setText(self.query_description())
+            self.query_desc_widget.setText(self.query_description())
 
         self.boot_picker = QueryBootWidget(self.boot_index, value_checked_func, self)
         tab_widget.addTab(self.boot_picker, "Boot")
@@ -2695,16 +2696,16 @@ class QueryJournal(QMainWindow):
                 field_widget.reset()
             self.row_limit = 0
             self.limit_rows_widget.setText('0')
-            self.query_desc_label.setText(self.query_description())
+            self.query_desc_widget.setText(self.query_description())
 
         reset_button = QPushButton(tr("Reset Query"))
         reset_button.clicked.connect(reset_func)
         button_box_layout.addWidget(reset_button)
         layout.addWidget(button_box)
-        self.query_desc_label.setText(self.query_description())
+        self.query_desc_widget.setText(self.query_description())
         self.setCentralWidget(central)
-        reset_func()
         self.show()
+        reset_func()
 
     def query_description(self):
         row_limit_desc = "RESULT_COUNT <= {}\n    and ".format(self.row_limit) if self.row_limit > 0 else ''
@@ -2852,12 +2853,12 @@ class QueryBootWidget(QWidget):
         self.reset()
 
     def reset(self):
-        self.calendar.set_selected_date(date.today())
         self.boot_table.blockSignals(True)
         for i in range(0, self.boot_table.rowCount()):
             self.boot_table.item(i, 0).setCheckState(Qt.Unchecked)
         self.boot_table.scrollToBottom()
         self.boot_table.blockSignals(False)
+        self.calendar.set_selected_date(date.today())
         self.boot_list = []
 
 
@@ -2872,13 +2873,13 @@ class BootTimelineWidget(QWidget):
         layout = QHBoxLayout()
         self.setLayout(layout)
 
-        calendars_layout = QHBoxLayout(self)
+        timespan_layout = QHBoxLayout(self)
         scroll_area = QScrollArea(self)
         scroll_area.setWidgetResizable(True)
-        container = QWidget(scroll_area)
-        container.setLayout(calendars_layout)
-        scroll_area.setWidget(container)
-        calendars_layout.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
+        timespan_widget = QWidget(scroll_area)
+        timespan_widget.setLayout(timespan_layout)
+        scroll_area.setWidget(timespan_widget)
+        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         layout.addWidget(scroll_area)
         self.scroll_area = scroll_area
 
@@ -2901,20 +2902,21 @@ class BootTimelineWidget(QWidget):
             cal_title_label = big_label(QLabel(f"{cal_date:%B} {cal_date.year}"))
             cal_box_layout.addWidget(cal_title_label)
             cal_box_layout.addWidget(calendar)
-            calendars_layout.addWidget(cal_box)
+            timespan_layout.addWidget(cal_box)
             self.calendar_list.append(calendar)
             cal_date = end_of_month + timedelta(days=1)
+        scroll_area.adjustSize()
+        scroll_area.setFixedHeight(scroll_area.height() + 20)
 
     def get_selected_date(self) -> date:
         return self.selected_date
 
-    def set_selected_date(self, new_date:date) -> None:
+    def set_selected_date(self, new_date: date) -> None:
         for calendar in self.calendar_list:
             cal_start_date = calendar.minimumDate().toPyDate()
             if new_date.year == cal_start_date.year and new_date.month == cal_start_date.month:
-                self.scroll_area.ensureWidgetVisible(calendar)
                 calendar.set_selected_date(new_date)
-
+                self.scroll_area.ensureWidgetVisible(calendar)
 
 class BootCalendar(QCalendarWidget):
     def __init__(self, boot_index: BootIndex, parent=None):
