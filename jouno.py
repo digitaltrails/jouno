@@ -2559,11 +2559,9 @@ class BootIndex:
             with journal.Reader() as reader:
                 reader.this_boot(boot_id)
                 first = reader.get_next()
-                print(first)
                 start_datetime = first['__REALTIME_TIMESTAMP']
                 reader.seek_tail()
                 last = reader.get_previous()
-                print(last)
                 end_datetime = last['__REALTIME_TIMESTAMP']
                 crashed = last['MESSAGE'] != "Journal stopped"
                 info = BootInfo(boot_id, start_datetime, end_datetime, crashed)
@@ -2891,7 +2889,6 @@ class BootTimelineWidget(QWidget):
         cal_date = start_date
         while cal_date <= end_date:
             calendar = BootCalendar(boot_index)
-            print(cal_date)
             end_of_month = date(cal_date.year + int(cal_date.month / 12), (cal_date.month % 12) + 1, 1) - timedelta(days=1)
             calendar.setDateRange(cal_date, end_of_month)
             calendar.setNavigationBarVisible(False)
