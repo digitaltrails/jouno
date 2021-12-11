@@ -1963,8 +1963,8 @@ class MainWindow(QMainWindow):
         def delete_filter() -> None:
             config_panel.delete_filter()
 
-        def view_entire_journal() -> None:
-            journal_viewer = QueryJournalWidget(parent=self)
+        def query_journal() -> None:
+            QueryInitializeWidget(parent=self)
 
         self.config_panel = config_panel = ConfigPanel(tab_change=tab_change, config_change_func=config_change)
         self.config_dock_container = DockContainer(
@@ -2002,7 +2002,7 @@ class MainWindow(QMainWindow):
 
         tool_bar = MainToolBar(
             run_func=toggle_listener, notify_func=toggle_notifier,
-            add_func=add_filter, del_func=delete_filter, journal_viewer_func=view_entire_journal,
+            add_func=add_filter, del_func=delete_filter, journal_viewer_func=query_journal,
             menu=app_context_menu,
             parent=self)
         self.addToolBar(tool_bar)
@@ -2548,8 +2548,12 @@ class JournalEntryDialogPlain(QDialog):
         self.show()
 
 
-class QueryMetaData:
+class QueryMetaData(QThread):
+    finished = pyqtSignal(str)
+    progress = pyqtSignal(str)
+
     def __init__(self):
+        super().__init__()
         self.start_date_map: Mapping[DT.date, QueryBootInfo] = {}
         self.end_date_map: Mapping[DT.date, QueryBootInfo] = {}
         self.first_entry_datetime = None
@@ -2557,52 +2561,63 @@ class QueryMetaData:
         self.boot_sequence_list = []
         self.boot_years = []
         self.unique_field_values = {}
-        self.stop = False
+        self.stopped = False
 
     def run(self) -> None:
-        with journal.Reader() as reader:
-            boot_id_set = reader.query_unique("_BOOT_ID")
-        for boot_id in boot_id_set:
+        boot_count = 0
+        try:
+            self.progress.emit(tr("Getting boot data.."))
             with journal.Reader() as reader:
-                if self.stop:
+                boot_id_set = reader.query_unique("_BOOT_ID")
+            for boot_id in boot_id_set:
+                with journal.Reader() as reader:
+                    if self.stopped:
+                        return
+                    reader.this_boot(boot_id)
+                    first = reader.get_next()
+                    start_datetime = first['__REALTIME_TIMESTAMP']
+                    reader.seek_tail()
+                    last = reader.get_previous()
+                    end_datetime = last['__REALTIME_TIMESTAMP']
+                    journal_incomplete = last['MESSAGE'] != "Journal stopped"
+                    info = QueryBootInfo(boot_id, start_datetime, end_datetime, journal_incomplete)
+                    start_date = start_datetime.date()
+                    end_date = end_datetime.date()
+                    if start_date.year not in self.boot_years:
+                        self.boot_years.append(start_date.year)
+                    if start_date not in self.start_date_map:
+                        self.start_date_map[start_date] = []
+                    if end_date not in self.end_date_map:
+                        self.end_date_map[end_date] = []
+                    self.start_date_map[start_datetime.date()].append(info)
+                    self.end_date_map[end_datetime.date()].append(info)
+                    boot_count += 1
+                    if int(time.time() * 1000) % 500 == 0:
+                        self.progress.emit(tr("Retrieved {} boot details, continuing..").format(boot_count))
+            for sublist in self.start_date_map.values():
+                self.boot_sequence_list.extend(sublist)
+            self.boot_sequence_list.sort(key=lambda boot_info: boot_info.start_datetime)
+            # Incomplete because it's still being written to:
+            self.boot_sequence_list[-1].journal_incomplete = False
+            self.first_entry_datetime = self.boot_sequence_list[0].start_datetime
+            self.last_entry_datetime = self.boot_sequence_list[-1].end_datetime
+            self.boot_years.sort()
+            for i, boot_info in enumerate(self.boot_sequence_list):
+                boot_info.boot_number = i
+            for field_name in ['_UID', '_GID', 'QT_CATEGORY', 'PRIORITY', 'SYSLOG_IDENTIFIER', '_COM', '_EXE', '_HOSTNAME']:
+                if self.stopped:
                     return
-                reader.this_boot(boot_id)
-                first = reader.get_next()
-                start_datetime = first['__REALTIME_TIMESTAMP']
-                reader.seek_tail()
-                last = reader.get_previous()
-                end_datetime = last['__REALTIME_TIMESTAMP']
-                journal_incomplete = last['MESSAGE'] != "Journal stopped"
-                info = QueryBootInfo(boot_id, start_datetime, end_datetime, journal_incomplete)
-                start_date = start_datetime.date()
-                end_date = end_datetime.date()
-                if start_date.year not in self.boot_years:
-                    self.boot_years.append(start_date.year)
-                if start_date not in self.start_date_map:
-                    self.start_date_map[start_date] = []
-                if end_date not in self.end_date_map:
-                    self.end_date_map[end_date] = []
-                self.start_date_map[start_datetime.date()].append(info)
-                self.end_date_map[end_datetime.date()].append(info)
-        for sublist in self.start_date_map.values():
-            self.boot_sequence_list.extend(sublist)
-        self.boot_sequence_list.sort(key=lambda boot_info: boot_info.start_datetime)
-        # Incomplete because it's still being written to:
-        self.boot_sequence_list[-1].journal_incomplete = False
-        self.first_entry_datetime = self.boot_sequence_list[0].start_datetime
-        self.last_entry_datetime = self.boot_sequence_list[-1].end_datetime
-        self.boot_years.sort()
-        for i, boot_info in enumerate(self.boot_sequence_list):
-            boot_info.boot_number = i
-        for field_name in ['_UID', '_GID', 'QT_CATEGORY', 'PRIORITY', 'SYSLOG_IDENTIFIER', '_COM', '_EXE', '_HOSTNAME']:
-            if self.stop:
-                return
-            with journal.Reader() as reader:
-                values_set = reader.query_unique(field_name)
-            values_list = [QueryFieldValue(field_name, v) for v in values_set]
-            values_list.sort(key=lambda v: v.sort_key)
-            self.unique_field_values[field_name] = values_list
+                with journal.Reader() as reader:
+                    values_set = reader.query_unique(field_name)
+                values_list = [QueryFieldValue(field_name, v) for v in values_set]
+                values_list.sort(key=lambda v: v.sort_key)
+                self.progress.emit(tr("Retrieved {} unique values for {}").format(len(values_list), field_name))
+                self.unique_field_values[field_name] = values_list
+        finally:
+            self.finished.emit(tr("Retrieved {} boot details.") if not self.stopped else "Abandoned retrieval.")
 
+    def stop(self):
+        self.stopped = True
 
 class QueryBootInfo:
     def __init__(self, boot_id, start_datetime: DT.datetime, end_datetime: DT.datetime, journal_incomplete: bool):
@@ -2629,12 +2644,45 @@ class QueryFieldValue:
         self.sort_key = sort_key
 
 
-class QueryJournalWidget(QMainWindow):
+class QueryInitializeWidget(QProgressDialog):
     def __init__(self, parent: MainWindow):
+        super().__init__(tr("Retrieving Journal Metadata"), tr("Cancel"), 0, 10, parent=parent)
+        self.setFixedHeight(200)
+        self.setFixedWidth(800)
+        layout = QVBoxLayout()
+        layout.setAlignment(Qt.AlignHCenter)
+        self.setLayout(layout)
+        status_label = QLabel()
+        layout.addWidget(status_label)
+        self.step = 0
+
+        def progress_func(message: str):
+            status_label.setText(message)
+            self.step += 1
+            self.setValue(self.step)
+
+        def finished_func(message: str):
+            if not query_metadata.stopped:
+                QueryJournalWidget(query_metadata, parent)
+            self.close()
+
+        query_metadata = QueryMetaData()
+        query_metadata.progress.connect(progress_func)
+        query_metadata.finished.connect(finished_func)
+        self.canceled.connect(query_metadata.stop)
+        query_metadata.start()
+        self.show()
+        self.raise_()
+        self.activateWindow()
+
+
+class QueryJournalWidget(QMainWindow):
+    def __init__(self, query_meta_data: QueryMetaData, parent: MainWindow):
         super().__init__(parent=parent)
         self.main_window = parent
         self.setObjectName("journal-query")
 
+        self.journal_meta_data = query_meta_data
         self.query_task = None
 
         central = QWidget()
@@ -2679,9 +2727,6 @@ class QueryJournalWidget(QMainWindow):
         def picked_to_date_func(picked_datetime: QDateTime):
             self.to_date_time = picked_datetime.toPyDateTime()
             self.query_desc_widget.setText(self.query_description())
-
-        self.journal_meta_data = QueryMetaData()
-        self.journal_meta_data.run()
 
         self.from_date_time = self.journal_meta_data.first_entry_datetime
         self.to_date_time = self.journal_meta_data.last_entry_datetime
