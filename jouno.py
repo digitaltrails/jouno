@@ -1690,7 +1690,7 @@ class MainToolBar(QToolBar):
         self.icon_run_stop = get_icon(SVG_TOOLBAR_STOP)
         self.icon_add_filter = get_icon(SVG_TOOLBAR_ADD_FILTER)
         self.icon_del_filter = get_icon(SVG_TOOLBAR_DEL_FILTER)
-        self.icon_journal_viewer = get_icon(SVG_TOOLBAR_JOURNAL_QUERY)
+        self.icon_query_journal = get_icon(SVG_TOOLBAR_JOURNAL_QUERY)
         self.icon_menu = get_icon(SVG_TOOLBAR_HAMBURGER_MENU)
 
         self.run_action = self.addAction(self.icon_run_enabled, "run", run_func)
@@ -1738,10 +1738,10 @@ class MainToolBar(QToolBar):
         spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         self.addWidget(spacer)
 
-        self.journal_viewer_action = self.addAction(self.icon_journal_viewer, "del", journal_viewer_func)
-        self.journal_viewer_action.setObjectName("journal_button")
-        self.journal_viewer_action.setIconText(tr("Journal"))
-        self.journal_viewer_action.setToolTip(tr("View/search entire journal."))
+        self.qurry_journal_action = self.addAction(self.icon_query_journal, "del", journal_viewer_func)
+        self.qurry_journal_action.setObjectName("journal_button")
+        self.qurry_journal_action.setIconText(tr("Journal"))
+        self.qurry_journal_action.setToolTip(tr("View/search entire journal."))
 
         self.addSeparator()
 
@@ -1762,8 +1762,9 @@ class MainToolBar(QToolBar):
         self.icon_run_stop = get_icon(SVG_TOOLBAR_STOP)
         self.icon_add_filter = get_icon(SVG_TOOLBAR_ADD_FILTER)
         self.icon_del_filter = get_icon(SVG_TOOLBAR_DEL_FILTER)
-        self.icon_journal_viewer = get_icon(SVG_TOOLBAR_JOURNAL_QUERY)
+        self.icon_query_journal = get_icon(SVG_TOOLBAR_JOURNAL_QUERY)
         self.icon_menu = get_icon(SVG_TOOLBAR_HAMBURGER_MENU)
+
 
     def eventFilter(self, target: QObject, event: QEvent) -> bool:
         super().eventFilter(target, event)
@@ -1774,6 +1775,7 @@ class MainToolBar(QToolBar):
             self.stop_action.setIcon(self.icon_run_stop)
             self.add_filter_action.setIcon(self.icon_add_filter)
             self.del_filter_action.setIcon(self.icon_del_filter)
+            self.qurry_journal_action.setIcon(self.icon_query_journal)
             self.menu_button.setIcon(self.icon_menu)
         event.accept()
         return True
@@ -2920,39 +2922,44 @@ class QueryJournalTask(QThread):
         self.stopped = True
 
 class QueryBootWidget(QWidget):
-    def __init__(self, boot_index: QueryMetaData, boot_picked_func: Callable, parent: QWidget):
+    def __init__(self, journal_metadata: QueryMetaData, boot_picked_func: Callable, parent: QWidget):
         super().__init__(parent=parent)
         self.boot_list = []
-        self.boot_index = boot_index
+        self.journal_metadata = journal_metadata
         layout = QVBoxLayout()
         self.setLayout(layout)
 
         def calendar_selection_changed_func():
             boot_table.clearSelection()
             selected_date = calendar.get_selected_date()
-            if selected_date in boot_index.start_date_map:
-                row_num = boot_index.start_date_map[selected_date][0].boot_number
+            if selected_date in journal_metadata.start_date_map:
+                row_num = journal_metadata.start_date_map[selected_date][0].boot_number
                 boot_table.scrollToItem(boot_table.item(row_num, 0), QAbstractItemView.PositionAtTop)
                 #boot_table.clearSelection()
-                for day_boot in boot_index.start_date_map[selected_date]:
+                for day_boot in journal_metadata.start_date_map[selected_date]:
                     boot_table.item(day_boot.boot_number,0).setCheckState(Qt.Checked)
 
         #calendar = BootCalendar(boot_index)
-        calendar = QueryBootTimelineWidget(boot_index=boot_index, parent=self)
+        calendar = QueryBootTimelineWidget(boot_index=journal_metadata, parent=self)
 
         #calendar.setSizePolicy(QSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed))
         layout.addWidget(calendar, 0, Qt.AlignTop)
         calendar.selection_changed.connect(calendar_selection_changed_func)
         self.calendar = calendar
 
-        boot_table = QTableWidget(len(boot_index.boot_sequence_list) , 4, self)
+        self.row_color_light_theme = QColor(0xfcfcfc), QColor(0xf1f1f1), QColor(0xffdcdc)
+        self.row_color_dark_theme = QColor(0x1b1b1b), QColor(0x2e2e2e), QColor(0x550000)
+        self.row_color_theme = self.row_color_dark_theme if is_dark_theme() else self.row_color_light_theme
+        self.row_bg_color = self.row_color_theme[0]
+
+        boot_table = QTableWidget(len(journal_metadata.boot_sequence_list), 4, self)
         boot_table.setSelectionMode(QTableWidget.SelectionMode.MultiSelection)
         boot_table.setHorizontalHeaderLabels(["Start", "End", "State", "BOOT_ID"])
         boot_table.sizePolicy().setVerticalStretch(10)
         boot_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
 
         def cell_changed_func(row: int, col: int):
-            cell_boot_info = boot_index.boot_sequence_list[row]
+            cell_boot_info = journal_metadata.boot_sequence_list[row]
             boot_id = cell_boot_info.boot_id
             calendar.set_selected_date(cell_boot_info.start_datetime.date(), block_signals=True)
             item = boot_table.item(row, col)
@@ -2966,16 +2973,11 @@ class QueryBootWidget(QWidget):
 
         header = boot_table.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.ResizeToContents)
-        current_date = boot_index.boot_sequence_list[0].start_datetime.date()
-        bg1 = QColor(0xfcfcfc)
-        bg2 = QColor(0xf1f1f1)#QColor(0xf0f9ff)
-        bg_crash = QColor(0xffdcdc)
-        bg = bg1
-        for i, boot_info in enumerate(boot_index.boot_sequence_list):
-            if boot_info.start_datetime.date() != current_date:
-                bg = bg2 if bg == bg1 else bg1
-                current_date = boot_info.start_datetime.date()
-            row_bg = bg_crash if boot_info.journal_incomplete else bg
+        previous_boot_date = journal_metadata.boot_sequence_list[0].start_datetime.date()
+
+        for i, boot_info in enumerate(journal_metadata.boot_sequence_list):
+            row_bg = self.choose_row_color(boot_info, previous_boot_date)
+            previous_boot_date = boot_info.start_datetime.date()
             start_datetime_item = QTableWidgetItem(f"{boot_info.start_datetime:%y-%m-%d %H:%M}")
             start_datetime_item.setFlags(Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
             start_datetime_item.setCheckState(Qt.Unchecked)
@@ -2995,12 +2997,33 @@ class QueryBootWidget(QWidget):
         self.boot_table = boot_table
         self.reset()
 
+    def choose_row_color(self, boot_info: QueryBootInfo, previous_boot_date: DT.date):
+        if boot_info.journal_incomplete:
+            return self.row_color_theme[2]
+        if boot_info.start_datetime.date() != previous_boot_date:
+            self.row_bg_color = self.row_color_theme[1] if self.row_bg_color == self.row_color_theme[0] else self.row_color_theme[0]
+        return self.row_bg_color
+
     def reset(self):
         for i in range(0, self.boot_table.rowCount()):
             self.boot_table.item(i, 0).setCheckState(Qt.Unchecked)
         self.boot_table.scrollToBottom()
         self.calendar.set_selected_date(DT.date.today(), block_signals=True)
         self.boot_list = []
+
+    def event(self, event: QEvent) -> bool:
+        super().event(event)
+        # PalletChange happens after the new style sheet is in use.
+        if event.type() == QEvent.PaletteChange:
+            self.row_color_theme = self.row_color_dark_theme if is_dark_theme() else self.row_color_light_theme
+            previous_boot_date = self.journal_metadata.boot_sequence_list[0].start_datetime.date()
+            for i, boot_info in enumerate(self.journal_metadata.boot_sequence_list):
+                for j in range(0, self.boot_table.columnCount()):
+                    item = self.boot_table.item(i, j)
+                    item.setBackground(self.choose_row_color(boot_info, previous_boot_date))
+                    previous_boot_date = boot_info.start_datetime.date()
+        event.accept()
+        return True
 
 
 class QueryBootTimelineWidget(QWidget):
