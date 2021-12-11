@@ -2606,7 +2606,8 @@ class QueryMetaData(QThread):
             self.boot_years.sort()
             for i, boot_info in enumerate(self.boot_sequence_list):
                 boot_info.boot_number = i
-            for field_name in ['_UID', '_GID', 'QT_CATEGORY', 'PRIORITY', 'SYSLOG_IDENTIFIER', '_COM', '_EXE', '_HOSTNAME']:
+            for field_name in ['_UID', '_GID', 'QT_CATEGORY', 'PRIORITY', 'SYSLOG_IDENTIFIER',
+                               '_COM', '_EXE', '_HOSTNAME', 'COREDUMP_COMM', 'COREDUMP_EXE']:
                 if self.stopped:
                     return
                 with journal.Reader() as reader:
@@ -2776,12 +2777,12 @@ class QueryJournalWidget(QMainWindow):
         self.stop_button.setEnabled(False)
         button_box_layout.addWidget(self.stop_button)
 
-        def reset_func():
+        def reset_func(initialization: bool=False):
             self.from_date_time = self.journal_meta_data.first_entry_datetime
             self.to_date_time = self.journal_meta_data.last_entry_datetime
             from_date_widget.setDateTime(self.from_date_time)
             to_date_widget.setDateTime(self.to_date_time)
-            self.boot_picker.reset()
+            self.boot_picker.reset(initialization=initialization)
             for field_widget in self.field_query_widget_list:
                 field_widget.reset()
             self.row_limit = 0
@@ -2797,7 +2798,7 @@ class QueryJournalWidget(QMainWindow):
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
         self.show()
-        reset_func()
+        reset_func(initialization=True)
 
     def query_description(self):
         row_limit_desc = "RESULT_COUNT <= {}\n    and ".format(self.row_limit) if self.row_limit > 0 else ''
@@ -2929,22 +2930,20 @@ class QueryBootWidget(QWidget):
         layout = QVBoxLayout()
         self.setLayout(layout)
 
-        def calendar_selection_changed_func():
+        def calendar_activated_func(date:QDate):
             boot_table.clearSelection()
-            selected_date = calendar.get_selected_date()
-            if selected_date in journal_metadata.start_date_map:
-                row_num = journal_metadata.start_date_map[selected_date][0].boot_number
+            picked_date = date.toPyDate()
+            if picked_date in journal_metadata.start_date_map:
+                row_num = journal_metadata.start_date_map[picked_date][0].boot_number
                 boot_table.scrollToItem(boot_table.item(row_num, 0), QAbstractItemView.PositionAtTop)
                 #boot_table.clearSelection()
-                for day_boot in journal_metadata.start_date_map[selected_date]:
-                    boot_table.item(day_boot.boot_number,0).setCheckState(Qt.Checked)
+                for day_boot in journal_metadata.start_date_map[picked_date]:
+                    item = boot_table.item(day_boot.boot_number, 0)
+                    item.setCheckState(Qt.Checked if item.checkState() != Qt.Checked else Qt.Unchecked)
 
-        #calendar = BootCalendar(boot_index)
         calendar = QueryBootTimelineWidget(boot_index=journal_metadata, parent=self)
-
-        #calendar.setSizePolicy(QSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed))
         layout.addWidget(calendar, 0, Qt.AlignTop)
-        calendar.selection_changed.connect(calendar_selection_changed_func)
+        calendar.activated.connect(calendar_activated_func)
         self.calendar = calendar
 
         self.row_color_light_theme = QColor(0xfcfcfc), QColor(0xf1f1f1), QColor(0xffdcdc)
@@ -2993,6 +2992,7 @@ class QueryBootWidget(QWidget):
             boot_table.setItem(i, 2, crashed_item)
             boot_table.setItem(i, 3, boot_id_item)
         layout.addWidget(boot_table, Qt.AlignTop)
+        calendar.set_selected_date(DT.date.today(), block_signals=True)
         boot_table.cellChanged.connect(cell_changed_func)
         self.boot_table = boot_table
         self.reset()
@@ -3004,11 +3004,12 @@ class QueryBootWidget(QWidget):
             self.row_bg_color = self.row_color_theme[1] if self.row_bg_color == self.row_color_theme[0] else self.row_color_theme[0]
         return self.row_bg_color
 
-    def reset(self):
+    def reset(self, initialization:bool = False):
         for i in range(0, self.boot_table.rowCount()):
             self.boot_table.item(i, 0).setCheckState(Qt.Unchecked)
         self.boot_table.scrollToBottom()
-        self.calendar.set_selected_date(DT.date.today(), block_signals=True)
+        if initialization:
+            self.calendar.set_selected_date(DT.date.today(), block_signals=True)
         self.boot_list = []
 
     def event(self, event: QEvent) -> bool:
@@ -3027,7 +3028,7 @@ class QueryBootWidget(QWidget):
 
 
 class QueryBootTimelineWidget(QWidget):
-    selection_changed = pyqtSignal()
+    activated = pyqtSignal(QDate)
 
     def __init__(self, boot_index: QueryMetaData, parent: QWidget):
         super().__init__(parent=parent)
@@ -3047,9 +3048,8 @@ class QueryBootTimelineWidget(QWidget):
         layout.addWidget(scroll_area)
         self.scroll_area = scroll_area
 
-        def selection_changed_func():
-            self.selected_date = self.sender().selectedDate().toPyDate()
-            self.selection_changed.emit()
+        def activated_func(date:QDate):
+            self.activated.emit(date)
 
         self.calendar_list = []
         cal_date = start_date
@@ -3058,7 +3058,7 @@ class QueryBootTimelineWidget(QWidget):
             end_of_month = DT.date(cal_date.year + int(cal_date.month / 12), (cal_date.month % 12) + 1, 1) - DT.timedelta(days=1)
             calendar.setDateRange(cal_date, end_of_month)
             calendar.setNavigationBarVisible(False)
-            calendar.selectionChanged.connect(selection_changed_func)
+            calendar.activated.connect(activated_func)
             cal_box = QWidget()
             cal_box_layout = QVBoxLayout()
             cal_box.setLayout(cal_box_layout)
@@ -3087,9 +3087,11 @@ class QueryBootTimelineWidget(QWidget):
 
 
 class QueryBootCalendar(QCalendarWidget):
+
     def __init__(self, boot_index: QueryMetaData, parent=None):
         super().__init__(parent)
         self.boot_index = boot_index
+        self.small_font = None
 
     def get_selected_date(self):
         return self.selectedDate().toPyDate()
@@ -3099,13 +3101,32 @@ class QueryBootCalendar(QCalendarWidget):
 
     def paintCell(self, painter, rect, date):
         super().paintCell(painter, rect, date)
-        if date.toPyDate() in self.boot_index.start_date_map:
+        py_date = date.toPyDate()
+        if py_date in self.boot_index.start_date_map:
+            boot_count = len(self.boot_index.start_date_map[py_date])
+            if self.small_font is None:
+                self.small_font = painter.font()
+                self.small_font.setPointSize(self.small_font.pointSize() - 2)
+            f, p, b = painter.font(), painter.pen(), painter.brush()
+            painter.setFont(self.small_font)
+            painter.drawText(rect.topLeft() + QPoint(16, 12), str(boot_count))
             painter.setBrush(Qt.green)
+            painter.setPen(Qt.green)
             painter.drawEllipse(rect.topLeft() + QPoint(12, 8), 3, 3)
-        if date.toPyDate() in self.boot_index.end_date_map:
-            crashed = True in [boot_info.journal_incomplete for boot_info in self.boot_index.end_date_map[date.toPyDate()]]
+            painter.setFont(f)
+            painter.setPen(p)
+            painter.setBrush(b)
+
+        if py_date in self.boot_index.end_date_map:
+            shutdowns_on_date = self.boot_index.end_date_map[py_date]
+            crashed = True in [boot_info.journal_incomplete for boot_info in shutdowns_on_date]
+            f, p, b = painter.font(), painter.pen(), painter.brush()
             painter.setBrush(Qt.red if crashed else Qt.lightGray)
+            painter.setPen(Qt.red if crashed else Qt.lightGray)
             painter.drawEllipse(rect.topLeft() + QPoint(12, 24), 3, 3)
+            painter.setFont(f)
+            painter.setPen(p)
+            painter.setBrush(b)
 
 
 class QueryFieldWidget(QGroupBox):
