@@ -10,6 +10,8 @@ Description
 
 ![Default](screen-shots/Screenshot_Large.png) 
 
+![Default](screen-shots/query_interface.png) 
+
 ``Jouno`` is a GUI *Systemd-Journal* monitoring and viewing tool.  Jouno can filter and bundle messages for
 forwarding to the desktop as standard *DBUS Freedesktop Notifications* (most linux desktop environments present 
 DBUS Notifications as popup messages). Jouno's feature set includes:
@@ -29,6 +31,12 @@ DBUS Notifications as popup messages). Jouno's feature set includes:
    + Filters may be edited, deleted, reordered, or selectively enabled or disabled.
    + Filter editing feedback via incremental-search of past journal entries as you edit.
    + Filters are saved to the config file and reloaded at startup.
+ * Journal query interface
+   + View/query current and past boots
+   + Boot timeline calendar marked with boots, shutdowns, and shutdowns with incomplete journals (crashes).
+   + Query refinement criteria including _BOOT_ID, _UID, _GID, QT_CATEGORY, SYSLOG_IDENTIFIER,
+     _COM, _EXE, and _HOSTNAME (with helpful displays of values that actually occur in the journal).
+   + Efficient queries using sd-journal API (via python systemd-journal)
  * User interface and configuration
    + Panels undock for maximised or customised viewing.
    + Customised panel and window geometries are saved across application-restart and panel-docking.
