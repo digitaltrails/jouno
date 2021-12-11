@@ -2949,6 +2949,7 @@ class QueryBootWidget(QWidget):
         boot_table.setSelectionMode(QTableWidget.SelectionMode.MultiSelection)
         boot_table.setHorizontalHeaderLabels(["Start", "End", "State", "BOOT_ID"])
         boot_table.sizePolicy().setVerticalStretch(10)
+        boot_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
 
         def cell_changed_func(row: int, col: int):
             cell_boot_info = boot_index.boot_sequence_list[row]
