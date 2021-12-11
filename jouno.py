@@ -2653,6 +2653,7 @@ class QueryJournalWidget(QMainWindow):
 
         self.query_desc_widget = QTextEdit()
         self.query_desc_widget.setMaximumHeight(200)
+        self.query_desc_widget.setReadOnly(True)
         layout.addRow(tr("Query:"), self.query_desc_widget)
 
         def row_limit_func(text: str):
@@ -2716,9 +2717,17 @@ class QueryJournalWidget(QMainWindow):
         button_box = QWidget()
         button_box_layout = QHBoxLayout()
         button_box.setLayout(button_box_layout)
-        self.run_query_button = QPushButton(tr("Run Query"))
+        self.run_query_button = QPushButton(get_icon(SVG_TOOLBAR_RUN_ENABLED), tr("Run Query"))
         self.run_query_button.clicked.connect(self.perform_query)
         button_box_layout.addWidget(self.run_query_button)
+
+        def stop_func():
+            self.query_task.stop()
+
+        self.stop_button = QPushButton(get_icon(SVG_TOOLBAR_STOP), tr("Stop Query"))
+        self.stop_button.clicked.connect(stop_func)
+        self.stop_button.setEnabled(False)
+        button_box_layout.addWidget(self.stop_button)
 
         def reset_func():
             self.from_date_time = self.journal_meta_data.first_entry_datetime
@@ -2732,7 +2741,7 @@ class QueryJournalWidget(QMainWindow):
             self.limit_rows_widget.setText('0')
             self.query_desc_widget.setText(self.query_description())
 
-        reset_button = QPushButton(tr("Reset Query"))
+        reset_button = QPushButton(get_icon(ICON_REVERT), tr("Reset Query"))
         reset_button.clicked.connect(reset_func)
         button_box_layout.addWidget(reset_button)
         layout.addWidget(button_box)
@@ -2764,6 +2773,7 @@ class QueryJournalWidget(QMainWindow):
         return row_limit_desc + time_desc + boot_desc + field_desc
 
     def perform_query(self):
+        self.stop_button.setEnabled(True)
         self.run_query_button.setDisabled(True)
         self.query_task = QueryJournalTask(
             from_datetime=self.from_date_time, to_datetime=self.to_date_time,
@@ -2779,7 +2789,9 @@ class QueryJournalWidget(QMainWindow):
         self.query_task.start()
 
     def query_finished(self, number_of_matches: int):
-        self.status_bar.showMessage(tr("Retrieved {} entries, creating view.."), 5000)
+        self.stop_button.setEnabled(False)
+        self.status_bar.showMessage(tr("Retrieved {} entries, creating view..").format(number_of_matches), 5000)
+        QApplication.processEvents()
         if not self.query_task.stopped:
             query_result = QWidget()
             query_layout = QVBoxLayout()
@@ -2850,7 +2862,7 @@ class QueryJournalTask(QThread):
                     if journal_entry_date_time > self.to_datetime:
                         break
                     number_of_matches += 1
-                    if number_of_matches % 1000 == 0:
+                    if int(time.time() * 1000) % 1000 == 0:
                         self.progress.emit(number_of_matches)
                     consolidate_text(journal_entry)
                     self.results.append(journal_entry)
@@ -2896,9 +2908,7 @@ class QueryBootWidget(QWidget):
         def cell_changed_func(row: int, col: int):
             cell_boot_info = boot_index.boot_sequence_list[row]
             boot_id = cell_boot_info.boot_id
-            self.blockSignals(True)
-            calendar.set_selected_date(cell_boot_info.start_datetime.date())
-            self.blockSignals(False)
+            calendar.set_selected_date(cell_boot_info.start_datetime.date(), block_signals=True)
             item = boot_table.item(row, col)
             if item.checkState() == Qt.Checked:
                 if boot_id not in self.boot_list:
@@ -2940,12 +2950,10 @@ class QueryBootWidget(QWidget):
         self.reset()
 
     def reset(self):
-        self.boot_table.blockSignals(True)
         for i in range(0, self.boot_table.rowCount()):
             self.boot_table.item(i, 0).setCheckState(Qt.Unchecked)
         self.boot_table.scrollToBottom()
-        self.boot_table.blockSignals(False)
-        self.calendar.set_selected_date(DT.date.today())
+        self.calendar.set_selected_date(DT.date.today(), block_signals=True)
         self.boot_list = []
 
 
@@ -2997,12 +3005,16 @@ class QueryBootTimelineWidget(QWidget):
     def get_selected_date(self) -> DT.date:
         return self.selected_date
 
-    def set_selected_date(self, new_date: DT.date) -> None:
+    def set_selected_date(self, new_date: DT.date, block_signals: bool = False) -> None:
         for calendar in self.calendar_list:
             cal_start_date = calendar.minimumDate().toPyDate()
             if new_date.year == cal_start_date.year and new_date.month == cal_start_date.month:
+                if block_signals:
+                    calendar.blockSignals(True)
                 calendar.set_selected_date(new_date)
                 self.scroll_area.ensureWidgetVisible(calendar)
+                if block_signals:
+                    calendar.blockSignals(False)
 
 
 class QueryBootCalendar(QCalendarWidget):
