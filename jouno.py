@@ -913,12 +913,12 @@ class JournalWatcher:
 
     def load_past_entries(self, journal_reader):
         data = []
-        if self.max_historical_entries != 0:
+        if self.from_boot_enabled:
+            journal_reader.this_boot()
+        elif self.max_historical_entries != 0:
             journal_reader.add_match()
             journal_reader.seek_tail()
             journal_reader.get_next(-self.max_historical_entries - 1)
-        elif self.from_boot_enabled:
-            journal_reader.this_boot()
         else:
             self.supervisor.deliver_historical_entries([])
             return
@@ -929,6 +929,8 @@ class JournalWatcher:
             if notable or self.forward_all:
                 results.append((journal_entry, notable,))
                 count += 1
+                if self.max_historical_entries != 0 and count > self.max_historical_entries:
+                    results.pop(0)
                 if int(time.time() * 1000) % 1000 == 0:
                     self.supervisor.report_progress(count)
         self.supervisor.deliver_historical_entries(results)
@@ -2020,7 +2022,7 @@ class MainWindow(QMainWindow):
             self.journal_panel.new_journal_entry(None, False)
 
         def process_progress(count:int):
-            self.journal_panel.journal_status_bar.showMessage(tr("Retrieved {} entries").format(count))
+            self.journal_panel.journal_status_bar.showMessage(tr("Scanned {} entries").format(count))
 
         journal_watcher_task.signal_new_entry.connect(new_journal_entry)
         journal_watcher_task.signal_historical_entries.connect(process_historical_entries)
