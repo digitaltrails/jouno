@@ -260,6 +260,7 @@ with this program. If not, see <https://www.gnu.org/licenses/>.
 
 import argparse
 import configparser
+import datetime as DT
 import grp
 import os
 import pwd
@@ -271,7 +272,6 @@ import sys
 import textwrap
 import time
 import traceback
-import datetime as DT
 from enum import Enum
 from functools import partial
 from html import escape
@@ -283,16 +283,15 @@ import dbus
 from PyQt5.QtCore import QCoreApplication, QProcess, Qt, pyqtSignal, QThread, QModelIndex, QItemSelectionModel, QSize, \
     QEvent, QSettings, QObject, QItemSelection, QPoint, QDateTime, QDate
 from PyQt5.QtGui import QPixmap, QIcon, QImage, QPainter, QStandardItemModel, QStandardItem, QIntValidator, \
-    QFontDatabase, QGuiApplication, QCloseEvent, QPalette, QTextCursor, QResizeEvent, QColor
+    QFontDatabase, QGuiApplication, QCloseEvent, QPalette, QTextCursor, QColor
 from PyQt5.QtSvg import QSvgRenderer
 from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QMessageBox, QLineEdit, QLabel, \
     QPushButton, QSystemTrayIcon, QMenu, QTextEdit, QDialog, QTabWidget, \
     QCheckBox, QGridLayout, QTableView, \
     QAbstractItemView, QHeaderView, QMainWindow, QSizePolicy, QStyledItemDelegate, QToolBar, QDockWidget, \
     QHBoxLayout, QStyleFactory, QToolButton, QScrollArea, QLayout, QStatusBar, QDateTimeEdit, QCalendarWidget, \
-    QFormLayout, QGroupBox, QSpacerItem, QComboBox, QListWidget, QListWidgetItem, QTableWidgetItem, QTableWidget, \
+    QFormLayout, QGroupBox, QSpacerItem, QTableWidgetItem, QTableWidget, \
     QProgressDialog
-from PyQt5.uic.properties import QtWidgets
 from systemd import journal
 
 JOUNO_VERSION = '1.2.0'
@@ -505,7 +504,7 @@ with this program. If not, see <a href="https://www.gnu.org/licenses/">https://w
 """
 
 DEFAULT_QUERY_FIELDS = ['_UID', '_GID', 'QT_CATEGORY', 'PRIORITY', 'SYSLOG_IDENTIFIER',
-                        '_COM', '_EXE', '_HOSTNAME', 'COREDUMP_COMM', 'COREDUMP_EXE']
+                        '_COM', '_EXE', 'COREDUMP_COMM', 'COREDUMP_EXE', '_HOSTNAME',]
 
 DEFAULT_CONFIG = f'''
 [options]
