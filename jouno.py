@@ -2627,9 +2627,11 @@ class QueryMetaData(QThread):
                     boot_count += 1
                     if int(time.time() * 1000) % 500 == 0:
                         self.progress.emit(tr("Retrieved {} boot details, continuing..").format(boot_count))
+
             for sublist in self.start_date_map.values():
+                sublist.sort(key=lambda b: b.start_datetime)
                 self.boot_sequence_list.extend(sublist)
-            self.boot_sequence_list.sort(key=lambda boot_info: boot_info.start_datetime)
+            self.boot_sequence_list.sort(key=lambda b: b.start_datetime)
             # Incomplete because it's still being written to:
             self.boot_sequence_list[-1].journal_incomplete = False
             self.first_entry_datetime = self.boot_sequence_list[0].start_datetime
@@ -2962,14 +2964,15 @@ class QueryBootWidget(QWidget):
         layout = QVBoxLayout()
         self.setLayout(layout)
 
-        def calendar_activated_func(date:QDate):
+        def calendar_activated_func(date: QDate):
             boot_table.clearSelection()
             picked_date = date.toPyDate()
             if picked_date in journal_metadata.start_date_map:
                 row_num = journal_metadata.start_date_map[picked_date][0].boot_number
                 boot_table.scrollToItem(boot_table.item(row_num, 0), QAbstractItemView.PositionAtTop)
                 #boot_table.clearSelection()
-                for day_boot in journal_metadata.start_date_map[picked_date]:
+                # Reverse order so that the first in list remains visible in the view.
+                for day_boot in journal_metadata.start_date_map[picked_date][::-1]:
                     item = boot_table.item(day_boot.boot_number, 0)
                     item.setCheckState(Qt.Checked if item.checkState() != Qt.Checked else Qt.Unchecked)
 
@@ -3139,11 +3142,12 @@ class QueryBootCalendar(QCalendarWidget):
         if py_date in self.boot_index.start_date_map:
             boot_count = len(self.boot_index.start_date_map[py_date])
             painter.save()
-            if self.small_font is None:
-                self.small_font = painter.font()
-                self.small_font.setPointSize(self.small_font.pointSize() - 2)
-            painter.setFont(self.small_font)
-            painter.drawText(rect.topLeft() + QPoint(16, 12), str(boot_count))
+            if boot_count > 1:
+                if self.small_font is None:
+                    self.small_font = painter.font()
+                    self.small_font.setPointSize(self.small_font.pointSize() - 2)
+                painter.setFont(self.small_font)
+                painter.drawText(rect.topLeft() + QPoint(16, 12), str(boot_count))
             painter.setBrush(Qt.green)
             painter.setPen(Qt.green)
             painter.drawEllipse(rect.topLeft() + QPoint(12, 8), 3, 3)
@@ -3153,7 +3157,6 @@ class QueryBootCalendar(QCalendarWidget):
             shutdowns_on_date = self.boot_index.end_date_map[py_date]
             crashed = True in [boot_info.journal_incomplete for boot_info in shutdowns_on_date]
             painter.save()
-            f, p, b = painter.font(), painter.pen(), painter.brush()
             painter.setBrush(Qt.red if crashed else Qt.lightGray)
             painter.setPen(Qt.red if crashed else Qt.lightGray)
             painter.drawEllipse(rect.topLeft() + QPoint(12, 24), 3, 3)
