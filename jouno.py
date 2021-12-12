@@ -2221,8 +2221,15 @@ class JournalPanel(DockableWidget):
                 row = self.table_view.model().rowCount() - 1
                 self.journal_status_bar.showMessage(tr("Viewing last entry."), 5000)
             if row >= 0:
-                entry_dialog = JournalEntryDialogPlain(self, self.table_view.model().get_journal_entry(row), row)
-                entry_dialog.show()
+                journal_entry = self.table_view.model().get_journal_entry(row)
+                #entry_dialog = JournalEntryDialogPlain(self, self.table_view.model().get_journal_entry(row), row)
+                #entry_dialog.show()
+                window_title = tr("Recent Entry #{row} \u2014 {entry}").format(
+                    row=row + 1,
+                    entry=journal_entry['__REALTIME_TIMESTAMP'])
+                text = format_journal_entry(journal_entry)
+                status = tr("{kb:.2f} kbytes").format(kb=len(journal_entry[JOUNO_CONSOLIDATED_TEXT_KEY]) / 1024.0)
+                ViewTextDialog(title=window_title, text=text, static_status=status, parent=self)
                 self.journal_status_bar.showMessage(tr("Viewing entry {}.").format(row + 1), 5000)
             else:
                 self.journal_status_bar.showMessage(tr("No entries available."), 5000)
@@ -2479,21 +2486,17 @@ def format_journal_entry(journal_entry):
     return text
 
 
-class JournalEntryDialogPlain(QDialog):
+class ViewTextDialog(QDialog):
 
-    def __init__(self, parent, journal_entry, row: int):
+    def __init__(self, title: str, text: str, static_status: str, parent=None):
         super().__init__(parent)
 
-        window_title = tr("Recent Entry #{row} \u2014 {entry}").format(
-            row=row + 1,
-            entry=journal_entry['__REALTIME_TIMESTAMP'])
-
-        self.setWindowTitle(window_title)
+        self.setWindowTitle(title)
 
         title_container = QWidget(self)
         title_layout = QHBoxLayout()
         title_container.setLayout(title_layout)
-        title_label = big_label(QLabel(window_title))
+        title_label = big_label(QLabel(title))
         title_layout.addWidget(title_label)
 
         spacer = QWidget()
@@ -2564,7 +2567,6 @@ class JournalEntryDialogPlain(QDialog):
         text_view.setFont(QFontDatabase.systemFont(QFontDatabase.FixedFont))
         text_view.setReadOnly(True)
         text_view.setLineWrapMode(QTextEdit.LineWrapMode.NoWrap)
-        text = format_journal_entry(journal_entry)
         text_view.setText(text)
 
         layout.addWidget(text_view)
@@ -2575,8 +2577,7 @@ class JournalEntryDialogPlain(QDialog):
         self.setMinimumHeight(950)
         self.adjustSize()
 
-        status_bar.addPermanentWidget(
-            QLabel(tr("{kb:.2f} kbytes").format(kb=len(journal_entry[JOUNO_CONSOLIDATED_TEXT_KEY]) / 1024.0)))
+        status_bar.addPermanentWidget(QLabel(static_status))
 
         # .show() is non-modal, .exec() is modal
         self.show()
@@ -2957,6 +2958,7 @@ class QueryJournalTask(QThread):
     def stop(self):
         self.stopped = True
 
+
 class QueryBootWidget(QWidget):
     def __init__(self, journal_metadata: QueryMetaData, boot_picked_func: Callable, parent: QWidget):
         super().__init__(parent=parent)
@@ -3030,6 +3032,34 @@ class QueryBootWidget(QWidget):
         layout.addWidget(boot_table, Qt.AlignTop)
         calendar.set_selected_date(DT.date.today(), block_signals=True)
         boot_table.cellChanged.connect(cell_changed_func)
+
+        def as_csv() -> str:
+            csv_text = 'Start, End, State, BOOT_ID\n'
+            for r in range(0, self.boot_table.rowCount()):
+                sep = ''
+                for c in range(0, self.boot_table.columnCount()):
+                    csv_text += sep + self.boot_table.item(r, c).text()
+                    sep = ', '
+                csv_text += '\n'
+            return csv_text
+
+        def view_text_func():
+            csv_text = as_csv()
+            ViewTextDialog(tr("Unique values: {}").format('BOOT_ID'), as_csv(),
+                           tr("{} lines").format(csv_text.count('\n')), self)
+
+        def copy_func():
+            QApplication.clipboard().setText(as_csv())
+
+        def context_menu_func(point: QPoint):
+            menu = QMenu(boot_table)
+            menu.addAction(get_icon(ICON_VIEW_JOURNAL_ENTRY), tr('View as CSV'), view_text_func)
+            menu.addAction(get_icon(ICON_COPY_SELECTED), tr('Copy as CSV'), copy_func)
+            menu.exec(boot_table.mapToGlobal(point))
+
+        boot_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        boot_table.customContextMenuRequested.connect(context_menu_func)
+
         self.boot_table = boot_table
         self.reset()
 
@@ -3171,13 +3201,14 @@ class QueryFieldWidget(QGroupBox):
         self.setAlignment(Qt.AlignLeft)
         layout = QVBoxLayout()
         self.setLayout(layout)
-        grid_layout = QGridLayout()
+
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
-        container = QWidget(scroll_area)
-        container.setLayout(grid_layout)
-        scroll_area.setWidget(container)
-        grid_layout.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
+        checkbox_container = QWidget(scroll_area)
+        checkbox_container_layout = QGridLayout()
+        checkbox_container.setLayout(checkbox_container_layout)
+        scroll_area.setWidget(checkbox_container)
+        checkbox_container_layout.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
         layout.addWidget(scroll_area)
         # self.setFlat(True)
         max_str_len = max(len(str(v.description)) for v in field_values)
@@ -3190,12 +3221,35 @@ class QueryFieldWidget(QGroupBox):
             if value_checked_func is not None:
                 checkbox.stateChanged.connect(value_checked_func)
             self.checkbox_list.append(checkbox)
-            grid_layout.addWidget(checkbox, i // num_cols, i % num_cols, Qt.AlignLeft)
+            checkbox_container_layout.addWidget(checkbox, i // num_cols, i % num_cols, Qt.AlignLeft)
         # Stop the inter-cell spacing from expanding by consuming it with spacers
         v_spacer = QSpacerItem(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        grid_layout.addItem(v_spacer, grid_layout.rowCount(), 0, 1, -1)
+        checkbox_container_layout.addItem(v_spacer, checkbox_container_layout.rowCount(), 0, 1, -1)
         h_spacer = QSpacerItem(QSizePolicy.Expanding, QSizePolicy.Minimum)
-        grid_layout.addItem(h_spacer, 0, grid_layout.columnCount(), -1, 1)
+        checkbox_container_layout.addItem(h_spacer, 0, checkbox_container_layout.columnCount(), -1, 1)
+
+        def as_csv() -> str:
+            csv_text = field_name + ', Description\n'
+            for fv in field_values:
+                csv_text += str(fv.value) + ', ' + fv.description + '\n'
+            return csv_text
+
+        def view_text_func():
+            csv_text = as_csv()
+            ViewTextDialog(tr("Unique values: {}").format(field_name), as_csv(),
+                           tr("{} lines").format(csv_text.count('\n')), self)
+
+        def copy_func():
+            QApplication.clipboard().setText(as_csv())
+
+        def context_menu_func(point: QPoint):
+            menu = QMenu(checkbox_container)
+            menu.addAction(get_icon(ICON_VIEW_JOURNAL_ENTRY), tr('View as CSV'), view_text_func)
+            menu.addAction(get_icon(ICON_COPY_SELECTED), tr('&Copy as CSV'), copy_func)
+            menu.exec(checkbox_container.mapToGlobal(point))
+
+        checkbox_container.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        checkbox_container.customContextMenuRequested.connect(context_menu_func)
 
     def get_checked_values(self):
         if self.field_name == '_UID':
