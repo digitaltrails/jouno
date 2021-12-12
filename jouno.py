@@ -488,7 +488,8 @@ more details.
 <p><p>
 
 <b>jouno Copyright (C) 2021 Michael Hamilton</b>
-<p>
+<p>DEFAULT_QUERY_FIELDS = ['_UID', '_GID', 'QT_CATEGORY', 'PRIORITY', 'SYSLOG_IDENTIFIER',
+                        '_COM', '_EXE', '_HOSTNAME', 'COREDUMP_COMM', 'COREDUMP_EXE']
 This program is free software: you can redistribute it and/or modify it
 under the terms of the GNU General Public License as published by the
 Free Software Foundation, version 3.
@@ -503,7 +504,10 @@ with this program. If not, see <a href="https://www.gnu.org/licenses/">https://w
 
 """
 
-DEFAULT_CONFIG = '''
+DEFAULT_QUERY_FIELDS = ['_UID', '_GID', 'QT_CATEGORY', 'PRIORITY', 'SYSLOG_IDENTIFIER',
+                        '_COM', '_EXE', '_HOSTNAME', 'COREDUMP_COMM', 'COREDUMP_EXE']
+
+DEFAULT_CONFIG = f'''
 [options]
 poll_seconds = 5
 burst_seconds = 5
@@ -514,6 +518,7 @@ system_tray_enabled = no
 start_with_notifications_enabled = yes
 list_all_enabled = no
 debug_enabled = no
+query_field_list = {' '.join(DEFAULT_QUERY_FIELDS)}
 
 [ignore] 
 kwin_bad_damage = XCB error: 152 (BadDamage)
@@ -557,6 +562,7 @@ CONFIG_OPTIONS_LIST: List[ConfigOption] = [
     ConfigOption('list_all_enabled', 'The Recent notifications panel should show all entries, including non-notified.'),
     ConfigOption('from_boot_enabled', 'Show old journal entries from boot onward.'),
     ConfigOption('debug_enabled', 'Enable extra debugging output to standard-out.'),
+    ConfigOption('query_field_list', 'Default query fields.'),
 ]
 
 
@@ -724,6 +730,7 @@ class JournalWatcher:
         self.forward_all = False
         self.max_historical_entries = 500
         self.from_boot_enabled = False
+        self.limit_from_boot = 0
         self.config = Config()
         self.config.refresh()
         self.update_settings_from_config()
@@ -906,17 +913,25 @@ class JournalWatcher:
 
     def load_past_entries(self, journal_reader):
         data = []
-        if self.from_boot_enabled:
-            journal_reader.this_boot()
-        else:
+        if self.max_historical_entries != 0:
             journal_reader.add_match()
             journal_reader.seek_tail()
             journal_reader.get_next(-self.max_historical_entries - 1)
+        elif self.from_boot_enabled:
+            journal_reader.this_boot()
+        else:
+            self.supervisor.deliver_historical_entries([])
+            return
+        results = []
+        count = 0
         for journal_entry in journal_reader:
             notable = self.is_notable(consolidate_text(journal_entry))
             if notable or self.forward_all:
-                self.supervisor.new_journal_entry(journal_entry, notable)
-        self.supervisor.listening_for_new_entries()
+                results.append((journal_entry, notable,))
+                count += 1
+                if int(time.time() * 1000) % 1000 == 0:
+                    self.supervisor.report_progress(count)
+        self.supervisor.deliver_historical_entries(results)
 
 
 def extract_source_from_considated_text(consolidated_text: str):
@@ -1327,6 +1342,7 @@ class OptionsTab(QWidget):
         bool_count = 0
         text_count = 0
         for i, option_spec in enumerate(CONFIG_OPTIONS_LIST):
+            col_span = 1
             option_id = option_spec.option_id
             value = config_section[option_id] if option_id in config_section else ''
             label_widget = QLabel(option_spec.label())
@@ -1338,6 +1354,15 @@ class OptionsTab(QWidget):
                 column_number = 3
                 row_number = bool_count
                 bool_count += 1
+            elif option_id.endswith("_list"):
+                input_widget = QTextEdit()
+                input_widget.setFixedWidth(1000)
+                input_widget.setText(value)
+                input_widget.setToolTip(option_spec.tooltip())
+                column_number = 0
+                row_number = text_count
+                col_span = 4
+                text_count += 1
             else:
                 input_widget = QLineEdit()
                 input_widget.setMaximumWidth(100)
@@ -1350,8 +1375,8 @@ class OptionsTab(QWidget):
                 column_number = 0
                 row_number = text_count
                 text_count += 1
-            grid_layout.addWidget(label_widget, row_number, column_number)
-            grid_layout.addWidget(input_widget, row_number, column_number + 1, 1, 1, alignment=Qt.AlignLeft)
+            grid_layout.addWidget(label_widget, row_number, column_number, 1, 1, alignment=Qt.AlignLeft|Qt.AlignTop)
+            grid_layout.addWidget(input_widget, row_number, column_number + 1, 1, col_span, alignment=Qt.AlignLeft|Qt.AlignTop)
             self.option_map[option_id] = input_widget
             if column_number == 0:
                 spacer = QLabel("\u2003\u2003")
@@ -1379,6 +1404,8 @@ class OptionsTab(QWidget):
         for option_id, widget in self.option_map.items():
             if option_id.endswith("_enabled"):
                 config_section[option_id] = "yes" if widget.isChecked() else "no"
+            elif option_id.endswith("_list"):
+                config_section[option_id] = widget.document().toRawText()
             else:
                 if widget.text().strip() != "":
                     config_section[option_id] = widget.text()
@@ -1640,8 +1667,9 @@ class ConfigWatcherTask(QThread):
 
 
 class JournalWatcherTask(QThread):
+    signal_historical_entries = pyqtSignal(list)
+    signal_progress = pyqtSignal(int)
     signal_new_entry = pyqtSignal(dict, bool)
-    signal_listening = pyqtSignal()
 
     def __init__(self) -> None:
         super().__init__()
@@ -1662,8 +1690,11 @@ class JournalWatcherTask(QThread):
     def new_journal_entry(self, journal_entry: Mapping, notable: bool):
         self.signal_new_entry.emit(journal_entry, notable)
 
-    def listening_for_new_entries(self):
-        self.signal_listening.emit()
+    def deliver_historical_entries(self, history_list:List):
+        self.signal_historical_entries.emit(history_list)
+
+    def report_progress(self, count:int):
+        self.signal_progress.emit(count)
 
 
 class MainToolBar(QToolBar):
@@ -1979,23 +2010,21 @@ class MainWindow(QMainWindow):
         self.journal_dock_container = DockContainer(
             dockable_widget=journal_panel, home_window=self, home_dock_area=Qt.DockWidgetArea.TopDockWidgetArea)
 
-        self.listening = False
-
         def new_journal_entry(entry, notable: bool):
-            if self.listening:
-                self.journal_panel.new_journal_entry(entry, notable)
-            else:
-                # Old journal entry - either during initialization or as a result of a query.
-                self.journal_panel.add_journal_entry(entry, notable)
+            self.journal_panel.new_journal_entry(entry, notable)
 
-        def now_listening():
-            # Now listening for new journal entries.
-            self.listening = True
+        def process_historical_entries(historical_entries: List[Tuple]):
+            for entry, notable in historical_entries:
+                self.journal_panel.add_journal_entry(entry, notable)
             # Scroll to bottom to await new entries
             self.journal_panel.new_journal_entry(None, False)
 
+        def process_progress(count:int):
+            self.journal_panel.journal_status_bar.showMessage(tr("Retrieved {} entries").format(count))
+
         journal_watcher_task.signal_new_entry.connect(new_journal_entry)
-        journal_watcher_task.signal_listening.connect(now_listening)
+        journal_watcher_task.signal_historical_entries.connect(process_historical_entries)
+        journal_watcher_task.signal_progress.connect(process_progress)
 
         self.config_panel.signal_editing_filter_pattern.connect(journal_panel.search_select_journal)
 
@@ -2253,6 +2282,8 @@ class JournalPanel(DockableWidget):
         self.title_layout.addWidget(dock_button)
 
     def add_journal_entry(self, journal_entry, notable):
+        if int(time.time() * 1000) % 2000:
+            self.journal_status_bar.showMessage(tr("Initialising."), 500)
         self.table_view.new_journal_entry(journal_entry, notable)
 
     def new_journal_entry(self, journal_entry, notable):
@@ -2606,8 +2637,9 @@ class QueryMetaData(QThread):
             self.boot_years.sort()
             for i, boot_info in enumerate(self.boot_sequence_list):
                 boot_info.boot_number = i
-            for field_name in ['_UID', '_GID', 'QT_CATEGORY', 'PRIORITY', 'SYSLOG_IDENTIFIER',
-                               '_COM', '_EXE', '_HOSTNAME', 'COREDUMP_COMM', 'COREDUMP_EXE']:
+            config = Config()
+            query_fields = config.get('options', 'query_field_list', fallback=' '.join(DEFAULT_QUERY_FIELDS)).split(' ')
+            for field_name in query_fields:
                 if self.stopped:
                     return
                 with journal.Reader() as reader:
@@ -3101,32 +3133,31 @@ class QueryBootCalendar(QCalendarWidget):
 
     def paintCell(self, painter, rect, date):
         super().paintCell(painter, rect, date)
+        if not painter.isActive():
+            return
         py_date = date.toPyDate()
         if py_date in self.boot_index.start_date_map:
             boot_count = len(self.boot_index.start_date_map[py_date])
+            painter.save()
             if self.small_font is None:
                 self.small_font = painter.font()
                 self.small_font.setPointSize(self.small_font.pointSize() - 2)
-            f, p, b = painter.font(), painter.pen(), painter.brush()
             painter.setFont(self.small_font)
             painter.drawText(rect.topLeft() + QPoint(16, 12), str(boot_count))
             painter.setBrush(Qt.green)
             painter.setPen(Qt.green)
             painter.drawEllipse(rect.topLeft() + QPoint(12, 8), 3, 3)
-            painter.setFont(f)
-            painter.setPen(p)
-            painter.setBrush(b)
+            painter.restore()
 
         if py_date in self.boot_index.end_date_map:
             shutdowns_on_date = self.boot_index.end_date_map[py_date]
             crashed = True in [boot_info.journal_incomplete for boot_info in shutdowns_on_date]
+            painter.save()
             f, p, b = painter.font(), painter.pen(), painter.brush()
             painter.setBrush(Qt.red if crashed else Qt.lightGray)
             painter.setPen(Qt.red if crashed else Qt.lightGray)
             painter.drawEllipse(rect.topLeft() + QPoint(12, 24), 3, 3)
-            painter.setFont(f)
-            painter.setPen(p)
-            painter.setBrush(b)
+            painter.restore()
 
 
 class QueryFieldWidget(QGroupBox):
