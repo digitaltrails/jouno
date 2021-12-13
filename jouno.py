@@ -2739,9 +2739,20 @@ class QueryJournalWidget(QMainWindow):
         self.query_results = []
 
         self.query_desc_widget = QTextEdit()
-        self.query_desc_widget.setMaximumHeight(200)
+        self.query_desc_widget.setMaximumHeight(150)
         self.query_desc_widget.setReadOnly(True)
         layout.addRow(tr("Query:"), self.query_desc_widget)
+
+        text_filter = QLineEdit(parent=parent)
+        text_filter.setMinimumWidth(800)
+        regexp_checkbox = QCheckBox(tr("reg-exp"))
+        filter_box = QWidget()
+        filter_layout = QHBoxLayout()
+        filter_box.setLayout(filter_layout)
+        filter_layout.addWidget(text_filter)
+        filter_layout.addWidget(regexp_checkbox)
+        filter_layout.setContentsMargins(0,0,0,0)
+        layout.addRow(tr("&Text Filter"), filter_box)
 
         def row_limit_func(text: str):
             try:
@@ -3102,6 +3113,7 @@ class QueryBootTimelineWidget(QWidget):
         end_date = boot_index.last_entry_datetime.date()
         self.selected_date = DT.date.today()
         layout = QHBoxLayout()
+        layout.setContentsMargins(0, 0, 0, 0)
         self.setLayout(layout)
 
         timespan_layout = QHBoxLayout()
