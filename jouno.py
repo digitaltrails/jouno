@@ -2798,15 +2798,41 @@ class QueryJournalWidget(QMainWindow):
                 tab_widget.addTab(field_query_widget, field_name)
                 self.field_query_widget_list.append(field_query_widget)
 
-        text_filter = QLineEdit(parent=parent)
-        text_filter.setMinimumWidth(800)
+        def validate_filter_func(text):
+            if text is None:
+                text = results_filter_edit.text()
+            if regexp_checkbox.isChecked():
+                try:
+                    re.compile(text)
+                    self.run_query_button.setEnabled(True)
+                    self.results_filter = text
+                    self.results_filter_is_regexp = True
+                    self.query_desc_widget.setText(self.query_description())
+                except re.error as e:
+                    self.status_bar.showMessage(str(e))
+                    self.run_query_button.setDisabled(True)
+            else:
+                self.run_query_button.setEnabled(True)
+                re.compile(re.escape(text))
+                self.results_filter = text
+                self.results_filter_is_regexp = False
+                self.query_desc_widget.setText(self.query_description())
+
+        self.results_filter = ''
+        self.results_filter_is_regexp = False
+        results_filter_edit = QLineEdit(parent=parent)
+        results_filter_edit.setMinimumWidth(800)
+        results_filter_edit.textChanged.connect(validate_filter_func)
         regexp_checkbox = QCheckBox(tr("reg-exp"))
+        regexp_checkbox.setChecked(self.results_filter_is_regexp)
+        regexp_checkbox.clicked.connect(partial(validate_filter_func, None))
         filter_box = QWidget()
         filter_layout = QHBoxLayout()
         filter_box.setLayout(filter_layout)
-        filter_layout.addWidget(text_filter)
+        filter_layout.addWidget(results_filter_edit)
         filter_layout.addWidget(regexp_checkbox)
         filter_layout.setContentsMargins(0,0,0,0)
+        results_filter_edit.setText(self.results_filter)
         layout.addRow(tr("&Results Filter"), filter_box)
 
         button_box = QWidget()
@@ -2854,6 +2880,9 @@ class QueryJournalWidget(QMainWindow):
         boot_desc = ''
         for boot_id in self.boot_picker.boot_list:
             boot_desc += f"\n    and _BOOT_ID = {boot_id}"
+        filter_desc = tr("\n    and result {} '{}'").format(
+            tr('matches') if self.results_filter_is_regexp else tr('contains'),
+            self.results_filter) if self.results_filter != '' else ''
         field_map = {}
         for field_query_widget in self.field_query_widget_list:
             for value in field_query_widget.get_checked_values():
@@ -2865,20 +2894,26 @@ class QueryJournalWidget(QMainWindow):
         field_desc = ''
         for key, value in field_map.items():
             field_desc += f"\n    and {key} in {value}" if len(value) > 1 else f"\n and {key}={value[0]}"
-        return row_limit_desc + time_desc + boot_desc + field_desc
+        return row_limit_desc + time_desc + boot_desc + field_desc + filter_desc
 
     def perform_query(self):
         self.stop_button.setEnabled(True)
         self.run_query_button.setDisabled(True)
+        if self.results_filter.strip() != '':
+            results_filter_pattern = \
+                re.compile(self.results_filter if self.results_filter_is_regexp else re.escape(self.results_filter))
+        else:
+            results_filter_pattern = None
         self.query_task = QueryJournalTask(
             from_datetime=self.from_date_time, to_datetime=self.to_date_time,
             boot_list=self.boot_picker.boot_list.copy(),
             field_values_map={f.field_name: f.get_checked_values() for f in self.field_query_widget_list},
-            row_limit=self.row_limit)
+            row_limit=self.row_limit,
+            results_filter_pattern=results_filter_pattern)
         self.query_task.finished.connect(self.query_finished)
 
         def progress_func(count: int):
-            self.status_bar.showMessage(tr("Retrieved {} entries so far, continuing..").format(count), 2000)
+            self.status_bar.showMessage(tr("Found {} entries so far, continuing..").format(count), 2000)
 
         self.query_task.progress.connect(progress_func)
         self.query_task.start()
@@ -2925,13 +2960,15 @@ class QueryJournalTask(QThread):
                  from_datetime: DT.datetime, to_datetime: DT.datetime,
                  boot_list: List[str],
                  field_values_map: Mapping[str, List],
-                 row_limit:int):
+                 row_limit: int,
+                 results_filter_pattern: re.Pattern):
         super().__init__()
         self.from_datetime = from_datetime
         self.to_datetime = to_datetime
         self.boot_list = boot_list
         self.field_values_map = field_values_map
         self.row_limit = row_limit
+        self.results_filter_pattern = results_filter_pattern
         self.results = []
         self.stopped = False
 
@@ -2956,11 +2993,12 @@ class QueryJournalTask(QThread):
                     journal_entry_date_time = journal_entry['__REALTIME_TIMESTAMP']
                     if journal_entry_date_time > self.to_datetime:
                         break
-                    number_of_matches += 1
+                    text = consolidate_text(journal_entry)
+                    if self.results_filter_pattern is None or self.results_filter_pattern.search(text) is not None:
+                        number_of_matches += 1
+                        self.results.append(journal_entry)
                     if int(time.time() * 1000) % 1000 == 0:
                         self.progress.emit(number_of_matches)
-                    consolidate_text(journal_entry)
-                    self.results.append(journal_entry)
                     if self.row_limit > 0 and number_of_matches == self.row_limit:
                         break
         finally:
