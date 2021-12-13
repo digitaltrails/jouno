@@ -2743,17 +2743,6 @@ class QueryJournalWidget(QMainWindow):
         self.query_desc_widget.setReadOnly(True)
         layout.addRow(tr("Query:"), self.query_desc_widget)
 
-        text_filter = QLineEdit(parent=parent)
-        text_filter.setMinimumWidth(800)
-        regexp_checkbox = QCheckBox(tr("reg-exp"))
-        filter_box = QWidget()
-        filter_layout = QHBoxLayout()
-        filter_box.setLayout(filter_layout)
-        filter_layout.addWidget(text_filter)
-        filter_layout.addWidget(regexp_checkbox)
-        filter_layout.setContentsMargins(0,0,0,0)
-        layout.addRow(tr("&Text Filter"), filter_box)
-
         def row_limit_func(text: str):
             try:
                 self.row_limit = int(text)
@@ -2794,7 +2783,7 @@ class QueryJournalWidget(QMainWindow):
         layout.addRow(tr("&To"), to_date_widget)
 
         tab_widget = QTabWidget()
-        layout.addWidget(tab_widget)
+        layout.addRow(tr("Criteria"), tab_widget)
 
         def value_checked_func():
             self.query_desc_widget.setText(self.query_description())
@@ -2808,6 +2797,17 @@ class QueryJournalWidget(QMainWindow):
                 field_query_widget = QueryFieldWidget(field_name, field_values, value_checked_func, self)
                 tab_widget.addTab(field_query_widget, field_name)
                 self.field_query_widget_list.append(field_query_widget)
+
+        text_filter = QLineEdit(parent=parent)
+        text_filter.setMinimumWidth(800)
+        regexp_checkbox = QCheckBox(tr("reg-exp"))
+        filter_box = QWidget()
+        filter_layout = QHBoxLayout()
+        filter_box.setLayout(filter_layout)
+        filter_layout.addWidget(text_filter)
+        filter_layout.addWidget(regexp_checkbox)
+        filter_layout.setContentsMargins(0,0,0,0)
+        layout.addRow(tr("&Results Filter"), filter_box)
 
         button_box = QWidget()
         button_box_layout = QHBoxLayout()
@@ -3220,6 +3220,7 @@ class QueryFieldWidget(QGroupBox):
         checkbox_container_layout = QGridLayout()
         checkbox_container.setLayout(checkbox_container_layout)
         scroll_area.setWidget(checkbox_container)
+        scroll_area.setContentsMargins(0,0,0,0)
         checkbox_container_layout.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
         layout.addWidget(scroll_area)
         # self.setFlat(True)
