@@ -272,12 +272,13 @@ import sys
 import textwrap
 import time
 import traceback
+import weakref
 from enum import Enum
 from functools import partial
 from html import escape
 from io import StringIO
 from pathlib import Path
-from typing import Mapping, Any, List, Type, Callable, Tuple
+from typing import Mapping, Any, List, Type, Callable, Tuple, Union
 
 import dbus
 from PyQt5.QtCore import QCoreApplication, QProcess, Qt, pyqtSignal, QThread, QModelIndex, QItemSelectionModel, QSize, \
@@ -313,7 +314,7 @@ ICON_CONTEXT_MENU_LISTENING_ENABLE = "view-refresh"
 ICON_CONTEXT_MENU_LISTENING_DISABLE = "process-stop"
 ICON_TRAY_LISTENING_DISABLED = ICON_CONTEXT_MENU_LISTENING_DISABLE
 ICON_COPY_TO_CLIPBOARD = "edit-copy"
-ICON_SEARCH_JOURNAL = "system-search"
+ICON_SEARCH_TEXT = "system-search"
 ICON_UNDOCK = "window-new"
 ICON_DOCK = "view-restore"
 ICON_GO_NEXT = "go-down"
@@ -443,7 +444,7 @@ SVG_TOOLBAR_TEST_FILTERS = b"""
 </svg>
 """
 
-SVG_TOOLBAR_JOURNAL_QUERY = b"""
+SVG_TOOLBAR_QUERY_JOURNAL = b"""
 <!DOCTYPE svg>
 <svg xmlns="http://www.w3.org/2000/svg" version="1.1" viewBox="0 0 22 22">
     <defs>
@@ -504,7 +505,7 @@ with this program. If not, see <a href="https://www.gnu.org/licenses/">https://w
 """
 
 DEFAULT_QUERY_FIELDS = ['_UID', '_GID', 'QT_CATEGORY', 'PRIORITY', 'SYSLOG_IDENTIFIER',
-                        '_COM', '_EXE', 'COREDUMP_COMM', 'COREDUMP_EXE', '_HOSTNAME',]
+                        '_COM', '_EXE', 'COREDUMP_COMM', 'COREDUMP_EXE', '_HOSTNAME', ]
 
 DEFAULT_CONFIG = f'''
 [options]
@@ -993,14 +994,34 @@ def create_icon_from_svg_bytes(default_svg: bytes = None,
     return icon
 
 
-def get_icon(source) -> QIcon:
-    # Consider caching icon loading - but icons are mutable and subject to theme changes,
-    # so perhaps that's asking for trouble.
+managed_svg_icon_source: Mapping[QObject, str] = weakref.WeakKeyDictionary()
+themed_icon_cache: Mapping[Union[str, bytes], QIcon] = {}
+
+
+def get_themed_icon(source) -> QIcon:
+    if source in themed_icon_cache:
+        return themed_icon_cache[source]
     if isinstance(source, str):
         return QIcon.fromTheme(source)
     if isinstance(source, bytes):
         return create_icon_from_svg_bytes(source)
     raise ValueError(f"get_icon parameter has unsupported type {type(source)} = {str(source)}")
+
+
+def manage_icon(q_object: QObject, source: Union[str, bytes]):
+    # Hold a weak reference to any item that might need an icon reload on a theme change
+    # At the moment this is only applicable to our internal SVG sourced icons.
+    icon = get_themed_icon(source)
+    managed_svg_icon_source[q_object] = source
+    q_object.setIcon(icon)
+    return q_object
+
+
+def apply_icon_theme_change():
+    themed_icon_cache.clear()
+    for q_object, svg_source in managed_svg_icon_source.items():
+        print(q_object.objectName())
+        manage_icon(q_object, svg_source)
 
 
 def big_label(label: QLabel) -> QLabel:
@@ -1080,7 +1101,7 @@ class DockContainer(QDockWidget):
         self.setFloating(False)
         self.setFeatures(QDockWidget.DockWidgetFloatable | QDockWidget.DockWidgetMovable)
 
-        self.dock_button = transparent_button(QPushButton(get_icon(ICON_UNDOCK), '', self))
+        self.dock_button = transparent_button(manage_icon(QPushButton('', self), ICON_UNDOCK))
         self.dock_button.setToolTip(tr("Dock/undock this panel"))
         self.dock_button.pressed.connect(self.switch_dock_state)
         self.target.add_dock_control(self.dock_button)
@@ -1104,7 +1125,7 @@ class DockContainer(QDockWidget):
         self.is_docked_to_home = True
         self.setFloating(True)
         self.dock_window.hide()
-        self.dock_button.setIcon(get_icon(ICON_UNDOCK))
+        manage_icon(self.dock_button, ICON_UNDOCK)
         if self.previous_home_geometry:
             # Hacky trick to force the panel to restore it's previous size.
             # The minimum be be retracted in showEvent().
@@ -1124,7 +1145,7 @@ class DockContainer(QDockWidget):
         self.previous_home_geometry = self.target.geometry()
         self.is_docked_to_home = False
         self.setFloating(True)
-        self.dock_button.setIcon(get_icon(ICON_DOCK))
+        manage_icon(self.dock_button, ICON_DOCK)
         self.dock_window.addDockWidget(Qt.DockWidgetArea.TopDockWidgetArea, self)
         self.setFloating(False)
         if show:
@@ -1205,9 +1226,9 @@ class ConfigPanel(DockableWidget):
         button_box_layout = QHBoxLayout()
         button_box.setLayout(button_box_layout)
         apply_button = QPushButton(tr("Apply"))
-        apply_button.setIcon(get_icon(ICON_APPLY))
+        manage_icon(apply_button, ICON_APPLY)
         revert_button = QPushButton(tr("Revert"))
-        revert_button.setIcon(get_icon(ICON_REVERT))
+        manage_icon(revert_button, ICON_REVERT)
         button_box_layout.addWidget(revert_button)
         spacer = QLabel('          ')
         button_box_layout.addWidget(spacer)
@@ -1376,8 +1397,9 @@ class OptionsTab(QWidget):
                 column_number = 0
                 row_number = text_count
                 text_count += 1
-            grid_layout.addWidget(label_widget, row_number, column_number, 1, 1, alignment=Qt.AlignLeft|Qt.AlignTop)
-            grid_layout.addWidget(input_widget, row_number, column_number + 1, 1, col_span, alignment=Qt.AlignLeft|Qt.AlignTop)
+            grid_layout.addWidget(label_widget, row_number, column_number, 1, 1, alignment=Qt.AlignLeft | Qt.AlignTop)
+            grid_layout.addWidget(input_widget, row_number, column_number + 1, 1, col_span,
+                                  alignment=Qt.AlignLeft | Qt.AlignTop)
             self.option_map[option_id] = input_widget
             if column_number == 0:
                 spacer = QLabel("\u2003\u2003")
@@ -1691,10 +1713,10 @@ class JournalWatcherTask(QThread):
     def new_journal_entry(self, journal_entry: Mapping, notable: bool):
         self.signal_new_entry.emit(journal_entry, notable)
 
-    def deliver_historical_entries(self, history_list:List):
+    def deliver_historical_entries(self, history_list: List):
         self.signal_historical_entries.emit(history_list)
 
-    def report_progress(self, count:int):
+    def report_progress(self, count: int):
         self.signal_progress.emit(count)
 
 
@@ -1715,35 +1737,25 @@ class MainToolBar(QToolBar):
         self.setIconSize(QSize(32, 32))
         self.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
 
-        self.icon_run_enabled = get_icon(SVG_TOOLBAR_RUN_ENABLED)
-        self.icon_run_disabled = get_icon(SVG_TOOLBAR_RUN_DISABLED)
-        self.icon_notifier_enabled = get_icon(SVG_TOOLBAR_NOTIFIER_ENABLED)
-        self.icon_notifier_disabled = get_icon(SVG_TOOLBAR_NOTIFIER_DISABLED)
-        self.icon_run_stop = get_icon(SVG_TOOLBAR_STOP)
-        self.icon_add_filter = get_icon(SVG_TOOLBAR_ADD_FILTER)
-        self.icon_del_filter = get_icon(SVG_TOOLBAR_DEL_FILTER)
-        self.icon_query_journal = get_icon(SVG_TOOLBAR_JOURNAL_QUERY)
-        self.icon_menu = get_icon(SVG_TOOLBAR_HAMBURGER_MENU)
-
-        self.run_action = self.addAction(self.icon_run_enabled, "run", run_func)
+        self.run_action = manage_icon(self.addAction("run", run_func), SVG_TOOLBAR_RUN_ENABLED)
         self.run_action.setObjectName("run_button")
         self.run_action.setToolTip(tr("Start/stop monitoring the journal feed."))
         # Stylesheets prevent theme changes for the widget - cannot be used.
         # self.widgetForAction(self.run_action).setStyleSheet("QToolButton { width: 130px; }")
 
-        self.stop_action = self.addAction(self.icon_run_stop, tr("Stop"), run_func)
+        self.stop_action = manage_icon(self.addAction(tr("Stop"), run_func), SVG_TOOLBAR_STOP)
         self.stop_action.setToolTip(tr("Stop monitoring the journal feed."))
 
         self.addSeparator()
 
-        self.notifier_action = self.addAction(self.icon_notifier_enabled, "notify", notify_func)
+        self.notifier_action = manage_icon(self.addAction("notify", notify_func), SVG_TOOLBAR_NOTIFIER_ENABLED)
         self.notifier_action.setToolTip(tr("Enable/disable desktop-notification forwarding."))
         # Stylesheets prevent theme changes for the widget - cannot be used.
         # self.widgetForAction(self.notifier_action).setStyleSheet("QToolButton { width: 130px; }")
 
         self.addSeparator()
 
-        self.add_filter_action = self.addAction(self.icon_add_filter, "add", add_func)
+        self.add_filter_action = manage_icon(self.addAction("add", add_func), SVG_TOOLBAR_ADD_FILTER)
         self.add_filter_action.setObjectName("add_button")
         self.add_filter_action.setIconText(tr("New filter"))
         self.add_filter_action.setToolTip(
@@ -1755,7 +1767,7 @@ class MainToolBar(QToolBar):
             tr("  3. Press the Apply button to save and apply the changes.")
         )
 
-        self.del_filter_action = self.addAction(self.icon_del_filter, "del", del_func)
+        self.del_filter_action = manage_icon(self.addAction("del", del_func), SVG_TOOLBAR_DEL_FILTER)
         self.del_filter_action.setObjectName("del_button")
         self.del_filter_action.setIconText(tr("Delete filter"))
         self.del_filter_action.setToolTip(
@@ -1770,67 +1782,41 @@ class MainToolBar(QToolBar):
         spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         self.addWidget(spacer)
 
-        self.qurry_journal_action = self.addAction(self.icon_query_journal, "del", journal_viewer_func)
+        self.qurry_journal_action = manage_icon(self.addAction("del", journal_viewer_func), SVG_TOOLBAR_QUERY_JOURNAL)
         self.qurry_journal_action.setObjectName("journal_button")
-        self.qurry_journal_action.setIconText(tr("Journal"))
+        self.qurry_journal_action.setIconText(tr("Journal query"))
         self.qurry_journal_action.setToolTip(tr("View/search entire journal."))
 
         self.addSeparator()
 
-        self.addAction(get_icon(ICON_HELP_CONTENTS), tr('Help'), HelpDialog.invoke)
-        self.addAction(get_icon(ICON_HELP_ABOUT), tr('About'), AboutDialog.invoke)
+        manage_icon(self.addAction(tr('Help'), HelpDialog.invoke), ICON_HELP_CONTENTS)
+        manage_icon(self.addAction(tr('About'), AboutDialog.invoke), ICON_HELP_ABOUT)
         self.menu_button = QToolButton(self)
-        self.menu_button.setIcon(self.icon_menu)
+        manage_icon(self.menu_button, SVG_TOOLBAR_HAMBURGER_MENU)
         self.menu_button.setMenu(menu)
         self.menu_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         self.addWidget(self.menu_button)
         self.installEventFilter(self)
 
-    def reload_icons(self):
-        self.icon_run_enabled = get_icon(SVG_TOOLBAR_RUN_ENABLED)
-        self.icon_run_disabled = get_icon(SVG_TOOLBAR_RUN_DISABLED)
-        self.icon_notifier_enabled = get_icon(SVG_TOOLBAR_NOTIFIER_ENABLED)
-        self.icon_notifier_disabled = get_icon(SVG_TOOLBAR_NOTIFIER_DISABLED)
-        self.icon_run_stop = get_icon(SVG_TOOLBAR_STOP)
-        self.icon_add_filter = get_icon(SVG_TOOLBAR_ADD_FILTER)
-        self.icon_del_filter = get_icon(SVG_TOOLBAR_DEL_FILTER)
-        self.icon_query_journal = get_icon(SVG_TOOLBAR_JOURNAL_QUERY)
-        self.icon_menu = get_icon(SVG_TOOLBAR_HAMBURGER_MENU)
-
-
-    def eventFilter(self, target: QObject, event: QEvent) -> bool:
-        super().eventFilter(target, event)
-        # PalletChange happens after the new style sheet is in use.
-        if event.type() == QEvent.PaletteChange:
-            debug(f"PaletteChange is_dark_theme()={is_dark_theme()} {str(target)}") if debugging else None
-            self.reload_icons()
-            self.stop_action.setIcon(self.icon_run_stop)
-            self.add_filter_action.setIcon(self.icon_add_filter)
-            self.del_filter_action.setIcon(self.icon_del_filter)
-            self.qurry_journal_action.setIcon(self.icon_query_journal)
-            self.menu_button.setIcon(self.icon_menu)
-        event.accept()
-        return True
-
     def configure_run_action(self, running: bool) -> None:
         debug("Run Style is dark", is_dark_theme()) if debugging else None
         if running:
-            self.run_action.setIcon(self.icon_run_enabled)
+            manage_icon(self.run_action, SVG_TOOLBAR_RUN_ENABLED)
             self.run_action.setIconText(tr("Running"))
             self.stop_action.setEnabled(True)
         else:
-            self.run_action.setIcon(self.icon_run_disabled)
+            manage_icon(self.run_action, SVG_TOOLBAR_RUN_DISABLED)
             self.run_action.setIconText(tr("Stopped"))
             self.stop_action.setEnabled(False)
 
     def configure_notifier_action(self, notifying: bool) -> None:
         padded = pad_text([tr('Notifying'), tr('Mute')])
         if notifying:
-            self.notifier_action.setIcon(self.icon_notifier_enabled)
+            manage_icon(self.notifier_action, SVG_TOOLBAR_NOTIFIER_ENABLED)
             # self.notifier_action.setIconText(tr("Notifying"))
             self.notifier_action.setIconText(padded[0])
         else:
-            self.notifier_action.setIcon(self.icon_notifier_disabled)
+            manage_icon(self.notifier_action, SVG_TOOLBAR_NOTIFIER_DISABLED)
             # Don't do this with a style sheet - style sheets will break dark/light theme loading.
             # self.notifier_action.setIconText(tr("Mute   \u2002"))
             self.notifier_action.setIconText(padded[1])
@@ -1869,46 +1855,37 @@ def pad_text(text_list: List[str]):
 
 class MainContextMenu(QMenu):
 
-    def __init__(self, run_func: Callable, notify_func: Callable, quit_func: Callable, parent: QWidget):
+    def __init__(self, run_func: Callable, notify_func: Callable, quit_func: Callable, query_journal_func: Callable,
+                 parent: 'MainWindow'):
         super().__init__(parent=parent)
-        self.icon_notifier_enabled = get_icon(SVG_TOOLBAR_NOTIFIER_ENABLED)
-        self.icon_notifier_disabled = get_icon(SVG_TOOLBAR_NOTIFIER_DISABLED)
-        self.listen_action = self.addAction(get_icon(ICON_CONTEXT_MENU_LISTENING_DISABLE),
-                                            tr("Stop journal monitoring"),
-                                            run_func)
-        self.notifier_action = self.addAction(self.icon_notifier_disabled,
-                                              tr("Disable notifications"),
-                                              notify_func)
-        self.addAction(get_icon(ICON_HELP_ABOUT),
-                       tr('About'),
-                       AboutDialog.invoke)
-        self.addAction(get_icon(ICON_HELP_CONTENTS),
-                       tr('Help'),
-                       HelpDialog.invoke)
+        self.listen_action = manage_icon(self.addAction(tr("Stop journal monitoring"), run_func),
+                                         ICON_CONTEXT_MENU_LISTENING_DISABLE)
+        self.notifier_action = manage_icon(self.addAction(tr("Disable notifications"), notify_func),
+                                           SVG_TOOLBAR_NOTIFIER_ENABLED)
+        manage_icon(self.addAction(tr('Journal query'), query_journal_func), SVG_TOOLBAR_QUERY_JOURNAL)
+        manage_icon(self.addAction(tr('About'), AboutDialog.invoke), ICON_HELP_ABOUT)
+        manage_icon(self.addAction(tr('Help'), HelpDialog.invoke), ICON_HELP_CONTENTS)
         self.addSeparator()
-        self.addAction(get_icon(ICON_APPLICATION_EXIT),
-                       tr('Quit'),
-                       quit_func)
+        manage_icon(self.addAction(tr('Quit'), quit_func), ICON_APPLICATION_EXIT)
 
     def configure_run_action(self, running: bool) -> None:
         if running:
             self.listen_action.setText(tr("Stop journal monitoring"))
-            self.listen_action.setIcon(get_icon(ICON_CONTEXT_MENU_LISTENING_DISABLE))
+            manage_icon(self.listen_action, ICON_CONTEXT_MENU_LISTENING_DISABLE)
         else:
             self.listen_action.setText(tr("Resume journal monitoring"))
-            self.listen_action.setIcon(get_icon(ICON_CONTEXT_MENU_LISTENING_ENABLE))
+            manage_icon(self.listen_action, ICON_CONTEXT_MENU_LISTENING_ENABLE)
 
     def configure_notifier_action(self, notifying: bool) -> None:
         if notifying:
             self.notifier_action.setText(tr("Disable notifications"))
-            self.notifier_action.setIcon(self.icon_notifier_disabled)
+            manage_icon(self.notifier_action, SVG_TOOLBAR_NOTIFIER_DISABLED)
         else:
             self.notifier_action.setText(tr("Enable notifications"))
-            self.notifier_action.setIcon(self.icon_notifier_enabled)
+            manage_icon(self.notifier_action, SVG_TOOLBAR_NOTIFIER_ENABLED)
 
 
 class MainWindow(QMainWindow):
-    signal_theme_change = pyqtSignal()
 
     def __init__(self, app: QApplication):
         super().__init__()
@@ -1924,7 +1901,7 @@ class MainWindow(QMainWindow):
         info(f"Icon theme '{QIcon.themeName()}' >> is_dark_theme()={is_dark_theme()}")
 
         app_name = tr('Jouno')
-        app.setWindowIcon(get_icon(SVG_JOUNO_LIGHT))
+        app.setWindowIcon(get_themed_icon(SVG_JOUNO_LIGHT))
         app.setApplicationDisplayName(app_name)
         app.setApplicationVersion(JOUNO_VERSION)
 
@@ -1935,12 +1912,12 @@ class MainWindow(QMainWindow):
                 title_text = tr("Running") if journal_watcher_task.is_notifying() else tr("Muted")
                 self.setWindowTitle(title_text)
                 tray.setToolTip(f"{title_text} \u2014 {app_name}")
-                tray.setIcon(get_icon(SVG_JOUNO))
+                manage_icon(tray, SVG_JOUNO)
             else:
                 title_text = tr("Stopped")
                 self.setWindowTitle(title_text)
                 tray.setToolTip(f"{title_text} \u2014 {app_name}")
-                tray.setIcon(get_icon(ICON_TRAY_LISTENING_DISABLED))
+                manage_icon(tray, ICON_TRAY_LISTENING_DISABLED)
 
         def enable_listener(enable: bool) -> None:
             if enable:
@@ -2020,7 +1997,7 @@ class MainWindow(QMainWindow):
             # Scroll to bottom to await new entries
             self.journal_panel.new_journal_entry(None, False)
 
-        def process_progress(count:int):
+        def process_progress(count: int):
             self.journal_panel.journal_status_bar.showMessage(tr("Scanned {} entries").format(count))
 
         journal_watcher_task.signal_new_entry.connect(new_journal_entry)
@@ -2030,7 +2007,8 @@ class MainWindow(QMainWindow):
         self.config_panel.signal_editing_filter_pattern.connect(journal_panel.search_select_journal)
 
         app_context_menu = MainContextMenu(
-            run_func=toggle_listener, notify_func=toggle_notifier, quit_func=quit_app, parent=self)
+            run_func=toggle_listener, notify_func=toggle_notifier, quit_func=quit_app, query_journal_func=query_journal,
+            parent=self)
 
         tool_bar = MainToolBar(
             run_func=toggle_listener, notify_func=toggle_notifier,
@@ -2040,9 +2018,8 @@ class MainWindow(QMainWindow):
         self.addToolBar(tool_bar)
 
         tray = QSystemTrayIcon()
-        tray.setIcon(get_icon(SVG_JOUNO))
+        manage_icon(tray, SVG_JOUNO)
         tray.setContextMenu(app_context_menu)
-        self.signal_theme_change.connect(update_title_and_tray_indicators)
 
         tray.activated.connect(self.tray_activate_window)
         if self.use_system_tray():
@@ -2073,7 +2050,7 @@ class MainWindow(QMainWindow):
         # ApplicationPaletteChange happens after the new style theme is in use.
         if event.type() == QEvent.ApplicationPaletteChange:
             debug(f"ApplicationPaletteChange is_dark_theme() {is_dark_theme()}") if debugging else None
-            self.signal_theme_change.emit()
+            apply_icon_theme_change()
         return True
 
     def closeEvent(self, event: QCloseEvent) -> None:
@@ -2164,8 +2141,9 @@ class JournalPanel(DockableWidget):
 
         search_input = QLineEdit()
         search_input.setFixedWidth(350)
-        search_input.addAction(get_icon(ICON_SEARCH_JOURNAL), QLineEdit.LeadingPosition)
-        re_action = search_input.addAction(get_icon(ICON_PLAIN_TEXT_SEARCH), QLineEdit.TrailingPosition)
+        search_input.addAction(get_themed_icon(ICON_SEARCH_TEXT), QLineEdit.LeadingPosition)
+
+        re_action = search_input.addAction(get_themed_icon(ICON_PLAIN_TEXT_SEARCH), QLineEdit.TrailingPosition)
         re_action.setCheckable(True)
         search_tip = tr(
             "Incrementally search journal entries.\nSearches all fields.\n"
@@ -2173,7 +2151,7 @@ class JournalPanel(DockableWidget):
 
         def re_search_toggle(enable: bool):
             self.re_search_enabled = enable
-            re_action.setIcon(get_icon(ICON_REGEXP_SEARCH if enable else ICON_PLAIN_TEXT_SEARCH))
+            manage_icon(re_action, ICON_REGEXP_SEARCH if enable else ICON_PLAIN_TEXT_SEARCH)
             tip = tr("Regular expression matching enabled.") if enable else tr("Plain-text matching enabled.")
             self.journal_status_bar.showMessage(tip)
             search_input.setToolTip(search_tip + "\n" + tip)
@@ -2185,13 +2163,13 @@ class JournalPanel(DockableWidget):
         title_layout.addWidget(search_input)
         self.scrolled_to_selected = None
 
-        go_next_button = transparent_button(QPushButton(get_icon(ICON_GO_NEXT), '', self))
+        go_next_button = transparent_button(manage_icon(QPushButton('', self), ICON_GO_NEXT))
         go_next_button.clicked.connect(partial(self.scroll_selected, 1))
         go_next_button.setEnabled(False)
         go_next_button.setToolTip(tr("Next match."))
         title_layout.addWidget(go_next_button)
 
-        go_previous_button = transparent_button(QPushButton(get_icon(ICON_GO_PREVIOUS), '', self))
+        go_previous_button = transparent_button(manage_icon(QPushButton('', self), ICON_GO_PREVIOUS))
         go_previous_button.clicked.connect(partial(self.scroll_selected, -1))
         go_previous_button.setToolTip(tr("Previous match."))
         go_previous_button.setEnabled(False)
@@ -2222,8 +2200,8 @@ class JournalPanel(DockableWidget):
                 self.journal_status_bar.showMessage(tr("Viewing last entry."), 5000)
             if row >= 0:
                 journal_entry = self.table_view.model().get_journal_entry(row)
-                #entry_dialog = JournalEntryDialogPlain(self, self.table_view.model().get_journal_entry(row), row)
-                #entry_dialog.show()
+                # entry_dialog = JournalEntryDialogPlain(self, self.table_view.model().get_journal_entry(row), row)
+                # entry_dialog.show()
                 window_title = tr("Recent Entry #{row} \u2014 {entry}").format(
                     row=row + 1,
                     entry=journal_entry['__REALTIME_TIMESTAMP'])
@@ -2269,10 +2247,10 @@ class JournalPanel(DockableWidget):
             QApplication.clipboard().setText(text)
 
         context_menu = QMenu(tr("Journal Entry Menu"), parent=self)
-        context_menu.addAction(get_icon(ICON_VIEW_JOURNAL_ENTRY), tr('View entry'), view_journal_entry)
+        manage_icon(context_menu.addAction(tr('View entry'), view_journal_entry), ICON_VIEW_JOURNAL_ENTRY)
         context_menu.addSeparator()
-        context_menu.addAction(get_icon(ICON_COPY_SELECTED), tr('Copy selected'), copy_selected)
-        context_menu.addAction(get_icon(ICON_CLEAR_SELECTION), tr('Clear selection'), self.table_view.clearSelection)
+        manage_icon(context_menu.addAction(tr('Copy selected'), copy_selected), ICON_COPY_SELECTED)
+        manage_icon(context_menu.addAction(tr('Clear selection'), self.table_view.clearSelection), ICON_CLEAR_SELECTION)
 
         self.context_menu_index = None
 
@@ -2532,13 +2510,13 @@ class ViewTextDialog(QDialog):
 
         search_input = QLineEdit()
         search_input.setFixedWidth(350)
-        search_input.addAction(get_icon(ICON_SEARCH_JOURNAL), QLineEdit.LeadingPosition)
-        re_action = search_input.addAction(get_icon(ICON_PLAIN_TEXT_SEARCH), QLineEdit.TrailingPosition)
+        search_input.addAction(get_themed_icon(ICON_SEARCH_TEXT), QLineEdit.LeadingPosition)
+        re_action = search_input.addAction(get_themed_icon(ICON_PLAIN_TEXT_SEARCH), QLineEdit.TrailingPosition)
         re_action.setCheckable(True)
 
         def re_search_toggle(enable: bool):
             self.re_search_enabled = enable
-            re_action.setIcon(get_icon(ICON_REGEXP_SEARCH if enable else ICON_PLAIN_TEXT_SEARCH))
+            manage_icon(re_action, ICON_REGEXP_SEARCH if enable else ICON_PLAIN_TEXT_SEARCH)
             status_bar.showMessage(tr("Regular expression search.") if enable else tr("Plain text search."), 10000)
 
         re_action.toggled.connect(re_search_toggle)
@@ -2553,7 +2531,7 @@ class ViewTextDialog(QDialog):
             QGuiApplication.clipboard().setText(text_view.toPlainText())
             status_bar.showMessage(tr("Copied all text to the clipboard"), 5000)
 
-        copy_button = transparent_button(QPushButton(get_icon(ICON_COPY_TO_CLIPBOARD), '', self))
+        copy_button = transparent_button(manage_icon(QPushButton('', self), ICON_COPY_TO_CLIPBOARD))
         copy_button.setToolTip(tr("Copy entire text to clipboard"))
         copy_button.clicked.connect(copy_to_clipboard)
         title_layout.addWidget(QLabel(' '))
@@ -2658,6 +2636,7 @@ class QueryMetaData(QThread):
     def stop(self):
         self.stopped = True
 
+
 class QueryBootInfo:
     def __init__(self, boot_id, start_datetime: DT.datetime, end_datetime: DT.datetime, journal_incomplete: bool):
         self.boot_id = boot_id
@@ -2733,7 +2712,7 @@ class QueryJournalWidget(QMainWindow):
         title_widget.setLayout(self.title_layout)
         self.title_layout.addWidget((big_label(QLabel(tr("Journal Query")))))
         spacer = QSpacerItem(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        #spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        # spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         self.title_layout.addItem(spacer)
         layout.addRow(title_widget)
         self.query_results = []
@@ -2831,26 +2810,26 @@ class QueryJournalWidget(QMainWindow):
         filter_box.setLayout(filter_layout)
         filter_layout.addWidget(results_filter_edit)
         filter_layout.addWidget(regexp_checkbox)
-        filter_layout.setContentsMargins(0,0,0,0)
+        filter_layout.setContentsMargins(0, 0, 0, 0)
         results_filter_edit.setText(self.results_filter)
         layout.addRow(tr("&Results Filter"), filter_box)
 
         button_box = QWidget()
         button_box_layout = QHBoxLayout()
         button_box.setLayout(button_box_layout)
-        self.run_query_button = QPushButton(get_icon(SVG_TOOLBAR_RUN_ENABLED), tr("Run Query"))
+        self.run_query_button = manage_icon(QPushButton(tr("Run Query")), SVG_TOOLBAR_RUN_ENABLED)
         self.run_query_button.clicked.connect(self.perform_query)
         button_box_layout.addWidget(self.run_query_button)
 
         def stop_func():
             self.query_task.stop()
 
-        self.stop_button = QPushButton(get_icon(SVG_TOOLBAR_STOP), tr("Stop Query"))
+        self.stop_button = manage_icon(QPushButton(tr("Stop Query")), SVG_TOOLBAR_STOP)
         self.stop_button.clicked.connect(stop_func)
         self.stop_button.setEnabled(False)
         button_box_layout.addWidget(self.stop_button)
 
-        def reset_func(initialization: bool=False):
+        def reset_func(initialization: bool = False):
             self.from_date_time = self.journal_meta_data.first_entry_datetime
             self.to_date_time = self.journal_meta_data.last_entry_datetime
             from_date_widget.setDateTime(self.from_date_time)
@@ -2862,7 +2841,7 @@ class QueryJournalWidget(QMainWindow):
             self.limit_rows_widget.setText('0')
             self.query_desc_widget.setText(self.query_description())
 
-        reset_button = QPushButton(get_icon(ICON_REVERT), tr("Reset Query"))
+        reset_button = manage_icon(QPushButton(tr("Reset Query")), ICON_REVERT)
         reset_button.clicked.connect(reset_func)
         button_box_layout.addWidget(reset_button)
         layout.addWidget(button_box)
@@ -2874,27 +2853,24 @@ class QueryJournalWidget(QMainWindow):
         reset_func(initialization=True)
 
     def query_description(self):
-        row_limit_desc = "RESULT_COUNT <= {}\n    and ".format(self.row_limit) if self.row_limit > 0 else ''
-        time_desc = tr("__REALTIME_TIMESTAMP between [{:%y-%m-%d %H:%M}, {:%y-%m-%d %H:%M}]").format(
-            self.from_date_time, self.to_date_time)
-        boot_desc = ''
-        for boot_id in self.boot_picker.boot_list:
-            boot_desc += f"\n    and _BOOT_ID = {boot_id}"
-        filter_desc = tr("\n    and result {} '{}'").format(
-            tr('matches') if self.results_filter_is_regexp else tr('contains'),
-            self.results_filter) if self.results_filter != '' else ''
-        field_map = {}
-        for field_query_widget in self.field_query_widget_list:
-            for value in field_query_widget.get_checked_values():
-                field_name = field_query_widget.field_name
-                if field_name in field_map:
-                    field_map[field_name].append(value)
-                else:
-                    field_map[field_name] = [value]
-        field_desc = ''
-        for key, value in field_map.items():
-            field_desc += f"\n    and {key} in {value}" if len(value) > 1 else f"\n and {key}={value[0]}"
-        return row_limit_desc + time_desc + boot_desc + field_desc + filter_desc
+        parts_list = []
+        if self.row_limit > 0:
+            parts_list.append("RESULT_COUNT <= {}".format(self.row_limit) )
+        parts_list.append("__REALTIME_TIMESTAMP between [{:%y-%m-%d %H:%M}, {:%y-%m-%d %H:%M}]".format(
+            self.from_date_time, self.to_date_time))
+        boots = self.boot_picker.get_description()
+        if boots != '':
+            parts_list.append(self.boot_picker.get_description())
+        if self.results_filter.strip() != '':
+            parts_list.append(
+                "   and result {} '{}'".format(
+                    'matches' if self.results_filter_is_regexp else 'contains',
+                    self.results_filter))
+        for field in self.field_query_widget_list:
+            description = field.get_description()
+            if description != '':
+                parts_list.append(description)
+        return '\n    and '.join(parts_list)
 
     def perform_query(self):
         self.stop_button.setEnabled(True)
@@ -2920,24 +2896,31 @@ class QueryJournalWidget(QMainWindow):
 
     def query_finished(self, number_of_matches: int):
         self.stop_button.setEnabled(False)
-        self.status_bar.showMessage(tr("Retrieved {} entries, creating view..").format(number_of_matches), 5000)
+        elapsed_time = self.query_task.time_query_end - self.query_task.time_query_start
+        self.status_bar.showMessage(
+            tr("Stopped at {} entries at {:.2f} seconds, creating view.."
+               if self.query_task.stopped else
+               "Retrieved at {} entries in {:.2f} seconds, creating view..").format(number_of_matches, elapsed_time),
+            5000)
         QApplication.processEvents()
-        if not self.query_task.stopped:
-            query_result = QWidget()
-            query_layout = QVBoxLayout()
-            query_result.setLayout(query_layout)
-            journal_panel = JournalPanel(max_entries=0)
-            title = tr("Query: {}").format(self.query_description())
-            journal_panel.title_label.setText(title)
-            query_layout.addWidget(journal_panel)
-            for journal_entry in self.query_task.results:
-                journal_panel.add_journal_entry(journal_entry, True)
-            journal_panel.static_status_label.setText(tr("Retrieved {} entries.".format(number_of_matches)))
-            result_geometry = self.main_window.geometry()
-            result_geometry.translate(50, 50)
-            query_result.setGeometry(result_geometry)
-            query_result.show()
-            self.query_results.append(query_result)
+        query_result = QWidget()
+        query_layout = QVBoxLayout()
+        query_result.setLayout(query_layout)
+        journal_panel = JournalPanel(max_entries=0)
+        title = tr("Query: {}").format(self.query_description())
+        journal_panel.title_label.setText(title)
+        query_layout.addWidget(journal_panel)
+        for journal_entry in self.query_task.results:
+            journal_panel.add_journal_entry(journal_entry, True)
+        journal_panel.static_status_label.setText(
+            tr("Stopped at {} entries at {:.2f} seconds."
+               if self.query_task.stopped else
+               "Retrieved {} entries in {:.2f} seconds.").format(number_of_matches, elapsed_time))
+        result_geometry = self.main_window.geometry()
+        result_geometry.translate(50, 50)
+        query_result.setGeometry(result_geometry)
+        query_result.show()
+        self.query_results.append(query_result)
         self.query_task = None
         self.run_query_button.setEnabled(True)
 
@@ -2971,9 +2954,12 @@ class QueryJournalTask(QThread):
         self.results_filter_pattern = results_filter_pattern
         self.results = []
         self.stopped = False
+        self.time_query_start = 0.0
+        self.time_query_end = 0.0
 
     def run(self):
         try:
+            self.time_query_start = time.time()
             number_of_matches = 0
             with journal.Reader() as query_reader:
                 query_reader.seek_realtime(self.from_datetime)
@@ -3002,6 +2988,7 @@ class QueryJournalTask(QThread):
                     if self.row_limit > 0 and number_of_matches == self.row_limit:
                         break
         finally:
+            self.time_query_end = time.time()
             self.finished.emit(number_of_matches)
 
     def stop(self):
@@ -3022,7 +3009,7 @@ class QueryBootWidget(QWidget):
             if picked_date in journal_metadata.start_date_map:
                 row_num = journal_metadata.start_date_map[picked_date][0].boot_number
                 boot_table.scrollToItem(boot_table.item(row_num, 0), QAbstractItemView.PositionAtTop)
-                #boot_table.clearSelection()
+                # boot_table.clearSelection()
                 # Reverse order so that the first in list remains visible in the view.
                 for day_boot in journal_metadata.start_date_map[picked_date][::-1]:
                     item = boot_table.item(day_boot.boot_number, 0)
@@ -3065,7 +3052,8 @@ class QueryBootWidget(QWidget):
             row_bg = self.choose_row_color(boot_info, previous_boot_date)
             previous_boot_date = boot_info.start_datetime.date()
             start_datetime_item = QTableWidgetItem(f"{boot_info.start_datetime:%y-%m-%d %H:%M}")
-            start_datetime_item.setFlags(Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+            start_datetime_item.setFlags(
+                Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
             start_datetime_item.setCheckState(Qt.Unchecked)
             start_datetime_item.setBackground(row_bg)
             end_datetime_item = QTableWidgetItem(f"{boot_info.end_datetime:%y-%m-%d %H:%M} ")
@@ -3102,8 +3090,8 @@ class QueryBootWidget(QWidget):
 
         def context_menu_func(point: QPoint):
             menu = QMenu(boot_table)
-            menu.addAction(get_icon(ICON_VIEW_JOURNAL_ENTRY), tr('View as CSV'), view_text_func)
-            menu.addAction(get_icon(ICON_COPY_SELECTED), tr('Copy as CSV'), copy_func)
+            manage_icon(menu.addAction(tr('View as CSV'), view_text_func), ICON_VIEW_JOURNAL_ENTRY)
+            manage_icon(menu.addAction(tr('Copy as CSV'), copy_func), ICON_COPY_SELECTED)
             menu.exec(boot_table.mapToGlobal(point))
 
         boot_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -3116,10 +3104,20 @@ class QueryBootWidget(QWidget):
         if boot_info.journal_incomplete:
             return self.row_color_theme[2]
         if boot_info.start_datetime.date() != previous_boot_date:
-            self.row_bg_color = self.row_color_theme[1] if self.row_bg_color == self.row_color_theme[0] else self.row_color_theme[0]
+            self.row_bg_color = self.row_color_theme[1] if self.row_bg_color == self.row_color_theme[0] else \
+            self.row_color_theme[0]
         return self.row_bg_color
 
-    def reset(self, initialization:bool = False):
+    def get_description(self):
+        values = self.boot_list
+        if len(values) == 0:
+            return ''
+        elif len(values) == 1:
+            return "{} = {}".format('_BOOT_ID', str(values[0]))
+        else:
+            return "{} in [{}]".format('_BOOT_ID', ',\n        '.join(str(value) for value in values))
+
+    def reset(self, initialization: bool = False):
         for i in range(0, self.boot_table.rowCount()):
             self.boot_table.item(i, 0).setCheckState(Qt.Unchecked)
         self.boot_table.scrollToBottom()
@@ -3164,14 +3162,15 @@ class QueryBootTimelineWidget(QWidget):
         layout.addWidget(scroll_area)
         self.scroll_area = scroll_area
 
-        def activated_func(date:QDate):
+        def activated_func(date: QDate):
             self.activated.emit(date)
 
         self.calendar_list = []
         cal_date = start_date
         while cal_date <= end_date:
             calendar = QueryBootCalendar(boot_index)
-            end_of_month = DT.date(cal_date.year + int(cal_date.month / 12), (cal_date.month % 12) + 1, 1) - DT.timedelta(days=1)
+            end_of_month = DT.date(cal_date.year + int(cal_date.month / 12), (cal_date.month % 12) + 1,
+                                   1) - DT.timedelta(days=1)
             calendar.setDateRange(cal_date, end_of_month)
             calendar.setNavigationBarVisible(False)
             calendar.activated.connect(activated_func)
@@ -3212,7 +3211,7 @@ class QueryBootCalendar(QCalendarWidget):
     def get_selected_date(self):
         return self.selectedDate().toPyDate()
 
-    def set_selected_date(self, new_date:DT.date):
+    def set_selected_date(self, new_date: DT.date):
         self.setSelectedDate(new_date)
 
     def paintCell(self, painter, rect, date):
@@ -3258,7 +3257,7 @@ class QueryFieldWidget(QGroupBox):
         checkbox_container_layout = QGridLayout()
         checkbox_container.setLayout(checkbox_container_layout)
         scroll_area.setWidget(checkbox_container)
-        scroll_area.setContentsMargins(0,0,0,0)
+        scroll_area.setContentsMargins(0, 0, 0, 0)
         checkbox_container_layout.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
         layout.addWidget(scroll_area)
         # self.setFlat(True)
@@ -3295,8 +3294,8 @@ class QueryFieldWidget(QGroupBox):
 
         def context_menu_func(point: QPoint):
             menu = QMenu(checkbox_container)
-            menu.addAction(get_icon(ICON_VIEW_JOURNAL_ENTRY), tr('View as CSV'), view_text_func)
-            menu.addAction(get_icon(ICON_COPY_SELECTED), tr('&Copy as CSV'), copy_func)
+            manage_icon(menu.addAction(tr('View as CSV'), view_text_func), ICON_VIEW_JOURNAL_ENTRY)
+            manage_icon(menu.addAction(tr('&Copy as CSV'), copy_func), ICON_COPY_SELECTED)
             menu.exec(checkbox_container.mapToGlobal(point))
 
         checkbox_container.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -3308,6 +3307,15 @@ class QueryFieldWidget(QGroupBox):
         elif self.field_name == '_GID':
             return [grp.getgrnam(checkbox.text()).gr_gid for checkbox in self.checkbox_list if checkbox.isChecked()]
         return [checkbox.text() for checkbox in self.checkbox_list if checkbox.isChecked()]
+
+    def get_description(self):
+        values = self.get_checked_values()
+        if len(values) == 0:
+            return ''
+        elif len(values) == 1:
+            return "{} = {}".format(self.field_name, str(values[0]))
+        else:
+            return "{} in [{}]".format(self.field_name, ', '.join([str(v) for v in values]))
 
     def reset(self):
         for checkbox in self.checkbox_list:
@@ -3426,16 +3434,10 @@ class ContextMenu(QMenu):
             ICON_CONTEXT_MENU_LISTENING_DISABLE,
             tr('Pause'),
             listen_action)
-        self.addAction(get_icon(ICON_HELP_ABOUT),
-                       tr('About'),
-                       about_action)
-        self.addAction(get_icon(ICON_HELP_CONTENTS),
-                       tr('Help'),
-                       help_action)
+        manage_icon(self.addAction(tr('About'), about_action), ICON_HELP_ABOUT)
+        manage_icon(self.addAction(tr('Help'), help_action), ICON_HELP_CONTENTS)
         self.addSeparator()
-        self.addAction(get_icon(ICON_APPLICATION_EXIT),
-                       tr('Quit'),
-                       quit_action)
+        manage_icon(self.addAction(tr('Quit'), quit_action), ICON_APPLICATION_EXIT)
 
 
 def exception_handler(e_type, e_value, e_traceback):
