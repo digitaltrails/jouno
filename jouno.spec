@@ -80,6 +80,8 @@ install -m644 %{name}.png %{buildroot}/%{_datadir}/icons
 
 %changelog
 
+* Wed Dec 15 2021 Michael Hamilton <michael@actrix.gen.nz>
+- Minor improvements: jouno 1.2.1
 * Mon Dec 06 2021 Michael Hamilton <michael@actrix.gen.nz>
 - Journal query interface: jouno 1.2.0
 * Sun Dec 05 2021 Michael Hamilton <michael@actrix.gen.nz>
