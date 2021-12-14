@@ -1736,6 +1736,8 @@ class MainToolBar(QToolBar):
         self.setObjectName("main-tool-bar")
         self.setIconSize(QSize(32, 32))
         self.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        self.setFloatable(False)
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.ActionsContextMenu)
 
         self.run_action = manage_icon(self.addAction("run", run_func), SVG_TOOLBAR_RUN_ENABLED)
         self.run_action.setObjectName("run_button")
@@ -2015,6 +2017,7 @@ class MainWindow(QMainWindow):
             add_func=add_filter, del_func=delete_filter, journal_viewer_func=query_journal,
             menu=app_context_menu,
             parent=self)
+        self.tool_bar = tool_bar
         self.addToolBar(tool_bar)
 
         tray = QSystemTrayIcon()
@@ -2098,6 +2101,8 @@ class MainWindow(QMainWindow):
         system_tray_in_use = self.use_system_tray()
         self.journal_dock_container.app_restore_state(from_settings=self.settings, show=not system_tray_in_use)
         self.config_dock_container.app_restore_state(from_settings=self.settings, show=not system_tray_in_use)
+        if self.tool_bar.isHidden():
+            self.tool_bar.setVisible(True)
 
 
 class JournalPanel(DockableWidget):
