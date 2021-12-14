@@ -1784,7 +1784,7 @@ class MainToolBar(QToolBar):
         spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         self.addWidget(spacer)
 
-        self.qurry_journal_action = manage_icon(self.addAction("del", journal_viewer_func), SVG_TOOLBAR_QUERY_JOURNAL)
+        self.qurry_journal_action = manage_icon(self.addAction("query", journal_viewer_func), SVG_TOOLBAR_QUERY_JOURNAL)
         self.qurry_journal_action.setObjectName("journal_button")
         self.qurry_journal_action.setIconText(tr("Journal query"))
         self.qurry_journal_action.setToolTip(tr("View/search entire journal."))
