@@ -295,7 +295,7 @@ from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QMessageBox, QLi
     QProgressDialog
 from systemd import journal
 
-JOUNO_VERSION = '1.2.0'
+JOUNO_VERSION = '1.2.2'
 
 JOUNO_CONSOLIDATED_TEXT_KEY = '___JOURNO_FULL_TEXT___'
 
@@ -503,6 +503,10 @@ You should have received a copy of the GNU General Public License along
 with this program. If not, see <a href="https://www.gnu.org/licenses/">https://www.gnu.org/licenses/</a>.
 
 """
+
+STATUS_TIMEOUT_MSEC = 10000
+STATUS_SHORT_TIMEOUT_MSEC = 5000
+STATUS_LONG_TIMEOUT_MSEC = 30000
 
 DEFAULT_QUERY_FIELDS = ['_UID', '_GID', 'QT_CATEGORY', 'PRIORITY', 'SYSLOG_IDENTIFIER',
                         '_COM', '_EXE', 'COREDUMP_COMM', 'COREDUMP_EXE', '_HOSTNAME', ]
@@ -1258,7 +1262,7 @@ class ConfigPanel(DockableWidget):
                     self.config.save()
                     match_panel.clear_selection()
                     ignore_panel.clear_selection()
-                    self.status_bar.showMessage("All changes have been saved.", 5000)
+                    self.status_bar.showMessage("All changes have been saved.", STATUS_TIMEOUT_MSEC)
                     debug(f'config saved ok') if debugging else None
             except FilterValidationException as e:
                 e_title, summary, text = e.args
@@ -1294,7 +1298,7 @@ class ConfigPanel(DockableWidget):
                 if revert_message.exec() == QMessageBox.Cancel:
                     return
             info("Reverting unsaved changes.")
-            self.status_bar.showMessage("Unapplied changes have been reverted.", 5000)
+            self.status_bar.showMessage("Unapplied changes have been reverted.", STATUS_TIMEOUT_MSEC)
             reload_from_config()
 
         def reload_from_config():
@@ -1503,7 +1507,7 @@ class FilterPatternEntryDelegate(QStyledItemDelegate):
                     re.compile(pattern)
                 self.config_panel.signal_editing_filter_pattern.emit(pattern, pattern_is_regexp)
             except re.error as e:
-                self.config_panel.status_bar.showMessage(str(e), 10000)
+                self.config_panel.status_bar.showMessage(str(e), STATUS_TIMEOUT_MSEC)
 
         self.line_edit.textEdited.connect(text_changed)
         return self.line_edit
@@ -1959,7 +1963,7 @@ class MainWindow(QMainWindow):
             journal_panel.set_max_entries(config_panel.get_config().getint('options', 'journal_history_max'))
             global debugging
             debugging = config_panel.get_config().getboolean('options', 'debug_enabled')
-            self.config_panel.status_bar.showMessage(tr("Applying configuration changes."), 3000)
+            self.config_panel.status_bar.showMessage(tr("Applying configuration changes."), STATUS_SHORT_TIMEOUT_MSEC)
             self.journal_panel.static_status_label.setText("")
 
             if self.use_system_tray():
@@ -1995,7 +1999,10 @@ class MainWindow(QMainWindow):
 
         def process_historical_entries(historical_entries: List[Tuple]):
             for entry, notable in historical_entries:
+                if int(time.time() * 1000) % 2000:
+                    self.journal_panel.journal_status_bar.showMessage(tr("Initialising."), 1000)
                 self.journal_panel.add_journal_entry(entry, notable)
+            self.journal_panel.journal_status_bar.showMessage('')
             # Scroll to bottom to await new entries
             self.journal_panel.new_journal_entry(None, False)
 
@@ -2144,6 +2151,7 @@ class JournalPanel(DockableWidget):
             go_next_button.setEnabled(self.scrolled_to_selected is not None)
             go_previous_button.setEnabled(self.scrolled_to_selected is not None)
 
+        self.search_start_time = 0
         search_input = QLineEdit()
         search_input.setFixedWidth(350)
         search_input.addAction(get_themed_icon(ICON_SEARCH_TEXT), QLineEdit.LeadingPosition)
@@ -2165,6 +2173,7 @@ class JournalPanel(DockableWidget):
         search_input.setToolTip(search_tip)
         search_input.textEdited.connect(search_entries)
         search_input.setClearButtonEnabled(True)
+        self.search_input = search_input
         title_layout.addWidget(search_input)
         self.scrolled_to_selected = None
 
@@ -2202,7 +2211,7 @@ class JournalPanel(DockableWidget):
         def view_journal_entry_at_row_number(row: int):
             if row < 0 and (self.table_view.model().rowCount() > 0):
                 row = self.table_view.model().rowCount() - 1
-                self.journal_status_bar.showMessage(tr("Viewing last entry."), 5000)
+                self.journal_status_bar.showMessage(tr("Viewing last entry."), STATUS_SHORT_TIMEOUT_MSEC)
             if row >= 0:
                 journal_entry = self.table_view.model().get_journal_entry(row)
                 # entry_dialog = JournalEntryDialogPlain(self, self.table_view.model().get_journal_entry(row), row)
@@ -2213,9 +2222,9 @@ class JournalPanel(DockableWidget):
                 text = format_journal_entry(journal_entry)
                 status = tr("{kb:.2f} kbytes").format(kb=len(journal_entry[JOUNO_CONSOLIDATED_TEXT_KEY]) / 1024.0)
                 ViewTextDialog(title=window_title, text=text, static_status=status, parent=self)
-                self.journal_status_bar.showMessage(tr("Viewing entry {}.").format(row + 1), 5000)
+                self.journal_status_bar.showMessage(tr("Viewing entry {}.").format(row + 1), STATUS_SHORT_TIMEOUT_MSEC)
             else:
-                self.journal_status_bar.showMessage(tr("No entries available."), 5000)
+                self.journal_status_bar.showMessage(tr("No entries available."), STATUS_SHORT_TIMEOUT_MSEC)
 
         def view_journal_entry_at_index(index: QModelIndex):
             view_journal_entry_at_row_number(index.row())
@@ -2235,20 +2244,20 @@ class JournalPanel(DockableWidget):
                     print('copy a row', row)
                     text = format_journal_entry(self.table_view.model().get_journal_entry(row))
                     self.journal_status_bar.showMessage(tr("Copied the entry {} to the clipboard.").format(row + 1),
-                                                        5000)
+                                                        STATUS_TIMEOUT_MSEC)
                 else:
                     if self.table_view.model().rowCount() > 0:
                         row = self.table_view.model().rowCount() - 1
                         text = format_journal_entry(self.table_view.model().get_journal_entry(row))
-                        self.journal_status_bar.showMessage(tr("Copied last entry."), 5000)
+                        self.journal_status_bar.showMessage(tr("Copied last entry."), STATUS_TIMEOUT_MSEC)
                     else:
-                        self.journal_status_bar.showMessage(tr("No entries available."), 5000)
+                        self.journal_status_bar.showMessage(tr("No entries available."), STATUS_TIMEOUT_MSEC)
                         text = ''
             else:
                 for index in selected:
                     text += format_journal_entry(self.table_view.model().get_journal_entry(index.row())) + '\n'
                 self.journal_status_bar.showMessage(
-                    tr("Copied {} entries to the clipboard.").format(len(selected)), 5000)
+                    tr("Copied {} entries to the clipboard.").format(len(selected)), STATUS_TIMEOUT_MSEC)
             QApplication.clipboard().setText(text)
 
         context_menu = QMenu(tr("Journal Entry Menu"), parent=self)
@@ -2273,18 +2282,26 @@ class JournalPanel(DockableWidget):
         self.title_layout.addWidget(dock_button)
 
     def add_journal_entry(self, journal_entry, notable):
-        if int(time.time() * 1000) % 2000:
-            self.journal_status_bar.showMessage(tr("Initialising."), 500)
         self.table_view.new_journal_entry(journal_entry, notable)
 
     def new_journal_entry(self, journal_entry, notable):
         if journal_entry is not None:
             self.add_journal_entry(journal_entry, notable)
-            self.journal_status_bar.showMessage(tr("New journal entry."), 1000)
-        self.table_view.scrollToBottom()
-        self.static_status_label.setText(
-            tr("{n}/{m}").format(n=self.table_view.model().get_num_entries(),
-                                 m=self.table_view.model().get_max_entries()))
+            message = journal_entry['MESSAGE']
+            if self.search_input.text().strip() == '':
+                self.journal_status_bar.showMessage(
+                    tr("New entry. Message={}{}").format(message[0:80], ' ...' if len(message) > 120 else ''),
+                    STATUS_TIMEOUT_MSEC)
+                self.table_view.scrollToBottom()
+            else:
+                self.journal_status_bar.showMessage(
+                    tr("New entry (scrolling prevented by search text). Message={}{}").format(
+                        journal_entry['MESSAGE'][0:40], ' ...' if len(message) > 80 else ''))
+            self.static_status_label.setText(
+                tr("{n}/{m}").format(n=self.table_view.model().get_num_entries(),
+                                     m=self.table_view.model().get_max_entries()))
+        else:
+            self.table_view.scrollToBottom()
 
     def get_selected_journal_entry(self):
         indexes = self.table_view.selectedIndexes()
@@ -2311,14 +2328,28 @@ class JournalPanel(DockableWidget):
                 # Assume case-insensitive if all text is in lower case.
                 regexp = re.compile(text if regexp_search else re.escape(text),
                                     flags=re.IGNORECASE if text == text.lower() else 0)
+
                 matching_rows_selection = QItemSelection()
-                matched_row_numbers = [row_num for row_num, journal_entry in enumerate(model.journal_entries)
-                                       if regexp.search(journal_entry[JOUNO_CONSOLIDATED_TEXT_KEY]) is not None]
+
+                # matched_row_numbers = [row_num for row_num, journal_entry in enumerate(model.journal_entries)
+                #                        if regexp.search(journal_entry[JOUNO_CONSOLIDATED_TEXT_KEY]) is not None]
+                matched_row_numbers = []
+                self.search_start_time = time.time_ns()
+                my_start_time = self.search_start_time
+                for row_num, journal_entry in enumerate(model.journal_entries):
+                    # Keep processing event loop and stop if a newer search has been started.
+                    # this makes for a responsive interface.
+                    QApplication.processEvents()
+                    if self.search_start_time > my_start_time:
+                        debug("isearch stopped by typing", text) if debugging else None
+                        return
+                    if regexp.search(journal_entry[JOUNO_CONSOLIDATED_TEXT_KEY]) is not None:
+                        matched_row_numbers.append(row_num)
                 match_count = len(matched_row_numbers)
                 if match_count == 0:
-                    self.journal_status_bar.showMessage(tr("Nothing matches"), 2000)
+                    self.journal_status_bar.showMessage(tr("Nothing matches"))
                 elif match_count == len(model.journal_entries):
-                    self.journal_status_bar.showMessage(tr("Everything matches."), 2000)
+                    self.journal_status_bar.showMessage(tr("Everything matches."))
                 else:
                     for row_n in matched_row_numbers:
                         row_n_selection = QItemSelection(model.index(row_n, 0), model.index(row_n, last_column))
@@ -2326,7 +2357,7 @@ class JournalPanel(DockableWidget):
                     self.scrolled_to_selected = model.index(matching_rows_selection.indexes()[0].row(), 0)
                     self.table_view.scrollTo(self.scrolled_to_selected)
                     self.journal_status_bar.showMessage(
-                        tr("Matched {match_count} entries.").format(match_count=match_count), 4000)
+                        tr("Matched {match_count} entries.").format(match_count=match_count))
                 self.table_view.selectionModel().select(matching_rows_selection, QItemSelectionModel.SelectCurrent)
         finally:
             self.table_view.setEditTriggers(save_triggers)
@@ -2344,8 +2375,7 @@ class JournalPanel(DockableWidget):
             new_pos = (matched_rows.index(self.scrolled_to_selected) + direction) % matched_count
             self.scrolled_to_selected = matched_rows[new_pos]
             self.journal_status_bar.showMessage(
-                tr("Match {}/{}, row {}.").format(new_pos + 1, matched_count, self.scrolled_to_selected.row() + 1),
-                10000)
+                tr("Match {}/{}, row {}.").format(new_pos + 1, matched_count, self.scrolled_to_selected.row() + 1))
         self.table_view.scrollTo(self.scrolled_to_selected, QAbstractItemView.PositionAtCenter)
 
     def set_max_entries(self, max_entries: int) -> None:
@@ -2522,7 +2552,8 @@ class ViewTextDialog(QDialog):
         def re_search_toggle(enable: bool):
             self.re_search_enabled = enable
             manage_icon(re_action, ICON_REGEXP_SEARCH if enable else ICON_PLAIN_TEXT_SEARCH)
-            status_bar.showMessage(tr("Regular expression search.") if enable else tr("Plain text search."), 10000)
+            status_bar.showMessage(
+                tr("Regular expression search.") if enable else tr("Plain text search."))
 
         re_action.toggled.connect(re_search_toggle)
         search_input.setToolTip(tr(
@@ -2534,7 +2565,7 @@ class ViewTextDialog(QDialog):
 
         def copy_to_clipboard():
             QGuiApplication.clipboard().setText(text_view.toPlainText())
-            status_bar.showMessage(tr("Copied all text to the clipboard"), 5000)
+            status_bar.showMessage(tr("Copied all text to the clipboard"), STATUS_TIMEOUT_MSEC)
 
         copy_button = transparent_button(manage_icon(QPushButton('', self), ICON_COPY_TO_CLIPBOARD))
         copy_button.setToolTip(tr("Copy entire text to clipboard"))
@@ -2894,7 +2925,7 @@ class QueryJournalWidget(QMainWindow):
         self.query_task.finished.connect(self.query_finished)
 
         def progress_func(count: int):
-            self.status_bar.showMessage(tr("Found {} entries so far, continuing..").format(count), 2000)
+            self.status_bar.showMessage(tr("Found {} entries so far, continuing..").format(count))
 
         self.query_task.progress.connect(progress_func)
         self.query_task.start()
@@ -2905,8 +2936,7 @@ class QueryJournalWidget(QMainWindow):
         self.status_bar.showMessage(
             tr("Stopped at {} entries at {:.2f} seconds, creating view.."
                if self.query_task.stopped else
-               "Retrieved at {} entries in {:.2f} seconds, creating view..").format(number_of_matches, elapsed_time),
-            5000)
+               "Retrieved at {} entries in {:.2f} seconds, creating view..").format(number_of_matches, elapsed_time))
         QApplication.processEvents()
         query_result = QWidget()
         query_layout = QVBoxLayout()
@@ -2916,7 +2946,10 @@ class QueryJournalWidget(QMainWindow):
         journal_panel.title_label.setText(title)
         query_layout.addWidget(journal_panel)
         for journal_entry in self.query_task.results:
+            if int(time.time() * 1000) % 2000:
+                journal_panel.journal_status_bar.showMessage(tr("Initialising."), 1000)
             journal_panel.add_journal_entry(journal_entry, True)
+        journal_panel.journal_status_bar.showMessage('')
         journal_panel.static_status_label.setText(
             tr("Stopped at {} entries at {:.2f} seconds."
                if self.query_task.stopped else
