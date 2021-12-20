@@ -81,7 +81,7 @@ install -m644 %{name}.png %{buildroot}/%{_datadir}/icons
 %changelog
 
 * Mon Dec 20 2021 Michael Hamilton <michael@actrix.gen.nz>
-- More responsive incremental search. Revised status bar timeouts.: jouno 1.2.2
+- More responsive incremental search, revised status bar timeouts: jouno 1.2.2
 * Wed Dec 15 2021 Michael Hamilton <michael@actrix.gen.nz>
 - Minor improvements: jouno 1.2.1
 * Mon Dec 06 2021 Michael Hamilton <michael@actrix.gen.nz>
