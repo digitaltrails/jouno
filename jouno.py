@@ -987,22 +987,25 @@ class ForwardFileTask(QThread):
     def __follow(self, file: TextIO) -> Iterator[str]:
         # gathers multiple lines into one incident
         line = ''
+        time_read = 0.0
         while True:
-            available_content = file.readline()
-            if available_content is None:
+            new_text = file.readline()
+            if new_text is None:
                 # Can this even happen?
                 return
-            elif available_content == '':
-                if line.endswith("\n"):
+            elif new_text == '':
+                # wait a bit in case this line is part of a group of lines
+                if line.endswith("\n") and time_read + 0.25 < time.time():
                     yield line
                     line = ''
                 time.sleep(0.25)
             else:
-                # TODO something smarter
-                if len(line) > 3200:
-                    yield line
-                    line = ''
-                line += available_content
+                time_read = time.time()
+                line += new_text
+            # deal with a large stream of data or data that is not newline terminated for an extended period
+            if line != '' and time_read + 2.0 < time.time():
+                yield line
+                line = ''
 
 
 # ######################## USER INTERFACE CODE ######################################################################
