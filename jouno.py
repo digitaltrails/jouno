@@ -511,6 +511,8 @@ STATUS_TIMEOUT_MSEC = 10000
 STATUS_SHORT_TIMEOUT_MSEC = 5000
 STATUS_LONG_TIMEOUT_MSEC = 30000
 
+ERROR_DBUS_NOTIFICATIONS_UNAVAILABLE = "DBUS notification service unavailable"
+
 DEFAULT_QUERY_FIELDS = ['_UID', '_GID', 'QT_CATEGORY', 'PRIORITY', 'SYSLOG_IDENTIFIER',
                         '_COM', '_EXE', 'COREDUMP_COMM', 'COREDUMP_EXE', '_HOSTNAME', ]
 
@@ -522,7 +524,7 @@ burst_truncate_messages = 6
 notification_seconds = 30
 journal_history_max = 500
 system_tray_enabled = no
-start_with_notifications_enabled = no
+start_with_notifications_enabled = yes
 list_all_enabled = no
 forward_session_log_enabled = no
 debug_enabled = no
@@ -630,19 +632,20 @@ class NotifyFreeDesktop:
 
     def notify_desktop(self, app_name: str, summary: str, message: str, priority: Priority, timeout: int):
         # https://specifications.freedesktop.org/notification-spec/notification-spec-latest.html
-        replace_id = 0
-        notification_icon = NOTIFICATION_ICONS[priority] + ".png"
-        action_requests = []
-        # extra_hints = {"urgency": 1, "sound-name": "dialog-warning", }
-        extra_hints = {}
-        self.notify_interface.Notify(app_name,
-                                     replace_id,
-                                     notification_icon,
-                                     escape(summary).encode('UTF-8'),
-                                     escape(message).encode('UTF-8'),
-                                     action_requests,
-                                     extra_hints,
-                                     timeout)
+        if self.notify_interface is not None:
+            replace_id = 0
+            notification_icon = NOTIFICATION_ICONS[priority] + ".png"
+            action_requests = []
+            # extra_hints = {"urgency": 1, "sound-name": "dialog-warning", }
+            extra_hints = {}
+            self.notify_interface.Notify(app_name,
+                                         replace_id,
+                                         notification_icon,
+                                         escape(summary).encode('UTF-8'),
+                                         escape(message).encode('UTF-8'),
+                                         action_requests,
+                                         extra_hints,
+                                         timeout)
 
 
 def get_config_path() -> Path:
@@ -730,7 +733,7 @@ def determine_priority(journal_entries: List[Mapping[str, Any]]) -> Priority:
 
 class JournalWatcher:
 
-    def __init__(self, supervisor=None):
+    def __init__(self, supervisor: 'JournalWatcherTask'):
         self.burst_truncate: int = 3
         self.polling_millis: int = 2_000
         self.notification_timeout_millis: int = 60_000
@@ -881,7 +884,6 @@ class JournalWatcher:
 
     def watch_journal(self):
         self._stop = False
-        notify = NotifyFreeDesktop()
 
         with journal.Reader() as journal_reader:
 
@@ -894,11 +896,18 @@ class JournalWatcher:
             journal_reader_poll = select.poll()
             journal_reader_poll.register(journal_reader, journal_reader.get_events())
             journal_reader.add_match()
+            notifier = None
             while True:
                 if self.is_stop_requested():
                     return
                 if self.config.refresh():
                     self.update_settings_from_config()
+                if self.notifications_enabled and notifier is None:
+                    try:
+                        notifier = NotifyFreeDesktop()
+                    except dbus.exceptions.DBusException as e:
+                        self.supervisor.signal_error.emit(ERROR_DBUS_NOTIFICATIONS_UNAVAILABLE, e)
+                        self.notifications_enabled = False
                 burst_count = 0
                 notable_list = []
                 limit_time_ns = self.burst_max_millis * 1_000_000 + time.time_ns()
@@ -915,11 +924,11 @@ class JournalWatcher:
                             if notable or self.forward_all:
                                 self.supervisor.new_journal_entry(journal_entry, notable)
                 if self.notifications_enabled and len(notable_list):
-                    notify.notify_desktop(app_name=self.determine_app_names(notable_list),
-                                          summary=self.determine_summary(notable_list),
-                                          message=self.determine_message(notable_list),
-                                          priority=determine_priority(notable_list),
-                                          timeout=self.notification_timeout_millis)
+                    notifier.notify_desktop(app_name=self.determine_app_names(notable_list),
+                                            summary=self.determine_summary(notable_list),
+                                            message=self.determine_message(notable_list),
+                                            priority=determine_priority(notable_list),
+                                            timeout=self.notification_timeout_millis)
 
     def load_past_entries(self, journal_reader):
         data = []
@@ -1763,6 +1772,7 @@ class JournalWatcherTask(QThread):
     signal_historical_entries = pyqtSignal(list)
     signal_progress = pyqtSignal(int)
     signal_new_entry = pyqtSignal(dict, bool)
+    signal_error = pyqtSignal(str, Exception)
 
     def __init__(self) -> None:
         super().__init__()
@@ -2121,6 +2131,18 @@ class MainWindow(QMainWindow):
         def process_progress(count: int):
             self.journal_panel.journal_status_bar.showMessage(tr("Scanned {} entries").format(count))
 
+        def handle_watcher_error(error_str: str, e: Exception):
+            msg = QMessageBox(self)
+            msg.setWindowTitle(tr("Error"))
+            msg.setText(tr(error_str))
+            msg.setDetailedText(str(e))
+            msg.setIcon(QMessageBox.Critical)
+            msg.setStandardButtons(QMessageBox.Ok)
+            msg.exec()
+            if error_str == ERROR_DBUS_NOTIFICATIONS_UNAVAILABLE:
+                enable_notifier(False)
+
+        journal_watcher_task.signal_error.connect(handle_watcher_error)
         journal_watcher_task.signal_new_entry.connect(new_journal_entry)
         journal_watcher_task.signal_historical_entries.connect(process_historical_entries)
         journal_watcher_task.signal_progress.connect(process_progress)
