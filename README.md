@@ -24,6 +24,8 @@ DBUS Notifications as popup messages). Jouno's feature set includes:
    + Forwarding of filtered messages to the desktop as DBUS-notifications.
    + Journal message-burst bundling to minimise desktop notifications.
    + Controls and options to enable/disable forwarding.
+   + Optional forwarding of the xorg-session.log or wayland-session.log to the systemd-journal (consolidated desktop
+     logging).
  * Filtering
    + Filtering to include or exclude messages.
    + Plain-text and regular-expression filtering.

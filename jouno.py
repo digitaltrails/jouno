@@ -37,7 +37,8 @@ DBUS Notifications as popup messages). Jouno's feature set includes:
    + Forwarding of filtered messages to the desktop as DBUS-notifications.
    + Journal message-burst bundling to minimise desktop notifications.
    + Controls and options to enable/disable forwarding.
-   + Optional forwarding of the xorg-session.log to the systemd-journal (considiate desktop logging).
+   + Optional forwarding of the xorg-session.log or wayland-session.log to the systemd-journal (consolidated desktop
+     logging).
  * Filtering
    + Filtering to include or exclude messages.
    + Plain-text and regular-expression filtering.
@@ -523,7 +524,7 @@ journal_history_max = 500
 system_tray_enabled = no
 start_with_notifications_enabled = yes
 list_all_enabled = no
-forward_xorg_session_enabled = no
+forward_session_log_enabled = no
 debug_enabled = no
 query_field_list = {' '.join(DEFAULT_QUERY_FIELDS)}
 
@@ -568,7 +569,8 @@ CONFIG_OPTIONS_LIST: List[ConfigOption] = [
     ConfigOption('start_with_notifications_enabled', 'Jouno should start with desktop notifications enabled.'),
     ConfigOption('list_all_enabled', 'The Recent notifications panel should show all entries, including non-notified.'),
     ConfigOption('from_boot_enabled', 'Show old journal entries from boot onward.'),
-    ConfigOption('forward_xorg_session_enabled', 'Forward xorg-session.log to the systemd-journal (if it exists).'),
+    ConfigOption('forward_session_log_enabled',
+                 'Forward xorg-session.log or wayland-session.log to the systemd-journal (if it exists).'),
     ConfigOption('debug_enabled', 'Enable extra debugging output to standard-out.'),
     ConfigOption('query_field_list', 'Default query fields.'),
 ]
@@ -953,15 +955,16 @@ def tr(source_text: str):
     return QCoreApplication.translate('jouno', source_text)
 
 
-def find_file(name: str, search_paths: List[Path]):
+def find_most_recent_file(name_list: List[str], search_paths: List[Path]):
     latest = None
     for path in search_paths:
         for root, dirs, files in os.walk(path):
-            if name in files:
-                possible = os.path.join(root, name)
-                print(possible)
-                if latest is None or possible.getmtime() > latest.getmtime():
-                    latest = possible
+            for name in name_list:
+                if name in files:
+                    possible = os.path.join(root, name)
+                    print(possible)
+                    if latest is None or os.path.getmtime(possible) > os.path.getmtime(latest):
+                        latest = possible
     return latest
 
 
@@ -1207,6 +1210,13 @@ class DockContainer(QDockWidget):
         self.setFloating(False)
         if show:
             self.dock_window.show()
+
+    def undock_and_show(self):
+        if self.is_docked_to_home:
+            self.dock_to_dock_window(show=True)
+        else:
+            self.activate_dock_window()
+            self.dock_window.showNormal()
 
     def activate_dock_window(self):
         if not self.is_docked_to_home:
@@ -1777,7 +1787,7 @@ class JournalWatcherTask(QThread):
         self.signal_progress.emit(count)
 
 
-class XorgSessionForwarder:
+class SessionForwarder:
     def __init__(self, main_window: QMainWindow):
         self.main_window = main_window
         self.forwarder: ForwardFileTask = None
@@ -1787,12 +1797,12 @@ class XorgSessionForwarder:
             if self.forwarder is not None and self.forwarder.isRunning():
                 return
             search_path_list = [Path.home().joinpath('.local/share/sddm'), Path.home().joinpath('.local/share/gdm'), Path('/var/log/gdm')]
-            filename = 'xorg-session.log'
-            session_file = find_file(filename, search_path_list)
+            filename_list = ['xorg-session.log', 'wayland-session.log']
+            session_file = find_most_recent_file(filename_list, search_path_list)
             if session_file is None:
                 error_message = QMessageBox(self.main_window)
-                error_message.setText(tr("Cannot forward {} to systemd journal.").format(filename))
-                error_message.setDetailedText(tr('Failed to find {} in {}').format(filename, [str(x) for x in search_path_list]))
+                error_message.setText(tr("Cannot forward {} to systemd journal.").format(str[filename_list]))
+                error_message.setDetailedText(tr('Failed to find {} in {}').format(str[filename_list], [str(x) for x in search_path_list]))
                 error_message.setIcon(QMessageBox.Question)
                 error_message.setStandardButtons(QMessageBox.Ok)
                 error_message.setIcon(QMessageBox.Critical)
@@ -1810,7 +1820,7 @@ class MainToolBar(QToolBar):
 
     def __init__(self,
                  run_func: Callable, notify_func: Callable,
-                 add_func: Callable, del_func: Callable, config_func: Callable,
+                 add_func: Callable, del_func: Callable, settings_func: Callable,
                  journal_viewer_func: Callable,
                  menu: QMenu,
                  parent: QMainWindow):
@@ -1876,7 +1886,7 @@ class MainToolBar(QToolBar):
         self.qurry_journal_action.setToolTip(tr("View/search entire journal."))
 
         self.addSeparator()
-        self.settings_action = manage_icon(self.addAction("settings", config_func), ICON_SETTINGS_CONFIGURE)
+        self.settings_action = manage_icon(self.addAction("settings", settings_func), ICON_SETTINGS_CONFIGURE)
         self.settings_action.setObjectName("settings_button")
         self.settings_action.setIconText(tr("Settings"))
         self.settings_action.setToolTip(tr("Edit settings"))
@@ -1949,7 +1959,7 @@ def pad_text(text_list: List[str]):
 class MainContextMenu(QMenu):
 
     def __init__(self, run_func: Callable, notify_func: Callable, quit_func: Callable,
-                 query_journal_func: Callable, config_func: Callable,
+                 query_journal_func: Callable, settings_func: Callable,
                  parent: 'MainWindow'):
         super().__init__(parent=parent)
         self.listen_action = manage_icon(self.addAction(tr("Stop journal monitoring"), run_func),
@@ -1959,7 +1969,7 @@ class MainContextMenu(QMenu):
         self.addSeparator()
         manage_icon(self.addAction(tr('Journal query'), query_journal_func), SVG_TOOLBAR_QUERY_JOURNAL)
         self.addSeparator()
-        manage_icon(self.addAction(tr("Settings"), config_func), ICON_SETTINGS_CONFIGURE)
+        manage_icon(self.addAction(tr("Settings"), settings_func), ICON_SETTINGS_CONFIGURE)
         self.addSeparator()
         manage_icon(self.addAction(tr('Help'), HelpDialog.invoke), ICON_HELP_CONTENTS)
         manage_icon(self.addAction(tr('About'), AboutDialog.invoke), ICON_HELP_ABOUT)
@@ -2004,7 +2014,7 @@ class MainWindow(QMainWindow):
         app.setApplicationDisplayName(app_name)
         app.setApplicationVersion(JOUNO_VERSION)
 
-        xorg_session_forwarder = XorgSessionForwarder(self)
+        xorg_session_forwarder = SessionForwarder(self)
 
         self.settings = QSettings('jouno.qt.state', 'jouno')
 
@@ -2061,7 +2071,7 @@ class MainWindow(QMainWindow):
             self.config_panel.status_bar.showMessage(tr("Applying configuration changes."), STATUS_SHORT_TIMEOUT_MSEC)
             self.journal_panel.static_status_label.setText("")
             xorg_session_forwarder.enable(
-                config_panel.get_config().getboolean('options', 'forward_xorg_session_enabled', fallback=False))
+                config_panel.get_config().getboolean('options', 'forward_session_log_enabled', fallback=False))
             if self.use_system_tray():
                 if not tray.isVisible():
                     tray.setVisible(True)
@@ -2079,8 +2089,8 @@ class MainWindow(QMainWindow):
         def query_journal() -> None:
             QueryInitializeWidget(parent=self)
 
-        def edit_config() -> None:
-            pass
+        def settings_edit() -> None:
+            self.config_dock_container.undock_and_show()
 
         self.config_panel = config_panel = ConfigPanel(tab_change=tab_change, config_change_func=config_change)
         self.config_dock_container = DockContainer(
@@ -2116,12 +2126,12 @@ class MainWindow(QMainWindow):
 
         app_context_menu = MainContextMenu(
             run_func=toggle_listener, notify_func=toggle_notifier, quit_func=quit_app,
-            query_journal_func=query_journal, config_func=edit_config,
+            query_journal_func=query_journal, settings_func=settings_edit,
             parent=self)
 
         tool_bar = MainToolBar(
             run_func=toggle_listener, notify_func=toggle_notifier,
-            add_func=add_filter, del_func=delete_filter, journal_viewer_func=query_journal, config_func=edit_config,
+            add_func=add_filter, del_func=delete_filter, journal_viewer_func=query_journal, settings_func=settings_edit,
             menu=app_context_menu,
             parent=self)
         self.tool_bar = tool_bar
@@ -2141,7 +2151,7 @@ class MainWindow(QMainWindow):
         enable_notifier(config_panel.get_config().getboolean('options', 'start_with_notifications_enabled'))
 
         xorg_session_forwarder.enable(
-            config_panel.get_config().getboolean('options', 'forward_xorg_session_enabled', fallback=False))
+            config_panel.get_config().getboolean('options', 'forward_session_log_enabled', fallback=False))
 
         if len(self.settings.allKeys()) == 0:
             # First run or qt settings have been erased - guess at sizes and locations
