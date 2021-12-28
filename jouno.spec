@@ -97,7 +97,7 @@ install -m644 %{name}.png %{buildroot}/%{_datadir}/icons/hicolor/64x64/apps
 - Detect if system tray is present, if not, ignore system_tray_enabled: jouno 1.1.2
 * Fri Dec 03 2021 Michael Hamilton <michael@actrix.gen.nz>
 - Faster startup by deferring UI scroll-to-bottom until old entries are read: jouno 1.1.1
-* Fir Dec 03 2021 Michael Hamilton <michael@actrix.gen.nz>
+* Fri Dec 03 2021 Michael Hamilton <michael@actrix.gen.nz>
 - Add the ability to show past messages, ether n, or from last boot: jouno 1.1.0
 * Thu Nov 18 2021 Michael Hamilton <michael@actrix.gen.nz>
 - Default system-tray-enabled to false - some systems lack a system tray: jouno 1.0.7
