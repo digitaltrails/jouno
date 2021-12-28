@@ -17,7 +17,7 @@
 #
 
 Name: jouno
-Version: 1.2.2
+Version: 1.3.0
 Release: 0
 License: GPL-3.0-or-later
 BuildArch: noarch
@@ -48,7 +48,7 @@ exit 0
 %install
 mkdir -p %{buildroot}/%{_bindir}
 mkdir -p %{buildroot}/%{_datadir}/applications
-mkdir -p %{buildroot}/%{_datadir}/icons
+mkdir -p %{buildroot}/%{_datadir}/icons/hicolor/64x64/apps
 install -m 755 jouno.py  %{buildroot}/%{_bindir}/%{name}
 
 cat > %{name}.desktop <<'EOF'
@@ -64,7 +64,7 @@ Categories=Qt;System;Monitor;System;
 EOF
 
 install -m644 %{name}.desktop %{buildroot}/%{_datadir}/applications
-install -m644 %{name}.png %{buildroot}/%{_datadir}/icons
+install -m644 %{name}.png %{buildroot}/%{_datadir}/icons/hicolor/64x64/apps
 
 #gzip -c docs/_build/man/vdu_controls.1 > %{buildroot}/%{_datadir}/man/man1/%{name}.1.gz
 
@@ -72,14 +72,19 @@ install -m644 %{name}.png %{buildroot}/%{_datadir}/icons
 
 
 %files
+%dir %{_datadir}/icons/hicolor
+%dir %{_datadir}/icons/hicolor/*
+%dir %{_datadir}/icons/hicolor/*/apps
 %license LICENSE.md
 %defattr(-,root,root)
 %{_bindir}/%{name}
 %{_datadir}/applications/%{name}.desktop
-%{_datadir}/icons/%{name}.png
+%{_datadir}/icons/hicolor/64x64/apps/%{name}.png
 
 %changelog
 
+* Tue Dec 28 2021 Michael Hamilton <michael@actrix.gen.nz>
+- Implement forward_xorg_session_enabled, wayland porting: jouno 1.3.0
 * Mon Dec 20 2021 Michael Hamilton <michael@actrix.gen.nz>
 - More responsive incremental search, revised status bar timeouts: jouno 1.2.2
 * Wed Dec 15 2021 Michael Hamilton <michael@actrix.gen.nz>
@@ -92,15 +97,15 @@ install -m644 %{name}.png %{buildroot}/%{_datadir}/icons
 - Detect if system tray is present, if not, ignore system_tray_enabled: jouno 1.1.2
 * Fri Dec 03 2021 Michael Hamilton <michael@actrix.gen.nz>
 - Faster startup by deferring UI scroll-to-bottom until old entries are read: jouno 1.1.1
-* Thu Dec 03 2021 Michael Hamilton <michael@actrix.gen.nz>
+* Fir Dec 03 2021 Michael Hamilton <michael@actrix.gen.nz>
 - Add the ability to show past messages, ether n, or from last boot: jouno 1.1.0
 * Thu Nov 18 2021 Michael Hamilton <michael@actrix.gen.nz>
 - Default system-tray-enabled to false - some systems lack a system tray: jouno 1.0.7
 * Thu Nov 09 2021 Michael Hamilton <michael@actrix.gen.nz>
 - Show position when moving to the next/previous match: jouno 1.0.6
-* Thu Nov 05 2021 Michael Hamilton <michael@actrix.gen.nz>
+* Fri Nov 05 2021 Michael Hamilton <michael@actrix.gen.nz>
 - Escape HTML before forwarding. Minor fixes and improvements: jouno 1.0.5
-* Thu Nov 05 2021 Michael Hamilton <michael@actrix.gen.nz>
+* Fri Nov 05 2021 Michael Hamilton <michael@actrix.gen.nz>
 - Abandon Qt table edit-mode in favour of read-only+context-menu: jouno 1.0.4
 * Thu Nov 04 2021 Michael Hamilton <michael@actrix.gen.nz>
 - Added search to the Journal-Entry full-text panel: jouno 1.0.3
