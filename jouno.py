@@ -1800,7 +1800,7 @@ class JournalWatcherTask(QThread):
         self.signal_progress.emit(count)
 
 
-class SessionForwarder:
+class SessionLogForwarder:
     def __init__(self, main_window: QMainWindow):
         self.main_window = main_window
         self.forwarder: ForwardFileTask = None
@@ -2027,7 +2027,7 @@ class MainWindow(QMainWindow):
         app.setApplicationDisplayName(app_name)
         app.setApplicationVersion(JOUNO_VERSION)
 
-        xorg_session_forwarder = SessionForwarder(self)
+        xorg_session_forwarder = SessionLogForwarder(self)
 
         self.settings = QSettings('jouno.qt.state', 'jouno')
 
