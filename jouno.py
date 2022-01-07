@@ -512,6 +512,7 @@ STATUS_SHORT_TIMEOUT_MSEC = 5000
 STATUS_LONG_TIMEOUT_MSEC = 30000
 
 ERROR_DBUS_NOTIFICATIONS_UNAVAILABLE = "DBUS notification service unavailable"
+ERROR_DBUS_NOTIFICATION_FAILED = "DBUS notification failed"
 
 DEFAULT_QUERY_FIELDS = ['_UID', '_GID', 'QT_CATEGORY', 'PRIORITY', 'SYSLOG_IDENTIFIER',
                         '_COM', '_EXE', 'COREDUMP_COMM', 'COREDUMP_EXE', '_HOSTNAME', ]
@@ -924,11 +925,14 @@ class JournalWatcher:
                             if notable or self.forward_all:
                                 self.supervisor.new_journal_entry(journal_entry, notable)
                 if self.notifications_enabled and len(notable_list):
-                    notifier.notify_desktop(app_name=self.determine_app_names(notable_list),
-                                            summary=self.determine_summary(notable_list),
-                                            message=self.determine_message(notable_list),
-                                            priority=determine_priority(notable_list),
-                                            timeout=self.notification_timeout_millis)
+                    try:
+                        notifier.notify_desktop(app_name=self.determine_app_names(notable_list),
+                                                summary=self.determine_summary(notable_list),
+                                                message=self.determine_message(notable_list),
+                                                priority=determine_priority(notable_list),
+                                                timeout=self.notification_timeout_millis)
+                    except dbus.exceptions.DBusException as e:
+                        self.supervisor.signal_error.emit(ERROR_DBUS_NOTIFICATION_FAILED, e)
 
     def load_past_entries(self, journal_reader):
         data = []
@@ -2022,6 +2026,11 @@ class MainWindow(QMainWindow):
         info(f"Icon theme '{QIcon.themeName()}' >> is_dark_theme()={is_dark_theme()}")
 
         QGuiApplication.setDesktopFileName('jouno')
+
+        global is_wayland
+        is_wayland = QGuiApplication.platformName() == "wayland"
+        debug("is_wayland", is_wayland) if debugging else None
+
         app_name = tr('Jouno')
         app.setWindowIcon(get_themed_icon(SVG_JOUNO_LIGHT))
         app.setApplicationDisplayName(app_name)
