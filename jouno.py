@@ -2433,13 +2433,16 @@ class JournalPanel(DockableWidget):
 
     def new_journal_entry(self, journal_entry, notable):
         if journal_entry is not None:
+            scroll_bar = self.table_view.verticalScrollBar()
+            at_bottom = scroll_bar.value() == scroll_bar.maximum()
             self.add_journal_entry(journal_entry, notable)
             message = journal_entry['MESSAGE']
             if self.search_input.text().strip() == '':
                 self.journal_status_bar.showMessage(
                     tr("New entry. Message={}{}").format(message[0:80], ' ...' if len(message) > 120 else ''),
                     STATUS_TIMEOUT_MSEC)
-                self.table_view.scrollToBottom()
+                if at_bottom:
+                    self.table_view.scrollToBottom()
             else:
                 self.journal_status_bar.showMessage(
                     tr("New entry (scrolling prevented by search text). Message={}{}").format(
