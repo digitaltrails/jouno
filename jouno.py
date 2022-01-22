@@ -2882,7 +2882,7 @@ class QueryInitializeWidget(QProgressDialog):
 
 class QueryJournalWidget(QMainWindow):
     def __init__(self, query_meta_data: QueryMetaData, parent: MainWindow):
-        super().__init__(parent=parent)
+        super().__init__(parent=parent, flags=Qt.Dialog)
         self.main_window = parent
         self.setObjectName("journal-query")
 
