@@ -83,7 +83,7 @@ install -m644 %{name}.png %{buildroot}/%{_datadir}/icons/hicolor/64x64/apps
 
 %changelog
 
-* Sat Jan 22 2021 Michael Hamilton <michael@actrix.gen.nz>
+* Sat Jan 22 2022 Michael Hamilton <michael@actrix.gen.nz>
 - On new message, on scroll to new end if prior position was at end: jouno 1.3.1
 * Tue Dec 28 2021 Michael Hamilton <michael@actrix.gen.nz>
 - Implement forward_xorg_session_enabled, wayland porting: jouno 1.3.0
