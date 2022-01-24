@@ -323,6 +323,7 @@ ICON_GO_NEXT = "go-down"
 ICON_GO_PREVIOUS = "go-up"
 ICON_CLEAR_RECENTS = "edit-clear-all"
 ICON_REVERT = 'edit-undo'
+ICON_WINDOW_CLOSE = 'window-close'
 # This might only be KDE/Linux icons - not in Freedesktop Standard.
 ICON_APPLY = "dialog-ok-apply"
 ICON_VIEW_JOURNAL_ENTRY = 'view-fullscreen'
@@ -3030,6 +3031,12 @@ class QueryJournalWidget(QMainWindow):
         reset_button = manage_icon(QPushButton(tr("Reset Query")), ICON_REVERT)
         reset_button.clicked.connect(reset_func)
         button_box_layout.addWidget(reset_button)
+
+        button_box_layout.addStretch()
+        close_button = manage_icon(QPushButton(tr("Close")), ICON_WINDOW_CLOSE)
+        close_button.clicked.connect(self.close)
+        button_box_layout.addWidget(close_button)
+
         layout.addWidget(button_box)
         self.query_desc_widget.setText(self.query_description())
         self.setCentralWidget(central)
