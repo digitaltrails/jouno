@@ -2767,6 +2767,8 @@ class QueryMetaData(QThread):
         boot_count = 0
         try:
             self.progress.emit(tr("Getting boot data.."))
+            # Run for enough time for the external GUI thread to finish its drawing before it is signaled.
+            self.msleep(1000)
             with journal.Reader() as reader:
                 boot_id_set = reader.query_unique("_BOOT_ID")
             for boot_id in boot_id_set:
@@ -2857,7 +2859,7 @@ class QueryInitializeWidget(QProgressDialog):
         layout = QVBoxLayout()
         layout.setAlignment(Qt.AlignHCenter)
         self.setLayout(layout)
-        status_label = QLabel()
+        status_label = QLabel(tr("Retrieving journal metadata..."))
         layout.addWidget(status_label)
         self.step = 0
 
@@ -2875,10 +2877,10 @@ class QueryInitializeWidget(QProgressDialog):
         query_metadata.progress.connect(progress_func)
         query_metadata.finished.connect(finished_func)
         self.canceled.connect(query_metadata.stop)
-        query_metadata.start()
         self.show()
         self.raise_()
         self.activateWindow()
+        query_metadata.start()
 
 
 class QueryJournalWidget(QMainWindow):
