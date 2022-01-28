@@ -96,6 +96,9 @@ Dependency installation on ``OpenSUSE``::
 
         zypper install python38-QtPy python38-systemd python38-dbus-python
 
+If you want to be able to read all of a system's journal entries you will need to be a member of the Linux
+systemd-journal group.
+
 Installing
 ----------
 
