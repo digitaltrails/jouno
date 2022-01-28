@@ -2198,6 +2198,15 @@ class MainWindow(QMainWindow):
             self.config_dock_container.setGeometry(x // 2 - 150 - 2 * x // 3, y // 3, x // 3, y // 2)
         self.app_restore_state()
 
+        try:
+            if grp.getgrnam('systemd-journal').gr_gid not in os.getgroups():
+                self.statusBar().showMessage(
+                    tr("** To see all messages please get yourself added to the Linux systemd-journald group. **"),
+                    30000)
+        except KeyError as e:
+            self.statusBar().showMessage(
+                tr("This system lacks a systemd-journal group, normally it should."), 10000)
+
         rc = app.exec_()
         if rc == 999:  # EXIT_CODE_FOR_RESTART:
             QProcess.startDetached(app.arguments()[0], app.arguments()[1:])
@@ -3039,7 +3048,7 @@ class QueryJournalWidget(QMainWindow):
         close_button.clicked.connect(self.close)
         button_box_layout.addWidget(close_button)
 
-        layout.addWidget(button_box)
+        layout.addRow('',button_box)
         self.query_desc_widget.setText(self.query_description())
         self.setCentralWidget(central)
         self.status_bar = QStatusBar()
