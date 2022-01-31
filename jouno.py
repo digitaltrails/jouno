@@ -2847,19 +2847,53 @@ class QueryBootInfo:
         self.boot_number = 0
 
 
+def get_name_from_uid(uid: int) -> str:
+    try:
+        return pwd.getpwuid(uid).pw_name
+    except KeyError:
+        return str(uid)
+
+
+def get_name_from_gid(gid: int) -> str:
+    try:
+        return grp.getgrgid(gid).gr_name
+    except KeyError:
+        return str(gid)
+
+
+def get_uid_from_name(name: str):
+    try:
+        return pwd.getpwnam(name).pw_uid
+    except KeyError:
+        try:
+            return int(name)
+        except ValueError:
+            return -1
+
+
+def get_gid_from_name(name: str):
+    try:
+        return pwd.getgrnam(name).gr_gid
+    except KeyError:
+        try:
+            return int(name)
+        except ValueError:
+            return -1
+
+
 class QueryFieldValue:
     def __init__(self, field_name: str, value):
         self.value = value
         if field_name == '_UID':
-            description = pwd.getpwuid(value).pw_name
+            description = get_name_from_uid(value)
             sort_key = description
         elif field_name == '_GID':
-            description = grp.getgrgid(value).gr_name
+            description = get_name_from_gid(value)
             sort_key = description
         else:
             description = str(value)
             sort_key = value
-        self.description = str(description)
+        self.description = description
         self.sort_key = sort_key
 
 
@@ -3512,9 +3546,9 @@ class QueryFieldWidget(QGroupBox):
 
     def get_checked_values(self):
         if self.field_name == '_UID':
-            return [pwd.getpwnam(checkbox.text()).pw_uid for checkbox in self.checkbox_list if checkbox.isChecked()]
+            return [get_uid_from_name(checkbox.text()) for checkbox in self.checkbox_list if checkbox.isChecked()]
         elif self.field_name == '_GID':
-            return [grp.getgrnam(checkbox.text()).gr_gid for checkbox in self.checkbox_list if checkbox.isChecked()]
+            return [get_gid_from_name(checkbox.text()) for checkbox in self.checkbox_list if checkbox.isChecked()]
         return [checkbox.text() for checkbox in self.checkbox_list if checkbox.isChecked()]
 
     def get_description(self):
