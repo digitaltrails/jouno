@@ -2636,11 +2636,11 @@ class JournalTableModel(QStandardItemModel):
         self.appendRow(
             [
                 selectable(align_right(QStandardItem(f"{journal_entry['__REALTIME_TIMESTAMP']:%y-%m-%d %H:%M:%S}"))),
-                selectable(QStandardItem(journal_entry['_HOSTNAME'])),
+                selectable(QStandardItem(journal_entry['_HOSTNAME'] if '_HOSTNAME' in journal_entry else 'UNKNOWN')),
                 selectable(QStandardItem(source)),
                 # TODO smarter choice when _PID is not present.
                 selectable(align_right(QStandardItem(str(journal_entry['_PID'] if '_PID' in journal_entry else '')))),
-                set_icon(selectable(QStandardItem(journal_entry['MESSAGE']))),
+                set_icon(selectable(QStandardItem(journal_entry['MESSAGE'] if 'MESSAGE' in journal_entry else ''))),
                 selectable(align_right(QStandardItem(size_k))),
             ])
 
@@ -2793,7 +2793,7 @@ class QueryMetaData(QThread):
                     reader.seek_tail()
                     last = reader.get_previous()
                     end_datetime = last['__REALTIME_TIMESTAMP']
-                    journal_incomplete = last['MESSAGE'] != "Journal stopped"
+                    journal_incomplete = 'MESSAGE' not in last or last['MESSAGE'] != "Journal stopped"
                     info = QueryBootInfo(boot_id, start_datetime, end_datetime, journal_incomplete)
                     start_date = start_datetime.date()
                     end_date = end_datetime.date()
