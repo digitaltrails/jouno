@@ -300,9 +300,12 @@ from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QMessageBox, QLi
     QProgressDialog
 from systemd import journal
 
-JOUNO_VERSION = '1.3.1'
+JOUNO_VERSION = '1.3.2'
 
 JOUNO_CONSOLIDATED_TEXT_KEY = '___JOURNO_FULL_TEXT___'
+
+# On Plasma Wayland the system tray may not be immediately available at login - so keep trying for...
+SYSTEM_TRAY_WAIT_SECONDS = 20
 
 # The icons can either be:
 #   1) str: named icons from the freedesktop theme which should all be available on most Linux desktops.
@@ -1426,9 +1429,9 @@ class ConfigPanel(DockableWidget):
     def add_dock_control(self, dock_button: QPushButton):
         self.title_layout.addWidget(dock_button)
 
-    def add_filter(self, rule_id, pattern) -> None:
+    def add_filter(self, suggested_rule_id, pattern) -> None:
         if isinstance(self.tabs.currentWidget(), FilterPanel):
-            self.tabs.currentWidget().add_rule(rule_id, pattern)
+            self.tabs.currentWidget().add_rule(suggested_rule_id, pattern)
         else:
             raise TypeError("Was expecting FilterPanel")
 
@@ -1543,8 +1546,8 @@ class FilterPanel(QWidget):
     def clear_selection(self):
         self.table_view.clearSelection()
 
-    def add_rule(self, rule_id: str = '', pattern: str = ''):
-        self.table_view.add_new_rule(rule_id, pattern)
+    def add_rule(self, suggested_rule_id: str = '', pattern: str = ''):
+        self.table_view.add_new_rule(suggested_rule_id, pattern)
 
     def delete_rules(self):
         self.table_view.delete_selected_rules()
@@ -1649,6 +1652,32 @@ class FilterTableView(QTableView):
         pattern_item.setToolTip(self.model().horizontalHeaderItem(1).toolTip())
         return pattern_item
 
+    def is_existing_rule_id(self, id: str):
+        model = self.model()
+        for row_num in self.item_view_order():
+            row_id = row_num + 1
+            key = model.item(row_num, 0).text()
+            if key == id:
+                return True
+        return False
+
+    def choose_rule_name(self, starting_text: str):
+        if len(starting_text) > 0:
+            prefix = re.sub(r'\W+', '_', starting_text)[0:21]
+            last_underscore = prefix.rfind('_')
+            if last_underscore > 10:
+                prefix = prefix[0:last_underscore]
+        else:
+            prefix = 'rule'
+        i = 0
+        possible_name = prefix
+        while True:
+            if self.is_existing_rule_id(possible_name):
+                i += 1
+                possible_name = prefix + '_' + str(i)
+            else:
+                return possible_name
+
     def is_valid(self) -> bool:
         model = self.model()
         seen = []
@@ -1726,7 +1755,8 @@ class FilterTableView(QTableView):
 
     select_flags = QItemSelectionModel.Clear | QItemSelectionModel.Rows | QItemSelectionModel.SelectCurrent | QItemSelectionModel.Rows
 
-    def add_new_rule(self, rule_id: str = '', pattern: str = ''):
+    def add_new_rule(self, suggested_rule_id: str = '', pattern: str = ''):
+        rule_id = self.choose_rule_name(suggested_rule_id)
         model = self.model()
         selected_row_indices = self.selectionModel().selectedRows()
         if len(selected_row_indices) > 0:
@@ -1817,13 +1847,15 @@ class SessionLogForwarder:
         if enable:
             if self.forwarder is not None and self.forwarder.isRunning():
                 return
-            search_path_list = [Path.home().joinpath('.local/share/sddm'), Path.home().joinpath('.local/share/gdm'), Path('/var/log/gdm')]
+            search_path_list = [Path.home().joinpath('.local/share/sddm'), Path.home().joinpath('.local/share/gdm'),
+                                Path('/var/log/gdm')]
             filename_list = ['xorg-session.log', 'wayland-session.log']
             session_file = find_most_recent_file(filename_list, search_path_list)
             if session_file is None:
                 error_message = QMessageBox(self.main_window)
                 error_message.setText(tr("Cannot forward {} to systemd journal.").format(str[filename_list]))
-                error_message.setDetailedText(tr('Failed to find {} in {}').format(str[filename_list], [str(x) for x in search_path_list]))
+                error_message.setDetailedText(
+                    tr('Failed to find {} in {}').format(str[filename_list], [str(x) for x in search_path_list]))
                 error_message.setIcon(QMessageBox.Question)
                 error_message.setStandardButtons(QMessageBox.Ok)
                 error_message.setIcon(QMessageBox.Critical)
@@ -1836,6 +1868,7 @@ class SessionLogForwarder:
             if self.forwarder is not None and self.forwarder.isRunning():
                 self.forwarder.stop = True
                 self.main_window.statusBar().showMessage(tr("Stopped forwarding xorg-session"), 10000)
+
 
 class MainToolBar(QToolBar):
 
@@ -2014,6 +2047,23 @@ class MainContextMenu(QMenu):
             manage_icon(self.notifier_action, SVG_TOOLBAR_NOTIFIER_ENABLED)
 
 
+wait_for_system_tray = True
+
+
+def is_system_tray_available():
+    # Only wait the first time called
+    global wait_for_system_tray
+    if wait_for_system_tray:
+        if not QSystemTrayIcon.isSystemTrayAvailable():
+            print("WARNING: no system tray, waiting to see if one becomes available.")
+            for i in range(0, SYSTEM_TRAY_WAIT_SECONDS):
+                if QSystemTrayIcon.isSystemTrayAvailable():
+                    break
+                time.sleep(1)
+    wait_for_system_tray = False
+    return QSystemTrayIcon.isSystemTrayAvailable()
+
+
 class MainWindow(QMainWindow):
 
     def __init__(self, app: QApplication):
@@ -2039,6 +2089,8 @@ class MainWindow(QMainWindow):
         app.setWindowIcon(get_themed_icon(SVG_JOUNO_LIGHT))
         app.setApplicationDisplayName(app_name)
         app.setApplicationVersion(JOUNO_VERSION)
+        # Make sure all icons use HiDPI - toolbars don't by default, so force it.
+        app.setAttribute(Qt.AA_UseHighDpiPixmaps)
 
         xorg_session_forwarder = SessionLogForwarder(self)
 
@@ -2107,7 +2159,11 @@ class MainWindow(QMainWindow):
 
         def add_filter() -> None:
             journal_entry = journal_panel.get_selected_journal_entry()
-            config_panel.add_filter('<new_id>', '' if journal_entry is None else journal_entry['MESSAGE'])
+            if journal_entry is None:
+                suggested_rule_id = ''
+            else:
+                suggested_rule_id = journal_entry['MESSAGE'] if 'MESSAGE' in journal_entry else ''
+            config_panel.add_filter(suggested_rule_id, suggested_rule_id)
 
         def delete_filter() -> None:
             config_panel.delete_filter()
@@ -2247,7 +2303,7 @@ class MainWindow(QMainWindow):
             self.config_dock_container.activate_dock_window()
 
     def use_system_tray(self):
-        return QSystemTrayIcon.isSystemTrayAvailable() and \
+        return is_system_tray_available() and \
                self.config_panel.get_config().getboolean('options', 'system_tray_enabled')
 
     def app_save_state(self):
@@ -3085,7 +3141,7 @@ class QueryJournalWidget(QMainWindow):
         close_button.clicked.connect(self.close)
         button_box_layout.addWidget(close_button)
 
-        layout.addRow('',button_box)
+        layout.addRow('', button_box)
         self.query_desc_widget.setText(self.query_description())
         self.setCentralWidget(central)
         self.status_bar = QStatusBar()

@@ -192,8 +192,7 @@ Michael Hamilton\
 Version History
 ---------------
 
-``jouno`` is currently still in development. It is feature complete and quite functional, but no formal release 
-has been made.
+See [GitHub](https://github.com/digitaltrails/jouno/releases)
 
 
 License
