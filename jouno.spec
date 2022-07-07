@@ -27,7 +27,7 @@ Summary: A GUI Systemd-Journal monitor with DBUS Notification forwarding
 Source0:        %{name}-%{version}.tar.gz
 
 %if 0%{?suse_version} || 0%{?fedora_version}
-Requires: python38 python38-qt5 python38-dbus-python python38-systemd
+Requires: python3 python3-qt5 python3-dbus-python python3-systemd
 %endif
 
 BuildRequires: coreutils
