@@ -723,7 +723,8 @@ def determine_source(journal_entry):
 def consolidate_text(journal_entry):
     # Is a list comprehension slower than a for-loop for string construction?
     # Use an easy a format that is easy to pattern match
-    fields_str = ', '.join((f"'{key}={str(value)}'" for key, value in journal_entry.items()))
+    # The sort is going to cost us.
+    fields_str = ', '.join((f"'{key}={str(journal_entry[key])}'" for key in sorted(journal_entry)))
     # Prepend the source, so it's searchable by entering what is seen in the UI
     journal_entry[JOUNO_CONSOLIDATED_TEXT_KEY] = f"source={determine_source(journal_entry)}, " + fields_str
     return fields_str
@@ -2562,6 +2563,8 @@ class JournalPanel(DockableWidget):
                     if self.search_start_time > my_start_time:
                         debug("isearch stopped by typing", text) if debugging else None
                         return
+                    if journal_entry['MESSAGE'].find(' unregistered') > -1 and journal_entry['MESSAGE'].find('Service ') > -1:
+                        print(journal_entry[JOUNO_CONSOLIDATED_TEXT_KEY])
                     if regexp.search(journal_entry[JOUNO_CONSOLIDATED_TEXT_KEY]) is not None:
                         matched_row_numbers.append(row_num)
                 match_count = len(matched_row_numbers)
@@ -2679,7 +2682,6 @@ class JournalTableModel(QStandardItemModel):
                 icon = self.icon_cache[notification_icon_name]
             else:
                 icon = QIcon.fromTheme(notification_icon_name)
-                self.icon_cache[notification_icon_name] = icon
             item.setIcon(icon)
             return item
 
