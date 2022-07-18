@@ -725,6 +725,7 @@ def consolidate_text(journal_entry):
     # Use an easy a format that is easy to pattern match
     # The sort is going to cost us.
     fields_str = ', '.join((f"'{key}={str(journal_entry[key])}'" for key in sorted(journal_entry)))
+    #fields_str = ', '.join((f"'{key}={str(value)}'" for key,value in journal_entry.items()))
     # Prepend the source, so it's searchable by entering what is seen in the UI
     journal_entry[JOUNO_CONSOLIDATED_TEXT_KEY] = f"source={determine_source(journal_entry)}, " + fields_str
     return fields_str
@@ -803,9 +804,9 @@ class JournalWatcher:
                 re_indicator_key = rule_id + "_regexp_enabled"
                 if rule_enabled_key not in rules_map or rules_map[rule_enabled_key].lower() == 'yes':
                     if re_indicator_key in rules_map and rules_map[re_indicator_key].lower() == 'yes':
-                        patterns_map[rule_id] = re.compile(rule_text)
+                        patterns_map[rule_id] = re.compile(rule_text, flags=re.DOTALL)
                     else:
-                        patterns_map[rule_id] = re.compile(re.escape(rule_text))
+                        patterns_map[rule_id] = re.compile(re.escape(rule_text), flags=re.DOTALL)
 
     def determine_source(self, journal_entry):
         for key in ['_COMM', '_EXE', '_CMDLINE', '_KERNEL_SUBSYSTEM', 'SYSLOG_IDENTIFIER', ]:
@@ -873,19 +874,22 @@ class JournalWatcher:
 
     def is_notable(self, fields_str: str):
         # debug(fields_str) if debugging else None
-        notable = len(self.match_regexp) == 0
+        # If there is nothing to match, then by default the entry is notable
+        notable = True
+        # Filter ignores first and see if the entry should be ignored
+        for rule_id, ignore_re in self.ignore_regexp.items():
+            if ignore_re.search(fields_str) is not None:
+                # debug(f"rule=ignore.{rule_id}: {journal_entry['MESSAGE']}") if debugging else None
+                notable = False
+                break
+        # Lastly, if we're going to ignore this entry, see if a match overrides this:
         if not notable:
             for rule_id, match_re in self.match_regexp.items():
                 if match_re.search(fields_str) is not None:
                     # debug(f"rule=match.{rule_id}: {journal_entry['MESSAGE']}") if debugging else None
                     notable = True
                     break
-        if notable:
-            for rule_id, ignore_re in self.ignore_regexp.items():
-                if ignore_re.search(fields_str) is not None:
-                    # debug(f"rule=ignore.{rule_id}: {journal_entry['MESSAGE']}") if debugging else None
-                    notable = False
-                    break
+
         return notable
 
     def is_stop_requested(self) -> bool:
@@ -1600,7 +1604,7 @@ class FilterPatternEntryDelegate(QStyledItemDelegate):
             pattern_is_regexp = self.model.itemFromIndex(index).checkState()
             try:
                 if pattern_is_regexp:
-                    re.compile(pattern)
+                    re.compile(pattern, flags=re.DOTALL)
                 self.config_panel.signal_editing_filter_pattern.emit(pattern, pattern_is_regexp)
             except re.error as e:
                 self.config_panel.status_bar.showMessage(str(e), STATUS_TIMEOUT_MSEC)
@@ -1713,7 +1717,7 @@ class FilterTableView(QTableView):
                     tr("ID's in must be unique within their own filter-tab."))
             elif value_is_regexp:
                 try:
-                    re.compile(value)
+                    re.compile(value, flags=re.DOTALL)
                 except re.error as e:
                     raise FilterValidationException(
                         self.__class__.__name__,
@@ -2369,7 +2373,7 @@ class JournalPanel(DockableWidget):
             self.scrolled_to_selected = None
             if self.re_search_enabled:
                 try:
-                    re.compile(text)
+                    re.compile(text, flags=re.DOTALL)
                 except re.error as e:
                     self.journal_status_bar.showMessage(str(e))
                     return
@@ -2556,7 +2560,7 @@ class JournalPanel(DockableWidget):
                 last_column = self.table_view.model().columnCount() - 1
                 # Assume case-insensitive if all text is in lower case.
                 regexp = re.compile(text if regexp_search else re.escape(text),
-                                    flags=re.IGNORECASE if text == text.lower() else 0)
+                                    flags=re.DOTALL | (re.IGNORECASE if text == text.lower() else 0))
 
                 matching_rows_selection = QItemSelection()
 
@@ -2777,7 +2781,7 @@ class ViewTextDialog(QDialog):
                 status_bar.showMessage('')
             else:
                 # Case-insensitive search if text_to_find is all lowercase.
-                re_flags = re.IGNORECASE if text_to_find == text_to_find.lower() else 0
+                re_flags = re.DOTALL | (re.IGNORECASE if text_to_find == text_to_find.lower() else 0)
                 self.scrolled_to_selected = None
                 if self.re_search_enabled:
                     try:
@@ -3108,7 +3112,7 @@ class QueryJournalWidget(QMainWindow):
                 text = results_filter_edit.text()
             if regexp_checkbox.isChecked():
                 try:
-                    re.compile(text)
+                    re.compile(text, flags=re.DOTALL)
                     self.run_query_button.setEnabled(True)
                     self.results_filter = text
                     self.results_filter_is_regexp = True
@@ -3118,7 +3122,7 @@ class QueryJournalWidget(QMainWindow):
                     self.run_query_button.setDisabled(True)
             else:
                 self.run_query_button.setEnabled(True)
-                re.compile(re.escape(text))
+                re.compile(re.escape(text), flags=re.DOTALL)
                 self.results_filter = text
                 self.results_filter_is_regexp = False
                 self.query_desc_widget.setText(self.query_description())
@@ -3209,7 +3213,8 @@ class QueryJournalWidget(QMainWindow):
         self.run_query_button.setDisabled(True)
         if self.results_filter.strip() != '':
             results_filter_pattern = \
-                re.compile(self.results_filter if self.results_filter_is_regexp else re.escape(self.results_filter))
+                re.compile(self.results_filter if self.results_filter_is_regexp else re.escape(self.results_filter),
+                           flags=re.DOTALL)
         else:
             results_filter_pattern = None
         self.query_task = QueryJournalTask(
