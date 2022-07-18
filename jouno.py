@@ -300,7 +300,7 @@ from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QMessageBox, QLi
     QProgressDialog
 from systemd import journal
 
-JOUNO_VERSION = '1.3.2'
+JOUNO_VERSION = '1.3.3'
 
 JOUNO_CONSOLIDATED_TEXT_KEY = '___JOURNO_FULL_TEXT___'
 
