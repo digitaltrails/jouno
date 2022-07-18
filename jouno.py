@@ -1078,6 +1078,15 @@ def create_icon_from_svg_bytes(default_svg: bytes = None,
     return icon
 
 
+def create_disabled_icon_from_themed_icon(themed_icon):
+    pixmap = QPixmap(themed_icon.pixmap(60, 60, QIcon.Disabled,QIcon.Off))
+    new_icon = QIcon()
+    new_icon.addPixmap(pixmap, state=QIcon.On)
+    new_icon.addPixmap(pixmap, state=QIcon.Off)
+    new_icon.addPixmap(pixmap, mode=QIcon.Disabled)
+    return new_icon
+
+
 managed_svg_icon_source: Mapping[QObject, str] = weakref.WeakKeyDictionary()
 themed_icon_cache: Mapping[Union[str, bytes], QIcon] = {}
 
@@ -2671,17 +2680,24 @@ class JournalTableModel(QStandardItemModel):
             return item
 
         def set_icon(item: QStandardItem):
-            if not notable:
-                notification_icon_name = 'edit-delete'
+            priority = journal_entry['PRIORITY'] if 'PRIORITY' in journal_entry else Priority.NOTICE.value
+            if not Priority.EMERGENCY.value <= priority <= Priority.DEBUG.value:
+                priority = Priority.NOTICE.value
+            notification_icon_name = NOTIFICATION_ICONS[Priority(priority)]
+            if True:
+                # New behavior - use "disabled" version of normal icon.
+                full_icon_name = notification_icon_name if notable else notification_icon_name + "_non_notable"
             else:
-                priority = journal_entry['PRIORITY'] if 'PRIORITY' in journal_entry else Priority.NOTICE.value
-                if not Priority.EMERGENCY.value <= priority <= Priority.DEBUG.value:
-                    priority = Priority.NOTICE.value
-                notification_icon_name = NOTIFICATION_ICONS[Priority(priority)]
-            if notification_icon_name in self.icon_cache:
-                icon = self.icon_cache[notification_icon_name]
+                # Old behavior - use trash can icon.
+                full_icon_name = notification_icon_name = notification_icon_name if notable else 'edit-delete'
+            if full_icon_name in self.icon_cache:
+                icon = self.icon_cache[full_icon_name]
             else:
                 icon = QIcon.fromTheme(notification_icon_name)
+                self.icon_cache[notification_icon_name] = icon
+                if full_icon_name != notification_icon_name:
+                    icon = create_disabled_icon_from_themed_icon(icon)
+                    self.icon_cache[full_icon_name] = icon
             item.setIcon(icon)
             return item
 
