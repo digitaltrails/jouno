@@ -1079,7 +1079,7 @@ def create_icon_from_svg_bytes(default_svg: bytes = None,
 
 
 def create_disabled_icon_from_themed_icon(themed_icon):
-    pixmap = QPixmap(themed_icon.pixmap(60, 60, QIcon.Disabled,QIcon.Off))
+    pixmap = QPixmap(themed_icon.pixmap(60, 60, QIcon.Disabled, QIcon.Off))
     new_icon = QIcon()
     new_icon.addPixmap(pixmap, state=QIcon.On)
     new_icon.addPixmap(pixmap, state=QIcon.Off)
@@ -2572,7 +2572,8 @@ class JournalPanel(DockableWidget):
                     if self.search_start_time > my_start_time:
                         debug("isearch stopped by typing", text) if debugging else None
                         return
-                    if journal_entry['MESSAGE'].find(' unregistered') > -1 and journal_entry['MESSAGE'].find('Service ') > -1:
+                    if journal_entry['MESSAGE'].find(' unregistered') > -1 and journal_entry['MESSAGE'].find(
+                            'Service ') > -1:
                         print(journal_entry[JOUNO_CONSOLIDATED_TEXT_KEY])
                     if regexp.search(journal_entry[JOUNO_CONSOLIDATED_TEXT_KEY]) is not None:
                         matched_row_numbers.append(row_num)
@@ -2603,7 +2604,23 @@ class JournalPanel(DockableWidget):
         if self.scrolled_to_selected is None or self.scrolled_to_selected not in matched_rows:
             self.scrolled_to_selected = matched_rows[0]
         else:
-            new_pos = (matched_rows.index(self.scrolled_to_selected) + direction) % matched_count
+            new_pos = matched_rows.index(self.scrolled_to_selected) + direction
+            if new_pos < 0:
+                alert = QMessageBox()
+                alert.setText(tr(f'At first match of {matched_count} matches.'))
+                alert.setInformativeText(tr('Continue from bottom?'))
+                alert.setIcon(QMessageBox.Question)
+                alert.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+                ret = alert.exec()
+                new_pos = 0 if ret == QMessageBox.No else matched_count - 1
+            if new_pos >= matched_count:
+                alert = QMessageBox()
+                alert.setText(tr(f'At last match of {matched_count} matches.'))
+                alert.setInformativeText(tr('Continue from top?'))
+                alert.setIcon(QMessageBox.Question)
+                alert.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+                ret = alert.exec()
+                new_pos = 0 if ret == QMessageBox.Yes else matched_count - 1
             self.scrolled_to_selected = matched_rows[new_pos]
             self.journal_status_bar.showMessage(
                 tr("Match {}/{}, row {}.").format(new_pos + 1, matched_count, self.scrolled_to_selected.row() + 1))
