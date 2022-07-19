@@ -715,13 +715,11 @@ def determine_source(journal_entry):
 
 
 def consolidate_text(journal_entry):
-    # Is a list comprehension slower than a for-loop for string construction?
     # Use an easy a format that is easy to pattern match
-    # The sort is going to cost us.
-    fields_str = ', '.join((f"'{key}={str(journal_entry[key])}'" for key in sorted(journal_entry)))
-    #fields_str = ', '.join((f"'{key}={str(value)}'" for key,value in journal_entry.items()))
+    # The sort is going to cost us - this seems to be the fastest way to do it
+    fields_str = ', '.join((f"'{key}={journal_entry[key]}'" for key in sorted(journal_entry.keys())))
     # Prepend the source, so it's searchable by entering what is seen in the UI
-    journal_entry[JOUNO_CONSOLIDATED_TEXT_KEY] = f"source={determine_source(journal_entry)}, " + fields_str
+    journal_entry[JOUNO_CONSOLIDATED_TEXT_KEY] = f"source={determine_source(journal_entry)}, {fields_str}"
     return fields_str
 
 
