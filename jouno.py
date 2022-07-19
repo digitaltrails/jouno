@@ -258,8 +258,6 @@ with this program. If not, see <https://www.gnu.org/licenses/>.
 
 """
 
-# TODO Consider creating a separate full log browser making use of the journal API for search and random access.
-# TODO Display more fields in 'recent' - priority as icon perhaps.
 # TODO figure out why QIntValidator is only working approximately.
 # TODO refine Apply/Revert and dynamically enable/disable the buttons.
 
@@ -277,6 +275,7 @@ import sys
 import textwrap
 import time
 import traceback
+import typing
 import weakref
 from enum import Enum
 from functools import partial
@@ -699,15 +698,10 @@ class Config(configparser.ConfigParser):
         return False
 
     def is_different(self, other: 'Config'):
-        try:
-            io1 = StringIO()
+        with StringIO() as io1, StringIO() as io2:
             self.write(io1)
-            io2 = StringIO()
             other.write(io2)
             return io1.getvalue() != io2.getvalue()
-        finally:
-            io1.close()
-            io2.close()
 
 
 def determine_source(journal_entry):
@@ -1338,7 +1332,7 @@ class ConfigPanel(DockableWidget):
         button_box_layout.addWidget(spacer)
         button_box_layout.addWidget(apply_button)
 
-        self.status_bar = QStatusBar()
+        self.status_bar = StatusBar()
         self.status_bar.addPermanentWidget(button_box)
 
         def save_action():
@@ -1362,7 +1356,7 @@ class ConfigPanel(DockableWidget):
                     self.config.save()
                     match_panel.clear_selection()
                     ignore_panel.clear_selection()
-                    self.status_bar.showMessage("All changes have been saved.", STATUS_TIMEOUT_MSEC)
+                    self.status_bar.show_info("All changes have been saved.", STATUS_TIMEOUT_MSEC)
                     debug(f'config saved ok') if debugging else None
             except FilterValidationException as e:
                 e_title, summary, text = e.args
@@ -1398,7 +1392,7 @@ class ConfigPanel(DockableWidget):
                 if revert_message.exec() == QMessageBox.Cancel:
                     return
             info("Reverting unsaved changes.")
-            self.status_bar.showMessage("Unapplied changes have been reverted.", STATUS_TIMEOUT_MSEC)
+            self.status_bar.show_warning("Unapplied changes have been reverted.", STATUS_TIMEOUT_MSEC)
             reload_from_config()
 
         def reload_from_config():
@@ -1607,7 +1601,7 @@ class FilterPatternEntryDelegate(QStyledItemDelegate):
                     re.compile(pattern, flags=re.DOTALL)
                 self.config_panel.signal_editing_filter_pattern.emit(pattern, pattern_is_regexp)
             except re.error as e:
-                self.config_panel.status_bar.showMessage(str(e), STATUS_TIMEOUT_MSEC)
+                self.config_panel.status_bar.show_error(str(e), STATUS_TIMEOUT_MSEC)
 
         self.line_edit.textEdited.connect(text_changed)
         return self.line_edit
@@ -2061,6 +2055,28 @@ class MainContextMenu(QMenu):
             manage_icon(self.notifier_action, SVG_TOOLBAR_NOTIFIER_ENABLED)
 
 
+class StatusBar(QStatusBar):
+
+    next_clock_face = {"\u25f4": "\u25f7", "\u25f7": "\u25f6", "\u25f6": "\u25f5", "\u25f5": "\u25f4"}
+
+    def __init__(self, parent: typing.Optional[QWidget] = None):
+        super().__init__(parent)
+        self.clock_face = "\u25f4"
+
+    def show_info(self, message: str, msecs: int = 0) -> None:
+        super().showMessage(f"\U0001F6C8 {message}", msecs)
+
+    def show_warning(self, message: str, msecs: int = 0) -> None:
+        super().showMessage(f"\U0001F6C6 {message}", msecs)
+
+    def show_error(self, message: str, msecs: int = 0) -> None:
+        super().showMessage(f"\U0001F6C7 {message}", msecs)
+
+    def show_progress(self, message: str, msecs: int = 0) -> None:
+        self.clock_face = StatusBar.next_clock_face[self.clock_face]
+        super().showMessage(f"{self.clock_face} {message}", msecs)
+
+
 wait_for_system_tray = True
 
 
@@ -2160,7 +2176,7 @@ class MainWindow(QMainWindow):
             journal_panel.set_max_entries(config_panel.get_config().getint('options', 'journal_history_max'))
             global debugging
             debugging = config_panel.get_config().getboolean('options', 'debug_enabled')
-            self.config_panel.status_bar.showMessage(tr("Applying configuration changes."), STATUS_SHORT_TIMEOUT_MSEC)
+            self.config_panel.status_bar.show_info(tr("Applying configuration changes."), STATUS_SHORT_TIMEOUT_MSEC)
             self.journal_panel.static_status_label.setText("")
             xorg_session_forwarder.enable(
                 config_panel.get_config().getboolean('options', 'forward_session_log_enabled', fallback=False))
@@ -2205,14 +2221,14 @@ class MainWindow(QMainWindow):
         def process_historical_entries(historical_entries: List[Tuple]):
             for entry, notable in historical_entries:
                 if int(time.time() * 1000) % 2000:
-                    self.journal_panel.journal_status_bar.showMessage(tr("Initialising."), 1000)
+                    self.journal_panel.journal_status_bar.show_info(tr("Initialising."), 1000)
                 self.journal_panel.add_journal_entry(entry, notable)
             self.journal_panel.journal_status_bar.showMessage('')
             # Scroll to bottom to await new entries
             self.journal_panel.new_journal_entry(None, False)
 
         def process_progress(count: int):
-            self.journal_panel.journal_status_bar.showMessage(tr("Scanned {} entries").format(count))
+            self.journal_panel.journal_status_bar.show_progress(tr("Scanned {} entries").format(count))
 
         def handle_watcher_error(error_str: str, e: Exception):
             msg = QMessageBox(self)
@@ -2278,7 +2294,7 @@ class MainWindow(QMainWindow):
                     30000)
         except KeyError as e:
             self.statusBar().showMessage(
-                tr("This system lacks a systemd-journal group, normally it should."), 10000)
+                tr("This system lacks a systemd-journal group, normally it should have one."), 10000)
 
         rc = app.exec_()
         if rc == 999:  # EXIT_CODE_FOR_RESTART:
@@ -2375,7 +2391,7 @@ class JournalPanel(DockableWidget):
                 try:
                     re.compile(text, flags=re.DOTALL)
                 except re.error as e:
-                    self.journal_status_bar.showMessage(str(e))
+                    self.journal_status_bar.show_error(str(e))
                     return
             self.search_select_journal(text, regexp_search=self.re_search_enabled)
             go_next_button.setEnabled(self.scrolled_to_selected is not None)
@@ -2396,7 +2412,7 @@ class JournalPanel(DockableWidget):
             self.re_search_enabled = enable
             manage_icon(re_action, ICON_REGEXP_SEARCH if enable else ICON_PLAIN_TEXT_SEARCH)
             tip = tr("Regular expression matching enabled.") if enable else tr("Plain-text matching enabled.")
-            self.journal_status_bar.showMessage(tip)
+            self.journal_status_bar.show_info(tip)
             search_input.setToolTip(search_tip + "\n" + tip)
 
         re_action.toggled.connect(re_search_toggle)
@@ -2432,8 +2448,10 @@ class JournalPanel(DockableWidget):
 
         layout.addWidget(self.table_view)
 
-        self.journal_status_bar = QStatusBar()
+        self.journal_status_bar = StatusBar()
         self.static_status_label = QLabel("")
+        self.static_pixmap_label = QLabel("")
+        self.static_pixmap_label.setPixmap(QIcon.fromTheme('dialog-information').pixmap(64,64))
         self.journal_status_bar.addPermanentWidget(self.static_status_label)
         layout.addWidget(self.journal_status_bar)
         self.static_status_label.setText(tr(""))
@@ -2441,7 +2459,7 @@ class JournalPanel(DockableWidget):
         def view_journal_entry_at_row_number(row: int):
             if row < 0 and (self.table_view.model().rowCount() > 0):
                 row = self.table_view.model().rowCount() - 1
-                self.journal_status_bar.showMessage(tr("Viewing last entry."), STATUS_SHORT_TIMEOUT_MSEC)
+                self.journal_status_bar.show_info(tr("Viewing last entry."), STATUS_SHORT_TIMEOUT_MSEC)
             if row >= 0:
                 journal_entry = self.table_view.model().get_journal_entry(row)
                 # entry_dialog = JournalEntryDialogPlain(self, self.table_view.model().get_journal_entry(row), row)
@@ -2452,9 +2470,9 @@ class JournalPanel(DockableWidget):
                 text = format_journal_entry(journal_entry)
                 status = tr("{kb:.2f} kbytes").format(kb=len(journal_entry[JOUNO_CONSOLIDATED_TEXT_KEY]) / 1024.0)
                 ViewTextDialog(title=window_title, text=text, static_status=status, parent=self)
-                self.journal_status_bar.showMessage(tr("Viewing entry {}.").format(row + 1), STATUS_SHORT_TIMEOUT_MSEC)
+                self.journal_status_bar.show_info(tr("Viewing entry {}.").format(row + 1), STATUS_SHORT_TIMEOUT_MSEC)
             else:
-                self.journal_status_bar.showMessage(tr("No entries available."), STATUS_SHORT_TIMEOUT_MSEC)
+                self.journal_status_bar.show_warning(tr("No entries available."), STATUS_SHORT_TIMEOUT_MSEC)
 
         def view_journal_entry_at_index(index: QModelIndex):
             view_journal_entry_at_row_number(index.row())
@@ -2473,20 +2491,20 @@ class JournalPanel(DockableWidget):
                     row = self.context_menu_index.row()
                     print('copy a row', row)
                     text = format_journal_entry(self.table_view.model().get_journal_entry(row))
-                    self.journal_status_bar.showMessage(tr("Copied the entry {} to the clipboard.").format(row + 1),
+                    self.journal_status_bar.show_info(tr("Copied the entry {} to the clipboard.").format(row + 1),
                                                         STATUS_TIMEOUT_MSEC)
                 else:
                     if self.table_view.model().rowCount() > 0:
                         row = self.table_view.model().rowCount() - 1
                         text = format_journal_entry(self.table_view.model().get_journal_entry(row))
-                        self.journal_status_bar.showMessage(tr("Copied last entry."), STATUS_TIMEOUT_MSEC)
+                        self.journal_status_bar.show_info(tr("Copied last entry."), STATUS_TIMEOUT_MSEC)
                     else:
-                        self.journal_status_bar.showMessage(tr("No entries available."), STATUS_TIMEOUT_MSEC)
+                        self.journal_status_bar.show_error(tr("No entries available."), STATUS_TIMEOUT_MSEC)
                         text = ''
             else:
                 for index in selected:
                     text += format_journal_entry(self.table_view.model().get_journal_entry(index.row())) + '\n'
-                self.journal_status_bar.showMessage(
+                self.journal_status_bar.show_info(
                     tr("Copied {} entries to the clipboard.").format(len(selected)), STATUS_TIMEOUT_MSEC)
             QApplication.clipboard().setText(text)
 
@@ -2521,13 +2539,13 @@ class JournalPanel(DockableWidget):
             self.add_journal_entry(journal_entry, notable)
             message = journal_entry['MESSAGE']
             if self.search_input.text().strip() == '':
-                self.journal_status_bar.showMessage(
+                self.journal_status_bar.show_info(
                     tr("New entry. Message={}{}").format(message[0:80], ' ...' if len(message) > 120 else ''),
                     STATUS_TIMEOUT_MSEC)
                 if at_bottom:
                     self.table_view.scrollToBottom()
             else:
-                self.journal_status_bar.showMessage(
+                self.journal_status_bar.show_warning(
                     tr("New entry (scrolling prevented by search text). Message={}{}").format(
                         journal_entry['MESSAGE'][0:40], ' ...' if len(message) > 80 else ''))
             self.static_status_label.setText(
@@ -2583,16 +2601,16 @@ class JournalPanel(DockableWidget):
                         matched_row_numbers.append(row_num)
                 match_count = len(matched_row_numbers)
                 if match_count == 0:
-                    self.journal_status_bar.showMessage(tr("Nothing matches"))
+                    self.journal_status_bar.show_warning(tr("Nothing matches"))
                 elif match_count == len(model.journal_entries):
-                    self.journal_status_bar.showMessage(tr("Everything matches."))
+                    self.journal_status_bar.show_warning(tr("Everything matches."))
                 else:
                     for row_n in matched_row_numbers:
                         row_n_selection = QItemSelection(model.index(row_n, 0), model.index(row_n, last_column))
                         matching_rows_selection.merge(row_n_selection, QItemSelectionModel.SelectCurrent)
                     self.scrolled_to_selected = model.index(matching_rows_selection.indexes()[0].row(), 0)
                     self.table_view.scrollTo(self.scrolled_to_selected)
-                    self.journal_status_bar.showMessage(
+                    self.journal_status_bar.show_info(
                         tr("Matched {match_count} entries.").format(match_count=match_count))
                 self.table_view.selectionModel().select(matching_rows_selection, QItemSelectionModel.SelectCurrent)
         finally:
@@ -2626,7 +2644,7 @@ class JournalPanel(DockableWidget):
                 ret = alert.exec()
                 new_pos = 0 if ret == QMessageBox.Yes else matched_count - 1
             self.scrolled_to_selected = matched_rows[new_pos]
-            self.journal_status_bar.showMessage(
+            self.journal_status_bar.show_info(
                 tr("Match {}/{}, row {}.").format(new_pos + 1, matched_count, self.scrolled_to_selected.row() + 1))
         self.table_view.scrollTo(self.scrolled_to_selected, QAbstractItemView.PositionAtCenter)
 
@@ -2787,7 +2805,7 @@ class ViewTextDialog(QDialog):
                     try:
                         matcher = re.compile(text_to_find, flags=re_flags)
                     except re.error as e:
-                        status_bar.showMessage(str(e))
+                        status_bar.show_error(str(e))
                         return
                 else:
                     matcher = re.compile(re.escape(text_to_find), flags=re_flags)
@@ -2797,9 +2815,9 @@ class ViewTextDialog(QDialog):
                     cursor.setPosition(matches.start())
                     cursor.setPosition(matches.end(), QTextCursor.KeepAnchor);
                     text_view.setTextCursor(cursor)
-                    status_bar.showMessage(tr("Matched '{}'").format(text_to_find))
+                    status_bar.show_info(tr("Matched '{}'").format(text_to_find))
                 else:
-                    status_bar.showMessage(tr("No matches."))
+                    status_bar.show_warning(tr("No matches."))
 
         search_input = QLineEdit()
         search_input.setFixedWidth(350)
@@ -2810,7 +2828,7 @@ class ViewTextDialog(QDialog):
         def re_search_toggle(enable: bool):
             self.re_search_enabled = enable
             manage_icon(re_action, ICON_REGEXP_SEARCH if enable else ICON_PLAIN_TEXT_SEARCH)
-            status_bar.showMessage(
+            status_bar.show_info(
                 tr("Regular expression search.") if enable else tr("Plain text search."))
 
         re_action.toggled.connect(re_search_toggle)
@@ -2823,7 +2841,7 @@ class ViewTextDialog(QDialog):
 
         def copy_to_clipboard():
             QGuiApplication.clipboard().setText(text_view.toPlainText())
-            status_bar.showMessage(tr("Copied all text to the clipboard"), STATUS_TIMEOUT_MSEC)
+            status_bar.show_info(tr("Copied all text to the clipboard"), STATUS_TIMEOUT_MSEC)
 
         copy_button = transparent_button(manage_icon(QPushButton('', self), ICON_COPY_TO_CLIPBOARD))
         copy_button.setToolTip(tr("Copy entire text to clipboard"))
@@ -2833,7 +2851,7 @@ class ViewTextDialog(QDialog):
 
         layout = QVBoxLayout()
         layout.addWidget(title_container)
-        status_bar = QStatusBar()
+        status_bar = StatusBar()
 
         text_view = QTextEdit()
         text_view.setFont(QFontDatabase.systemFont(QFontDatabase.FixedFont))
@@ -3118,7 +3136,7 @@ class QueryJournalWidget(QMainWindow):
                     self.results_filter_is_regexp = True
                     self.query_desc_widget.setText(self.query_description())
                 except re.error as e:
-                    self.status_bar.showMessage(str(e))
+                    self.status_bar.show_error(str(e))
                     self.run_query_button.setDisabled(True)
             else:
                 self.run_query_button.setEnabled(True)
@@ -3183,7 +3201,7 @@ class QueryJournalWidget(QMainWindow):
         layout.addRow('', button_box)
         self.query_desc_widget.setText(self.query_description())
         self.setCentralWidget(central)
-        self.status_bar = QStatusBar()
+        self.status_bar = StatusBar()
         self.setStatusBar(self.status_bar)
         self.show()
         reset_func(initialization=True)
@@ -3226,7 +3244,7 @@ class QueryJournalWidget(QMainWindow):
         self.query_task.finished.connect(self.query_finished)
 
         def progress_func(count: int):
-            self.status_bar.showMessage(tr("Found {} entries so far, continuing..").format(count))
+            self.status_bar.show_progress(tr("Found {} entries so far, continuing..").format(count))
 
         self.query_task.progress.connect(progress_func)
         self.query_task.start()
@@ -3234,7 +3252,7 @@ class QueryJournalWidget(QMainWindow):
     def query_finished(self, number_of_matches: int):
         self.stop_button.setEnabled(False)
         elapsed_time = self.query_task.time_query_end - self.query_task.time_query_start
-        self.status_bar.showMessage(
+        self.status_bar.show_info(
             tr("Stopped at {} entries at {:.2f} seconds, creating view.."
                if self.query_task.stopped else
                "Retrieved at {} entries in {:.2f} seconds, creating view..").format(number_of_matches, elapsed_time))
@@ -3248,7 +3266,7 @@ class QueryJournalWidget(QMainWindow):
         query_layout.addWidget(journal_panel)
         for journal_entry in self.query_task.results:
             if int(time.time() * 1000) % 2000:
-                journal_panel.journal_status_bar.showMessage(tr("Initialising."), 1000)
+                journal_panel.journal_status_bar.show_info(tr("Initialising."), 1000)
             journal_panel.add_journal_entry(journal_entry, True)
         journal_panel.journal_status_bar.showMessage('')
         journal_panel.static_status_label.setText(
