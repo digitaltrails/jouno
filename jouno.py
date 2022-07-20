@@ -110,6 +110,11 @@ Match and Ignore Patterns
 
  * Journal entries are filtered by list of rules.  Each rule defines a ``Rule ID`` and a ``pattern.``
 
+ * A rule can be a Match-Filters (notifying matching message) or an Ignore-Filter (ignore matching messages).
+
+ * Match-Filters override Ignore-Filters, so you can ignore all the noise, and selectively override this for
+   specific sources or items of interest.
+
  * Each rule is identified by a ``Rule ID`` which is text identifier compliant with commonly accepted
    variable naming conventions, for example:
    ```
@@ -117,7 +122,6 @@ Match and Ignore Patterns
    my-id
    myId21
    ```
-
  * Patterns may match any fragment of text seen in actual journal entries, double click any journal
    entry's icon to see the full journal text that is available for matching.  Some examples:
    ```
@@ -146,12 +150,17 @@ Match and Ignore Patterns
    to ensure that complete values are matched, for example: ``'_GID=500'``  will
    only match the intended field and value, it won't match ``PARENT_GID=5000``.
 
-   The list of possible field names can be found at:
+   The list of possible field names can be found by double-clicking a message or by usined the names found at:
 
       [https://www.freedesktop.org/software/systemd/man/systemd.journal-fields.html](https://www.freedesktop.org/software/systemd/man/systemd.journal-fields.html)
 
    Not all fields are found in all messages, it's best to use actual messages as a basis for creating new
    patterns.
+
+ * When matching, in the text being matched, field names appear in alphabetical order.  This allows
+   regular expressions to be written to match a combination of fields.  For example, the regular expression
+   (?<='PRIORITY=[45]')(.*)(?='_UID=1027')  would match PRIORITY 4 or 5 and _UID 1027 with
+   any amount of text in between.
 
 Config files
 ------------
@@ -964,7 +973,6 @@ class JournalWatcher:
                 if self.max_historical_entries != 0 and count > self.max_historical_entries:
                     results.pop(0)
             now = time.time()
-            print("t=", now, last_time, now - last_time)
             if now - last_time > 0.2:
                 self.supervisor.report_historical_progress(count)
                 last_time = now
@@ -1333,10 +1341,13 @@ class ConfigPanel(DockableWidget):
         button_box_layout = QHBoxLayout()
         button_box.setLayout(button_box_layout)
         apply_button = QPushButton(tr("Apply"))
+        apply_button.setToolTip(tr("Apply the config changes from now on - do no reprocess existing messages."))
         manage_icon(apply_button, ICON_APPLY)
         revert_button = QPushButton(tr("Revert"))
+        revert_button.setToolTip(tr("Revert the changes made."))
         manage_icon(revert_button, ICON_REVERT)
         apply_and_restart_button = QPushButton(tr("Apply+Reset"))
+        apply_and_restart_button.setToolTip(tr("Apply the config changes - re-read and process the entire journal"))
         manage_icon(apply_and_restart_button, ICON_APPLY_AND_RESTART)
         button_box_layout.addWidget(revert_button)
         spacer = QLabel('          ')
