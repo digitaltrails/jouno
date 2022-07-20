@@ -328,6 +328,7 @@ ICON_GO_NEXT = "go-down"
 ICON_GO_PREVIOUS = "go-up"
 ICON_CLEAR_RECENTS = "edit-clear-all"
 ICON_REVERT = 'edit-undo'
+ICON_APPLY_AND_RESTART = 'edit-redo'
 ICON_WINDOW_CLOSE = 'window-close'
 # This might only be KDE/Linux icons - not in Freedesktop Standard.
 ICON_APPLY = "dialog-ok-apply"
@@ -747,11 +748,11 @@ class JournalWatcher:
         self.from_boot_enabled = False
         self.limit_from_boot = 0
         self.config = Config()
-        self.config.refresh()
         self.update_settings_from_config()
         self._stop = False
         self.supervisor = supervisor
         self.notifications_enabled = True
+        self.deliver_history = True
 
     def is_notifying(self) -> bool:
         return self.notifications_enabled
@@ -764,6 +765,7 @@ class JournalWatcher:
 
     def update_settings_from_config(self):
         info('JournalWatcher reading config.')
+        self.config.refresh()
         if 'poll_seconds' in self.config['options']:
             self.polling_millis = 1_000 * self.config.getint('options', 'poll_seconds')
         if 'burst_truncate_messages' in self.config['options']:
@@ -889,13 +891,15 @@ class JournalWatcher:
 
     def watch_journal(self):
         self._stop = False
+        self.update_settings_from_config()
 
         with journal.Reader() as journal_reader:
 
-            self.load_past_entries(journal_reader)
+            if self.deliver_history:
+                self.load_past_entries(journal_reader)
+                self.deliver_history = False
 
             journal_reader.seek_tail()
-
             journal_reader.get_previous()
 
             journal_reader_poll = select.poll()
@@ -951,6 +955,7 @@ class JournalWatcher:
             return
         results = []
         count = 0
+        last_time = 0.0
         for journal_entry in journal_reader:
             notable = self.is_notable(consolidate_text(journal_entry))
             if notable or self.forward_all:
@@ -958,8 +963,12 @@ class JournalWatcher:
                 count += 1
                 if self.max_historical_entries != 0 and count > self.max_historical_entries:
                     results.pop(0)
-                if int(time.time() * 1000) % 1000 == 0:
-                    self.supervisor.report_progress(count)
+            now = time.time()
+            print("t=", now, last_time, now - last_time)
+            if now - last_time > 0.2:
+                self.supervisor.report_historical_progress(count)
+                last_time = now
+        self.supervisor.report_historical_progress(count)
         self.supervisor.deliver_historical_entries(results)
 
 
@@ -1300,6 +1309,8 @@ class ConfigPanel(DockableWidget):
         spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         title_layout.addWidget(spacer)
 
+        self.restart_is_required = False
+
         tabs = QTabWidget()
         self.tabs = tabs
 
@@ -1325,10 +1336,13 @@ class ConfigPanel(DockableWidget):
         manage_icon(apply_button, ICON_APPLY)
         revert_button = QPushButton(tr("Revert"))
         manage_icon(revert_button, ICON_REVERT)
+        apply_and_restart_button = QPushButton(tr("Apply+Reset"))
+        manage_icon(apply_and_restart_button, ICON_APPLY_AND_RESTART)
         button_box_layout.addWidget(revert_button)
         spacer = QLabel('          ')
         button_box_layout.addWidget(spacer)
         button_box_layout.addWidget(apply_button)
+        button_box_layout.addWidget(apply_and_restart_button)
 
         self.status_bar = StatusBar()
         self.status_bar.addPermanentWidget(button_box)
@@ -1356,6 +1370,7 @@ class ConfigPanel(DockableWidget):
                     ignore_panel.clear_selection()
                     self.status_bar.show_info("All changes have been saved.", STATUS_TIMEOUT_MSEC)
                     debug(f'config saved ok') if debugging else None
+                    self.restart_is_required = False
             except FilterValidationException as e:
                 e_title, summary, text = e.args
                 message = QMessageBox(self)
@@ -1367,6 +1382,12 @@ class ConfigPanel(DockableWidget):
                 message.exec()
 
         apply_button.clicked.connect(save_action)
+
+        def apply_and_restart_action():
+            save_action()
+            self.restart_is_required = True
+
+        apply_and_restart_button.clicked.connect(apply_and_restart_action)
 
         def revert_action():
             debug("revert") if debugging else None
@@ -1450,6 +1471,11 @@ class ConfigPanel(DockableWidget):
     def get_config(self) -> Config:
         return self.config
 
+    def requires_restart(self):
+        return self.restart_is_required
+
+    def restart_is_completed(self):
+        self.restart_is_required = False
 
 class OptionsTab(QWidget):
 
@@ -1814,7 +1840,7 @@ class ConfigWatcherTask(QThread):
 
 class JournalWatcherTask(QThread):
     signal_historical_entries = pyqtSignal(list)
-    signal_progress = pyqtSignal(int)
+    signal_historical_progress = pyqtSignal(int)
     signal_new_entry = pyqtSignal(dict, bool)
     signal_error = pyqtSignal(str, Exception)
 
@@ -1831,6 +1857,9 @@ class JournalWatcherTask(QThread):
     def enable_forward_all(self, enable: bool):
         self.watcher.enable_forward_all(enable)
 
+    def reset(self):
+        self.watcher.deliver_history = True
+
     def run(self) -> None:
         self.watcher.watch_journal()
 
@@ -1840,8 +1869,8 @@ class JournalWatcherTask(QThread):
     def deliver_historical_entries(self, history_list: List):
         self.signal_historical_entries.emit(history_list)
 
-    def report_progress(self, count: int):
-        self.signal_progress.emit(count)
+    def report_historical_progress(self, count: int):
+        self.signal_historical_progress.emit(count)
 
 
 class SessionLogForwarder:
@@ -2145,7 +2174,6 @@ class MainWindow(QMainWindow):
                 journal_watcher_task.requestInterruption()
                 while journal_watcher_task.isRunning():
                     time.sleep(0.2)
-
             tool_bar.configure_run_action(enable)
             app_context_menu.configure_run_action(enable)
             update_title_and_tray_indicators()
@@ -2184,6 +2212,21 @@ class MainWindow(QMainWindow):
             else:
                 if tray.isVisible():
                     tray.setVisible(False)
+            if config_panel.requires_restart():
+                is_running = journal_watcher_task.isRunning()
+                if is_running:
+                    self.journal_panel.journal_status_bar.show_progress(tr("Restarting..."))
+                    QApplication.processEvents()
+                    enable_listener(False)
+                journal_watcher_task.reset()
+                self.journal_panel.journal_status_bar.show_progress(tr("Clearing existing entries..."))
+                QApplication.processEvents()
+                journal_panel.clear_all_entries()
+                config_panel.restart_is_completed()
+                if is_running:
+                    enable_listener(True)
+                self.journal_panel.journal_status_bar.show_info(tr("Reset completed."), msecs=STATUS_SHORT_TIMEOUT_MSEC)
+                QApplication.processEvents()
 
         def add_filter() -> None:
             journal_entry = journal_panel.get_selected_journal_entry()
@@ -2217,9 +2260,8 @@ class MainWindow(QMainWindow):
             self.journal_panel.new_journal_entry(entry, notable)
 
         def process_historical_entries(historical_entries: List[Tuple]):
+            self.journal_panel.journal_status_bar.show_info(tr("Initialising..."))
             for entry, notable in historical_entries:
-                if int(time.time() * 1000) % 2000:
-                    self.journal_panel.journal_status_bar.show_info(tr("Initialising."), 1000)
                 self.journal_panel.add_journal_entry(entry, notable)
             self.journal_panel.journal_status_bar.showMessage('')
             # Scroll to bottom to await new entries
@@ -2227,6 +2269,7 @@ class MainWindow(QMainWindow):
 
         def process_progress(count: int):
             self.journal_panel.journal_status_bar.show_progress(tr("Scanned {} entries").format(count))
+            #QApplication.processEvents()
 
         def handle_watcher_error(error_str: str, e: Exception):
             msg = QMessageBox(self)
@@ -2242,7 +2285,7 @@ class MainWindow(QMainWindow):
         journal_watcher_task.signal_error.connect(handle_watcher_error)
         journal_watcher_task.signal_new_entry.connect(new_journal_entry)
         journal_watcher_task.signal_historical_entries.connect(process_historical_entries)
-        journal_watcher_task.signal_progress.connect(process_progress)
+        journal_watcher_task.signal_historical_progress.connect(process_progress)
 
         self.config_panel.signal_editing_filter_pattern.connect(journal_panel.search_select_journal)
 
@@ -2562,6 +2605,10 @@ class JournalPanel(DockableWidget):
         if self.table_view.model().rowCount() == 0:
             return None
         return self.table_view.model().get_journal_entry(self.table_view.model().rowCount() - 1)
+
+    def clear_all_entries(self):
+        if self.table_view.model().rowCount() != 0:
+            self.table_view.model().removeRows(0,self.table_view.model().rowCount())
 
     def search_select_journal(self, text: str, regexp_search: bool = False):
         save_triggers = self.table_view.editTriggers()
