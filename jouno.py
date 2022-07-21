@@ -2618,8 +2618,7 @@ class JournalPanel(DockableWidget):
         return self.table_view.model().get_journal_entry(self.table_view.model().rowCount() - 1)
 
     def clear_all_entries(self):
-        if self.table_view.model().rowCount() != 0:
-            self.table_view.model().removeRows(0,self.table_view.model().rowCount())
+        self.table_view.model().remove_all_entries()
 
     def search_select_journal(self, text: str, regexp_search: bool = False):
         save_triggers = self.table_view.editTriggers()
@@ -2821,6 +2820,10 @@ class JournalTableModel(QStandardItemModel):
 
     def get_num_entries(self) -> int:
         return len(self.journal_entries)
+
+    def remove_all_entries(self):
+        self.removeRows(0,self.rowCount())
+        self.journal_entries = []
 
 
 def format_journal_entry(journal_entry):
