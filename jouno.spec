@@ -17,7 +17,7 @@
 #
 
 Name: jouno
-Version: 1.3.3
+Version: 1.3.4
 Release: 0
 License: GPL-3.0-or-later
 BuildArch: noarch
@@ -83,6 +83,10 @@ install -m644 %{name}.png %{buildroot}/%{_datadir}/icons/hicolor/64x64/apps
 
 %changelog
 
+* Mon Oct 24 2022 Michael Hamilton <michael@actrix.gen.nz>
+- Recover from dbus reinit/desktop-error: jouno 1.3.4
+* Mon Jul 18 2022 Michael Hamilton <michael@actrix.gen.nz>
+- Usability improvements: jouno 1.3.3
 * Mon Jul 18 2022 Michael Hamilton <michael@actrix.gen.nz>
 - Usability improvements: jouno 1.3.2
 * Wed Apr 13 2022 Michael Hamilton <michael@actrix.gen.nz>

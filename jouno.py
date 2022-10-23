@@ -308,7 +308,7 @@ from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QMessageBox, QLi
     QProgressDialog
 from systemd import journal
 
-JOUNO_VERSION = '1.3.3'
+JOUNO_VERSION = '1.3.4'
 
 JOUNO_CONSOLIDATED_TEXT_KEY = '___JOURNO_FULL_TEXT___'
 
@@ -648,6 +648,11 @@ class NotifyFreeDesktop:
             dbus_interface="org.freedesktop.Notifications")
 
     def notify_desktop(self, app_name: str, summary: str, message: str, priority: Priority, timeout: int):
+        if self.notify_interface == None:
+            self.notify_interface = dbus.Interface(
+                object=dbus.SessionBus().get_object("org.freedesktop.Notifications", "/org/freedesktop/Notifications"),
+                dbus_interface="org.freedesktop.Notifications")
+
         # https://specifications.freedesktop.org/notification-spec/notification-spec-latest.html
         if self.notify_interface is not None:
             replace_id = 0
@@ -655,14 +660,19 @@ class NotifyFreeDesktop:
             action_requests = []
             # extra_hints = {"urgency": 1, "sound-name": "dialog-warning", }
             extra_hints = {}
-            self.notify_interface.Notify(app_name,
-                                         replace_id,
-                                         notification_icon,
-                                         escape(summary).encode('UTF-8'),
-                                         escape(message).encode('UTF-8'),
-                                         action_requests,
-                                         extra_hints,
-                                         timeout)
+            try:
+                self.notify_interface.Notify(app_name,
+                                             replace_id,
+                                             notification_icon,
+                                             escape(summary).encode('UTF-8'),
+                                             escape(message).encode('UTF-8'),
+                                             action_requests,
+                                             extra_hints,
+                                             timeout)
+            except dbus.exceptions.DBusException as e:
+                # Force reinit on next use
+                self.notify_interface = None
+                raise e
 
 
 def get_config_path() -> Path:
