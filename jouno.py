@@ -2818,7 +2818,7 @@ class JournalTableModel(QStandardItemModel):
                 selectable(QStandardItem(source)),
                 # TODO smarter choice when _PID is not present.
                 selectable(align_right(QStandardItem(str(journal_entry['_PID'] if '_PID' in journal_entry else '')))),
-                set_icon(selectable(QStandardItem(journal_entry['MESSAGE'] if 'MESSAGE' in journal_entry else ''))),
+                set_icon(selectable(QStandardItem(str(journal_entry['MESSAGE']) if 'MESSAGE' in journal_entry else ''))),
                 selectable(align_right(QStandardItem(size_k))),
             ])
 
