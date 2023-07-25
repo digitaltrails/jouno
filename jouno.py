@@ -1806,8 +1806,6 @@ class FilterTableView(QTableView):
             if model.item(row_num, 1).checkState() == Qt.Checked:
                 config_section[key + "_regexp_enabled"] = "yes"
 
-    select_flags = QItemSelectionModel.Clear | QItemSelectionModel.Rows | QItemSelectionModel.SelectCurrent | QItemSelectionModel.Rows
-
     def add_new_rule(self, suggested_rule_id: str = '', pattern: str = ''):
         rule_id = self.choose_rule_name(suggested_rule_id)
         model = self.model()
@@ -2739,7 +2737,7 @@ class JournalTableView(QTableView):
         self.setDragDropOverwriteMode(False)
         self.resizeColumnsToContents()
         self.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.setSelectionMode(QAbstractItemView.MultiSelection)
+        self.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.setColumnWidth(0, 15 * 14)
         self.setColumnWidth(1, 10 * 14)
         self.setColumnWidth(2, 10 * 14)
