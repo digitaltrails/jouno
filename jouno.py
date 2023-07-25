@@ -1664,7 +1664,7 @@ class FilterTableView(QTableView):
         self.verticalHeader().setDragDropMode(QAbstractItemView.InternalMove)
         self.setDragDropOverwriteMode(True)
         self.resizeColumnsToContents()
-        self.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.setSelectionMode(QAbstractItemView.NoSelection)
         self.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
         self.horizontalHeader().setDefaultAlignment(Qt.AlignLeft)
