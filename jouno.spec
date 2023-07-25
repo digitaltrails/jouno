@@ -111,7 +111,7 @@ install -m644 %{name}.png %{buildroot}/%{_datadir}/icons/hicolor/64x64/apps
 - Add the ability to show past messages, ether n, or from last boot: jouno 1.1.0
 * Thu Nov 18 2021 Michael Hamilton <michael@actrix.gen.nz>
 - Default system-tray-enabled to false - some systems lack a system tray: jouno 1.0.7
-* Thu Nov 09 2021 Michael Hamilton <michael@actrix.gen.nz>
+* Tue Nov 09 2021 Michael Hamilton <michael@actrix.gen.nz>
 - Show position when moving to the next/previous match: jouno 1.0.6
 * Fri Nov 05 2021 Michael Hamilton <michael@actrix.gen.nz>
 - Escape HTML before forwarding. Minor fixes and improvements: jouno 1.0.5
@@ -123,5 +123,5 @@ install -m644 %{name}.png %{buildroot}/%{_datadir}/icons/hicolor/64x64/apps
 - Faster incremental search. More reexp search options: jouno 1.0.2
 * Tue Nov 02 2021 Michael Hamilton <michael@actrix.gen.nz>
 - Fixes for first time installation and use: jouno 1.0.1
-* Sun Oct 25 2021 Michael Hamilton <michael@actrix.gen.nz>
+* Sun Oct 24 2021 Michael Hamilton <michael@actrix.gen.nz>
 - Packaged for rpm jouno 1.0.0

@@ -2142,6 +2142,9 @@ def is_system_tray_available():
     return QSystemTrayIcon.isSystemTrayAvailable()
 
 
+is_wayland = False
+
+
 class MainWindow(QMainWindow):
 
     def __init__(self, app: QApplication):
@@ -2364,12 +2367,13 @@ class MainWindow(QMainWindow):
         sys.exit(rc)
 
     def event(self, event: 'QEvent') -> bool:
-        super().event(event)
-        # ApplicationPaletteChange happens after the new style theme is in use.
-        if event.type() == QEvent.ApplicationPaletteChange:
-            debug(f"ApplicationPaletteChange is_dark_theme() {is_dark_theme()}") if debugging else None
-            apply_icon_theme_change()
-        return True
+        try:
+            return super().event(event)
+        finally:
+            # ApplicationPaletteChange happens after the new style theme is in use.
+            if event.type() == QEvent.ApplicationPaletteChange:
+                debug(f"ApplicationPaletteChange is_dark_theme() {is_dark_theme()}") if debugging else None
+                apply_icon_theme_change()
 
     def closeEvent(self, event: QCloseEvent) -> None:
         debug("closeEvent") if debugging else None
@@ -2531,7 +2535,7 @@ class JournalPanel(DockableWidget):
                     entry=journal_entry['__REALTIME_TIMESTAMP'])
                 text = format_journal_entry(journal_entry)
                 status = tr("{kb:.2f} kbytes").format(kb=len(journal_entry[JOUNO_CONSOLIDATED_TEXT_KEY]) / 1024.0)
-                ViewTextDialog(title=window_title, text=text, static_status=status, parent=self)
+                ViewTextDialog(title=window_title, text=text, static_status=status)
                 self.journal_status_bar.show_info(tr("Viewing entry {}.").format(row + 1), STATUS_SHORT_TIMEOUT_MSEC)
             else:
                 self.journal_status_bar.show_warning(tr("No entries available."), STATUS_SHORT_TIMEOUT_MSEC)
@@ -2659,9 +2663,9 @@ class JournalPanel(DockableWidget):
                     if self.search_start_time > my_start_time:
                         debug("isearch stopped by typing", text) if debugging else None
                         return
-                    if journal_entry['MESSAGE'].find(' unregistered') > -1 and journal_entry['MESSAGE'].find(
-                            'Service ') > -1:
-                        print(journal_entry[JOUNO_CONSOLIDATED_TEXT_KEY])
+                    # if journal_entry['MESSAGE'].find(' unregistered') > -1 and journal_entry['MESSAGE'].find(
+                    #         'Service ') > -1:
+                    #     print(journal_entry[JOUNO_CONSOLIDATED_TEXT_KEY])
                     if regexp.search(journal_entry[JOUNO_CONSOLIDATED_TEXT_KEY]) is not None:
                         matched_row_numbers.append(row_num)
                 match_count = len(matched_row_numbers)
@@ -2844,10 +2848,10 @@ def format_journal_entry(journal_entry):
     return text
 
 
-class ViewTextDialog(QDialog):
+class ViewTextDialog(QWidget):
 
-    def __init__(self, title: str, text: str, static_status: str, parent=None):
-        super().__init__(parent)
+    def __init__(self, title: str, text: str, static_status: str):
+        super().__init__(parent=None, flags=Qt.WindowFlags(Qt.Dialog))
 
         self.setWindowTitle(title)
 
@@ -3552,18 +3556,18 @@ class QueryBootWidget(QWidget):
         self.boot_list = []
 
     def event(self, event: QEvent) -> bool:
-        super().event(event)
-        # PalletChange happens after the new style sheet is in use.
-        if event.type() == QEvent.PaletteChange:
-            self.row_color_theme = self.row_color_dark_theme if is_dark_theme() else self.row_color_light_theme
-            previous_boot_date = self.journal_metadata.boot_sequence_list[0].start_datetime.date()
-            for i, boot_info in enumerate(self.journal_metadata.boot_sequence_list):
-                for j in range(0, self.boot_table.columnCount()):
-                    item = self.boot_table.item(i, j)
-                    item.setBackground(self.choose_row_color(boot_info, previous_boot_date))
-                    previous_boot_date = boot_info.start_datetime.date()
-        event.accept()
-        return True
+        try:
+            return super().event(event)
+        finally:
+            # PalletChange happens after the new style sheet is in use.
+            if event.type() == QEvent.PaletteChange:
+                self.row_color_theme = self.row_color_dark_theme if is_dark_theme() else self.row_color_light_theme
+                previous_boot_date = self.journal_metadata.boot_sequence_list[0].start_datetime.date()
+                for i, boot_info in enumerate(self.journal_metadata.boot_sequence_list):
+                    for j in range(0, self.boot_table.columnCount()):
+                        item = self.boot_table.item(i, j)
+                        item.setBackground(self.choose_row_color(boot_info, previous_boot_date))
+                        previous_boot_date = boot_info.start_datetime.date()
 
 
 class QueryBootTimelineWidget(QWidget):
