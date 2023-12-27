@@ -541,6 +541,7 @@ burst_truncate_messages = 6
 notification_seconds = 30
 journal_history_max = 500
 system_tray_enabled = no
+dark_tray_enabled = no
 start_with_notifications_enabled = yes
 list_all_enabled = no
 forward_session_log_enabled = no
@@ -585,6 +586,7 @@ CONFIG_OPTIONS_LIST: List[ConfigOption] = [
     ConfigOption('journal_history_max',
                  'How many journal entries should be shown in the Recently Notified panel.', None),
     ConfigOption('system_tray_enabled', 'Jouno should start minimised in the system-tray.'),
+    ConfigOption('dark_tray_enabled', 'System tray is dark colored.'),
     ConfigOption('start_with_notifications_enabled', 'Jouno should start with desktop notifications enabled.'),
     ConfigOption('list_all_enabled', 'The Recent notifications panel should show all entries, including non-notified.'),
     ConfigOption('from_boot_enabled', 'Show old journal entries from boot onward.'),
@@ -892,14 +894,14 @@ class JournalWatcher:
         # Filter ignores first and see if the entry should be ignored
         for rule_id, ignore_re in self.ignore_regexp.items():
             if ignore_re.search(fields_str) is not None:
-                # debug(f"rule=ignore.{rule_id}: {journal_entry['MESSAGE']}") if debugging else None
+                # debug(f"rule=ignore.{rule_id}: ") if debugging else None
                 notable = False
                 break
         # Lastly, if we're going to ignore this entry, see if a match overrides this:
         if not notable:
             for rule_id, match_re in self.match_regexp.items():
                 if match_re.search(fields_str) is not None:
-                    # debug(f"rule=match.{rule_id}: {journal_entry['MESSAGE']}") if debugging else None
+                    # debug(f"rule=match.{rule_id}: ") if debugging else None
                     notable = True
                     break
 
@@ -1525,7 +1527,7 @@ class OptionsTab(QWidget):
                 input_widget.setText(value)
                 input_widget.setToolTip(option_spec.tooltip())
                 column_number = 0
-                row_number = text_count
+                row_number = max(text_count, bool_count) + 1
                 col_span = 4
                 text_count += 1
             else:
@@ -2180,7 +2182,10 @@ class MainWindow(QMainWindow):
                 title_text = tr("Running") if journal_watcher_task.is_notifying() else tr("Muted")
                 self.setWindowTitle(title_text)
                 tray.setToolTip(f"{title_text} \u2014 {app_name}")
-                manage_icon(tray, SVG_JOUNO)
+                manage_icon(tray,
+                            SVG_JOUNO_LIGHT if config_panel.get_config().getboolean('options',
+                                                                                    'dark_tray_enabled',
+                                                                                    fallback=False) else SVG_JOUNO)
             else:
                 title_text = tr("Stopped")
                 self.setWindowTitle(title_text)
@@ -2325,7 +2330,10 @@ class MainWindow(QMainWindow):
         self.addToolBar(tool_bar)
 
         tray = QSystemTrayIcon()
-        manage_icon(tray, SVG_JOUNO)
+        manage_icon(tray,
+                    SVG_JOUNO_LIGHT if config_panel.get_config().getboolean('options',
+                                                                            'dark_tray_enabled',
+                                                                            fallback=False) else SVG_JOUNO)
         tray.setContextMenu(app_context_menu)
 
         tray.activated.connect(self.tray_activate_window)
