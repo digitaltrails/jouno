@@ -308,7 +308,7 @@ from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QMessageBox, QLi
     QProgressDialog
 from systemd import journal
 
-JOUNO_VERSION = '1.3.4'
+JOUNO_VERSION = '1.3.5'
 
 JOUNO_CONSOLIDATED_TEXT_KEY = '___JOURNO_FULL_TEXT___'
 
@@ -2182,6 +2182,7 @@ class MainWindow(QMainWindow):
                 title_text = tr("Running") if journal_watcher_task.is_notifying() else tr("Muted")
                 self.setWindowTitle(title_text)
                 tray.setToolTip(f"{title_text} \u2014 {app_name}")
+                print(app.styleSheet())
                 manage_icon(tray,
                             SVG_JOUNO_LIGHT if config_panel.get_config().getboolean('options',
                                                                                     'dark_tray_enabled',
