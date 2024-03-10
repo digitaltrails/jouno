@@ -17,7 +17,7 @@
 #
 
 Name: jouno
-Version: 1.3.5
+Version: 1.3.6
 Release: 0
 License: GPL-3.0-or-later
 BuildArch: noarch
@@ -83,6 +83,8 @@ install -m644 %{name}.png %{buildroot}/%{_datadir}/icons/hicolor/64x64/apps
 
 %changelog
 
+* Mon Mar 11 2024 Michael Hamilton <michael@actrix.gen.nz>
+- Fix date comparison error in Journal-Query for newer python versions
 * Fri Dec 29 2023 Michael Hamilton <michael@actrix.gen.nz>
 - Add Setting Dark Tray Enabled for themes such as Breeze Twilight
 * Mon Oct 24 2022 Michael Hamilton <michael@actrix.gen.nz>
