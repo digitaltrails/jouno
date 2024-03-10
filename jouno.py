@@ -294,6 +294,7 @@ from pathlib import Path
 from typing import Mapping, Any, List, Type, Callable, Tuple, Union, Iterator, TextIO
 
 import dbus
+import pytz
 from PyQt5.QtCore import QCoreApplication, QProcess, Qt, pyqtSignal, QThread, QModelIndex, QItemSelectionModel, QSize, \
     QEvent, QSettings, QObject, QItemSelection, QPoint, QDateTime, QDate
 from PyQt5.QtGui import QPixmap, QIcon, QImage, QPainter, QStandardItemModel, QStandardItem, QIntValidator, \
@@ -3414,7 +3415,7 @@ class QueryJournalTask(QThread):
                     if journal_entry is None or len(journal_entry) == 0:
                         break
                     journal_entry_date_time = journal_entry['__REALTIME_TIMESTAMP']
-                    if journal_entry_date_time > self.to_datetime:
+                    if journal_entry_date_time.replace(tzinfo=pytz.UTC) > self.to_datetime.replace(tzinfo=pytz.UTC):
                         break
                     text = consolidate_text(journal_entry)
                     if self.results_filter_pattern is None or self.results_filter_pattern.search(text) is not None:
